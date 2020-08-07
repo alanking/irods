@@ -162,6 +162,34 @@ set(
   irods_client
   )
 
+# finalize_data_object API
+set(
+  IRODS_API_PLUGIN_SOURCES_irods_finalize_data_object_server
+  ${CMAKE_SOURCE_DIR}/plugins/api/src/finalize_data_object.cpp
+  )
+
+set(
+  IRODS_API_PLUGIN_SOURCES_irods_finalize_data_object_client
+  ${CMAKE_SOURCE_DIR}/plugins/api/src/finalize_data_object.cpp
+  )
+
+set(
+  IRODS_API_PLUGIN_COMPILE_DEFINITIONS_irods_finalize_data_object_server
+  RODS_SERVER
+  ENABLE_RE
+  IRODS_ENABLE_SYSLOG
+  )
+
+set(
+  IRODS_API_PLUGIN_COMPILE_DEFINITIONS_irods_finalize_data_object_client
+  )
+
+set(
+  IRODS_API_PLUGIN_LINK_LIBRARIES_irods_finalize_data_object_server
+  irods_server
+  ${IRODS_EXTERNALS_FULLPATH_NANODBC}/lib/libnanodbc.so
+  )
+
 # experimental_api_plugin_adaptor API
 set(
   IRODS_API_PLUGIN_SOURCES_experimental_api_plugin_adaptor_server
@@ -278,6 +306,8 @@ set(
   irods_replica_close_server
   irods_replica_open_client
   irods_replica_open_server
+  irods_finalize_data_object_server
+  irods_finalize_data_object_client
   )
 
 foreach(PLUGIN ${IRODS_API_PLUGINS})

@@ -752,6 +752,7 @@ set(
   ${CMAKE_SOURCE_DIR}/server/api/src/rsSubStructFileUnlink.cpp
   ${CMAKE_SOURCE_DIR}/server/api/src/rsSubStructFileWrite.cpp
   ${CMAKE_SOURCE_DIR}/server/api/src/rsSyncMountedColl.cpp
+  ${CMAKE_SOURCE_DIR}/server/api/src/rs_finalize_data_object.cpp
   ${CMAKE_SOURCE_DIR}/server/api/src/rsTicketAdmin.cpp
   ${CMAKE_SOURCE_DIR}/server/api/src/rsUnbunAndRegPhyBunfile.cpp
   ${CMAKE_SOURCE_DIR}/server/api/src/rsUnregDataObj.cpp
