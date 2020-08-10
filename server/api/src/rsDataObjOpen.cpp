@@ -166,36 +166,35 @@ int register_intermediate_replica_for_new_data_object(
 
     dataObjInfo_t* out{};
 
+    log::server::debug("[{}:{}]: registering new data object [{}]", __FUNCTION__, __LINE__, _in.objPath);
+
     return rsRegDataObj(&_comm, &_in, &out);
 } // register_intermediate_replica_for_new_data_object
 
-int register_intermediate_replica(
+int register_intermediate_replica_for_existing_data_object(
     rsComm_t&      _comm,
-    dataObjInfo_t& _in)
+    dataObjInfo_t& _in,
+    dataObjInfo_t& _out)
 {
-    dataObjInfo_t out{};
-    std::memcpy(&out, &_in, sizeof(dataObjInfo_t));
-    replKeyVal(&_in.condInput, &out.condInput);
-    out.replStatus = INTERMEDIATE_REPLICA;
+    _out.replStatus = INTERMEDIATE_REPLICA;
+    resc_mgr.hier_to_leaf_id(_out.rescHier, _out.rescId);
 
-    regReplica_t in{};
-
-    ix::key_value_proxy kvp{out.condInput};
+    ix::key_value_proxy kvp{_out.condInput};
     kvp[REGISTER_AS_INTERMEDIATE_KW] = "";
     kvp[FILE_PATH_KW] = _in.filePath;
     kvp[DATA_SIZE_KW] = "0";
 
-    resc_mgr.hier_to_leaf_id(out.rescHier, out.rescId);
+    log::server::debug("[{}:{}]: registering new replica for existing data object [{}]", __FUNCTION__, __LINE__, _in.objPath);
 
-    log::server::debug("[{}:{}]: in data_id:[{}], out data_id:[{}]", __FUNCTION__, __LINE__, _in.dataId, out.dataId);
+    regReplica_t in{};
 
     addKeyVal(&in.condInput, REGISTER_AS_INTERMEDIATE_KW, "");
 
     in.srcDataObjInfo = &_in;
-    in.destDataObjInfo = &out;
+    in.destDataObjInfo = &_out;
 
     return rsRegReplica(&_comm, &in);
-} // register_intermediate_replica
+} // register_intermediate_replica_for_existing_data_object
 
 int l3CreateByObjInfo(
     rsComm_t* rsComm,
@@ -333,7 +332,9 @@ auto create_new_replica(
         }
     };
 
-    addKeyVal(&_inp.condInput, SEL_OBJ_TYPE_KW, "dataObj" );
+    auto cond_input = ix::make_key_value_proxy(_inp.condInput);
+
+    cond_input[SEL_OBJ_TYPE_KW] = "dataObj";
     int status = rsObjStat(&_comm, &_inp, &rodsObjStatOut );
     if (status < 0) {
         rodsLog(LOG_DEBUG, "[%s:%d] - rsObjStat failed with [%d]", __FUNCTION__, __LINE__, status);
@@ -356,7 +357,7 @@ auto create_new_replica(
         }
     }
 
-    addKeyVal(&_inp.condInput, OPEN_TYPE_KW, std::to_string(CREATE_TYPE).c_str());
+    cond_input[OPEN_TYPE_KW] = std::to_string(CREATE_TYPE);
     int l1descInx = allocL1desc();
     if (l1descInx < 0) {
         return l1descInx;
@@ -365,9 +366,9 @@ auto create_new_replica(
     dataObjInfo_t* dataObjInfo = (dataObjInfo_t*)malloc(sizeof(dataObjInfo_t));
     initDataObjInfoWithInp(dataObjInfo, &_inp);
 
-    const char* resc_hier = getValByKey(&_inp.condInput, RESC_HIER_STR_KW);
-    if (resc_hier) {
+    if (cond_input.contains(RESC_HIER_STR_KW)) {
         // we need to favor the results from the PEP acSetRescSchemeForCreate
+        const char* resc_hier = cond_input.at(RESC_HIER_STR_KW).value().data();
         std::string root = irods::hierarchy_parser{resc_hier}.first_resc();
         rstrcpy( dataObjInfo->rescName, root.c_str(), NAME_LEN );
         rstrcpy( dataObjInfo->rescHier, resc_hier, MAX_NAME_LEN );
@@ -398,15 +399,30 @@ auto create_new_replica(
     }
     else {
         // new replica for existing data object
-        status = register_intermediate_replica(_comm, *(L1desc[l1descInx].dataObjInfo));
-        if (status < 0) {
+        if (!cond_input.contains(SOURCE_L1_DESC_KW)) {
+            log::api::error("missing source l1 descriptor for replication");
+            freeL1desc(l1descInx);
+            return SYS_INTERNAL_NULL_INPUT_ERR;
+        }
+
+        const int source_l1_desc = std::atoi(cond_input.at(SOURCE_L1_DESC_KW).value().data());
+        if (auto* source_replica = L1desc[source_l1_desc].dataObjInfo; source_replica) {
+            auto* new_replica = L1desc[l1descInx].dataObjInfo;
+            status = register_intermediate_replica_for_existing_data_object(_comm, *source_replica, *new_replica);
+            if (status < 0) {
+                freeL1desc(l1descInx);
+                return status;
+            }
+            L1desc[l1descInx].dataObjInfo->replNum = status;
+        }
+        else {
+            log::api::error("source l1 descriptor has null dataObjInfo");
             freeL1desc(l1descInx);
             return status;
         }
-        L1desc[l1descInx].dataObjInfo->replNum = status;
     }
 
-    if (getValByKey(&_inp.condInput, NO_OPEN_FLAG_KW)) {
+    if (cond_input.contains(NO_OPEN_FLAG_KW)) {
         return l1descInx;
     }
 
@@ -932,6 +948,8 @@ int rsDataObjOpen(
         // open replica
         dataObjInfo_t* tmpDataObjInfo = dataObjInfoHead;
         tmpDataObjInfo->next = NULL;
+        log::server::debug("[{}:{}] - attempting open for [{}], repl:[{}], hier:[{}]",
+            __FUNCTION__, __LINE__, tmpDataObjInfo->objPath, tmpDataObjInfo->replNum, tmpDataObjInfo->rescHier);
         int l1descInx = open_with_obj_info(rsComm, *dataObjInp, tmpDataObjInfo);
         if (l1descInx < 0) {
             if (lockFd > 0) {

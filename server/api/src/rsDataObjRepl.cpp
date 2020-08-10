@@ -172,6 +172,8 @@ int open_source_replica(
     if (source_l1descInx < 0) {
         return source_l1descInx;
     }
+    const auto* info = L1desc[source_l1descInx].dataObjInfo;
+    log::server::debug("[{}:{}] - opened source replica [{}] on [{}] (repl [{}])", __FUNCTION__, __LINE__, info->objPath, info->rescHier, info->replNum);
     // TODO: Consider using force flag and making this part of the voting process
     if (GOOD_REPLICA != L1desc[source_l1descInx].dataObjInfo->replStatus) {
         const int status = SYS_NO_GOOD_REPLICA;
@@ -189,6 +191,7 @@ int open_destination_replica(
     auto kvp = ix::make_key_value_proxy(destination_data_obj_inp.condInput);
     kvp[REG_REPL_KW] = "";
     kvp[DATA_ID_KW] = std::to_string(L1desc[source_l1desc_inx].dataObjInfo->dataId);
+    kvp[SOURCE_L1_DESC_KW] = std::to_string(source_l1desc_inx);
     destination_data_obj_inp.oprType = REPLICATE_DEST;
     destination_data_obj_inp.openFlags = O_CREAT | O_RDWR;
     log::server::debug(
