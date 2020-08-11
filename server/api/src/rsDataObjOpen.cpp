@@ -978,7 +978,7 @@ int rsDataObjOpen(
             }
             catch (const irods::exception& e) {
                 logger::api::error("Could not update replica access table for data object. "
-                                   "Closing data object and setting replica status to it's original value. "
+                                   "Closing data object and setting replica status to its original value. "
                                    "[error_code={}, path={}, exception={}]",
                                    dataObjInp->objPath, e.code(), e.what());
 
