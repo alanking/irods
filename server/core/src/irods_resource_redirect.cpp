@@ -93,7 +93,7 @@ namespace {
         if ( !strlen( rei.rescName ) ) {
             irods::error set_err = irods::set_default_resource(_comm, "", "", &_obj_inp.condInput, _resc_name);
             if ( !set_err.ok() ) {
-                THROW(set_err.code(), set_err.result());
+                THROW(SYS_INVALID_RESC_INPUT, set_err.result());
             }
         }
         else {
