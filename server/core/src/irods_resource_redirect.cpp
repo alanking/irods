@@ -61,10 +61,10 @@ namespace {
         return false;
     } // hier_has_replica
 
-    int apply_policy_for_create_operation(
+    auto apply_policy_for_create_operation(
         rsComm_t*     _comm,
         dataObjInp_t& _obj_inp,
-        std::string&  _resc_name )
+        std::string&  _resc_name) -> void
     {
         /* query rcat for resource info and sort it */
         ruleExecInfo_t rei{};
