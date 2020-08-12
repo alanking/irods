@@ -667,7 +667,7 @@ rodsLong_t get_size_in_vault(
         return l1desc.dataSize;
     }
 
-    if (size_in_vault < 0) {
+    if (size_in_vault < 0 && UNKNOWN_FILE_SZ != size_in_vault) {
         THROW((int)size_in_vault, 
             fmt::format("{}: getSizeInVault error for {}, status = {}",
             __FUNCTION__, l1desc.dataObjInfo->objPath, size_in_vault));
@@ -734,7 +734,7 @@ int finalize_replica(
     try {
         auto& l1desc = L1desc[inx];
 
-        ix::log::api::trace("[{}:{}] - finalizing replica [{}] on [{}]",
+        ix::log::api::debug("[{}:{}] - finalizing replica [{}] on [{}]",
             __FUNCTION__, __LINE__, l1desc.dataObjInfo->objPath, l1desc.dataObjInfo->rescHier);
 
         if (l1desc.oprStatus < 0) {
