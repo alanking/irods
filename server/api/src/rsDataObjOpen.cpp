@@ -160,13 +160,6 @@ auto register_intermediate_replica_for_new_data_object(
 {
     auto dest_replica = ix::make_replica_proxy(*L1desc[_dest_l1_desc_inx].dataObjInfo);
 
-#if 0
-    auto kvp = dest_replica.cond_input();
-    kvp[REGISTER_AS_INTERMEDIATE_KW] = "";
-    kvp[FILE_PATH_KW] = dest_replica.physical_path();
-    kvp[DATA_SIZE_KW] = "0";
-#endif
-
     dest_replica.replica_status(INTERMEDIATE_REPLICA);
 
     dataObjInfo_t* out{};
@@ -182,22 +175,19 @@ auto register_intermediate_replica_for_existing_data_object(
     const ix::key_value_proxy<keyValPair_t>& _cond_input) -> int
 {
     // get and validate source replica information
-    if (!cond_input.contains(SOURCE_L1_DESC_KW)) {
+    if (!_cond_input.contains(SOURCE_L1_DESC_KW)) {
         log::api::error("[{}] - missing source l1 descriptor for replication", __FUNCTION__);
-        freeL1desc(l1descInx);
         return SYS_INTERNAL_NULL_INPUT_ERR;
     }
 
-    const int source_l1_desc_inx = std::atoi(cond_input.at(SOURCE_L1_DESC_KW).value().data());
+    const int source_l1_desc_inx = std::atoi(_cond_input.at(SOURCE_L1_DESC_KW).value().data());
     if (source_l1_desc_inx < 3 || source_l1_desc_inx >= NUM_L1_DESC) {
         log::api::error("[{}] - source l1 descriptor is invalid", __FUNCTION__);
-        freeL1desc(l1descInx);
         return SYS_FILE_DESC_OUT_OF_RANGE;
     }
 
     if (!L1desc[source_l1_desc_inx].dataObjInfo) {
         log::api::error("[{}] - source l1 descriptor has null dataObjInfo", __FUNCTION__);
-        freeL1desc(l1descInx);
         return SYS_INTERNAL_NULL_INPUT_ERR;
     }
 
@@ -206,12 +196,6 @@ auto register_intermediate_replica_for_existing_data_object(
 
     dest_replica.replica_status(INTERMEDIATE_REPLICA);
     resc_mgr.hier_to_leaf_id(dest_replica.hierarchy().data(), dest_replica.get()->rescId);
-
-#if 0
-    auto dest_kvp = dest_replica.cond_input();
-    dest_kvp[FILE_PATH_KW] = source_replica.physical_path();
-    dest_kvp[DATA_SIZE_KW] = "0";
-#endif
 
     log::server::debug("[{}:{}]: registering new replica for existing data object [{}]", __FUNCTION__, __LINE__, source_replica.logical_path());
 
