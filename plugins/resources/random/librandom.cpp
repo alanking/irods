@@ -793,6 +793,10 @@ irods::error random_file_resolve_hierarchy(
     }
 
     // =-=-=-=-=-=-=-
+    // add ourselves into the hierarchy before calling child resources
+    _out_parser->add_child( name );
+
+    // =-=-=-=-=-=-=-
     // test the operation to determine which choices to make
     if ( irods::OPEN_OPERATION   == ( *_opr )  ||
          irods::WRITE_OPERATION  == ( *_opr ) ||
@@ -816,11 +820,9 @@ irods::error random_file_resolve_hierarchy(
             if ( !ret.ok() ) {
                 ret = PASSMSG( "Failed calling child operation.", ret );
             }
-            _out_parser->add_parent( name );
         }
         else if ( REPLICA_NOT_IN_RESC == ret.code() ) {
             *_out_vote = 0;
-            _out_parser->add_parent( name );
             ret = SUCCESS();
         }
     }

@@ -754,6 +754,8 @@ irods::error passthru_file_resolve_hierarchy(
         return ERROR(SYS_INVALID_INPUT_PARAM, "Invalid input parameter.");
     }
 
+    _out_parser->add_child(irods::get_resource_name(_ctx));
+
     irods::resource_ptr resc;
     ret = passthru_get_first_child_resc( _ctx.prop_map(), resc );
     if ( !ret.ok() ) {
@@ -772,8 +774,6 @@ irods::error passthru_file_resolve_hierarchy(
                                  _curr_host,
                                  _out_parser,
                                  _out_vote );
-
-    _out_parser->add_parent(irods::get_resource_name(_ctx));
  
     double orig_vote = *_out_vote;
     if ( irods::OPEN_OPERATION == ( *_opr ) ) {

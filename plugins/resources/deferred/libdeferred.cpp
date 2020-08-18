@@ -793,6 +793,10 @@ irods::error deferred_file_resolve_hierarchy(
     }
 
     // =-=-=-=-=-=-=-
+    // add ourselves into the hierarchy before calling child resources
+    _out_parser->add_child( name );
+
+    // =-=-=-=-=-=-=-
     // test the operation to determine which choices to make
     if ( irods::OPEN_OPERATION   == ( *_opr )  ||
             irods::WRITE_OPERATION  == ( *_opr ) ||
@@ -801,9 +805,6 @@ irods::error deferred_file_resolve_hierarchy(
         ret = deferred_redirect_for_operation( _ctx, _opr, _curr_host, _out_parser, _out_vote );
         if ( !ret.ok() ) {
             ret = PASSMSG( std::string( "failed in resolve hierarchy for [" + ( *_opr ) + "]" ), ret );
-        }
-        else {
-            _out_parser->add_parent(name);
         }
     }
     else {

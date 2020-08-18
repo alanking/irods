@@ -1890,11 +1890,13 @@ void replace_archive_for_replica(
 
     irods::file_object_ptr file_obj = boost::dynamic_pointer_cast<irods::file_object>(ctx.fco());
     for (auto& r : file_obj->replicas()) {
-
-        log::resource::debug(
-            "[{}:{}] - vote:[{}],voted_hier:[{}],hier:[{}],arch:[{}]",
-            __FUNCTION__, __LINE__, r.vote(), voted_hier.str(), r.resc_hier(), archive_resc_name);
-
+        rodsLog(LOG_DEBUG,
+            "[%s:%d] - vote:[%f],voted_hier:[%s],hier:[%s],arch:[%s]",
+            __FUNCTION__, __LINE__,
+            r.vote(),
+            voted_hier.str().c_str(),
+            r.resc_hier().c_str(),
+            archive_resc_name.c_str());
         if (irods::hierarchy_parser{r.resc_hier()}.last_resc() == archive_resc_name) {
             r.resc_hier(voted_hier.str());
             break;
@@ -1948,7 +1950,9 @@ irods::error compound_file_resolve_hierarchy(
         return ERROR( SYS_INVALID_INPUT_PARAM, msg.str() );
     }
 
-    // TODO: investigate need to add_parent... just reverse-resolve the leaf resources at time of use
+    // =-=-=-=-=-=-=-
+    // add ourselves to the hierarchy parser by default
+    _out_parser->add_child( resc_name );
 
     // =-=-=-=-=-=-=-
     // test the operation to determine which choices to make
@@ -1958,23 +1962,18 @@ irods::error compound_file_resolve_hierarchy(
         auto ret = compound_file_redirect_open( _ctx, _opr, _curr_host, _out_parser, _out_vote );
         if (ret.ok()) {
             replace_archive_for_replica(_ctx, *_out_parser);
-            _out_parser->add_parent(resc_name);
         }
         return ret;
     }
     else if ( irods::CREATE_OPERATION == ( *_opr )) {
-        auto ret = compound_file_redirect_create( _ctx, ( *_opr ), _curr_host, _out_parser, _out_vote );
-        if (ret.ok()) {
-            _out_parser->add_parent(resc_name);
-        }
-        return ret;
+        // =-=-=-=-=-=-=-
+        // call redirect determination for 'create' operation
+        return compound_file_redirect_create( _ctx, ( *_opr ), _curr_host, _out_parser, _out_vote );
     }
     else if ( irods::UNLINK_OPERATION == ( *_opr )) {
-        auto ret = compound_file_redirect_unlink( _ctx, ( *_opr ), _curr_host, _out_parser, _out_vote );
-        if (ret.ok()) {
-            _out_parser->add_parent(resc_name);
-        }
-        return ret;
+        // =-=-=-=-=-=-=-
+        // call redirect determination for 'unlink' operation
+        return compound_file_redirect_unlink( _ctx, ( *_opr ), _curr_host, _out_parser, _out_vote );
     }
 
     // =-=-=-=-=-=-=-
