@@ -11,24 +11,25 @@
 
 // =-=-=-=-=-=-=-
 #include "irods_at_scope_exit.hpp"
-#include "irods_resource_plugin.hpp"
-#include "irods_file_object.hpp"
 #include "irods_collection_object.hpp"
-#include "irods_string_tokenize.hpp"
+#include "irods_create_write_replicator.hpp"
+#include "irods_exception.hpp"
+#include "irods_file_object.hpp"
 #include "irods_hierarchy_parser.hpp"
-#include "irods_resource_backport.hpp"
+#include "irods_kvp_string_parser.hpp"
+#include "irods_logger.hpp"
+#include "irods_object_oper.hpp"
 #include "irods_plugin_base.hpp"
-#include "irods_stacktrace.hpp"
+#include "irods_random.hpp"
+#include "irods_repl_rebalance.hpp"
 #include "irods_repl_retry.hpp"
 #include "irods_repl_types.hpp"
-#include "irods_object_oper.hpp"
 #include "irods_replicator.hpp"
-#include "irods_create_write_replicator.hpp"
+#include "irods_resource_backport.hpp"
+#include "irods_resource_plugin.hpp"
 #include "irods_resource_redirect.hpp"
-#include "irods_repl_rebalance.hpp"
-#include "irods_kvp_string_parser.hpp"
-#include "irods_random.hpp"
-#include "irods_exception.hpp"
+#include "irods_stacktrace.hpp"
+#include "irods_string_tokenize.hpp"
 #include "rsGenQuery.hpp"
 
 // =-=-=-=-=-=-=-
@@ -79,6 +80,10 @@
 
 const std::string READ_KW( "read" );
 const std::string READ_RANDOM_POLICY( "random" );
+
+namespace {
+    using log = irods::experimental::log;
+} // anonymous namespace
 
 /// @brief Check the general parameters passed in to most plugin functions
 template< typename DEST_TYPE >
