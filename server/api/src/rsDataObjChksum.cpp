@@ -43,7 +43,7 @@ namespace {
         const rodsLong_t size_in_vault = fileStatOut->st_size;
         free(fileStatOut);
         std::optional<rodsLong_t> size_in_database {};
-        auto select_and_condition { fmt::format("select DATA_SIZE where DATA_PATH = '{}'", dataObjInfo->filePath) };
+        const auto select_and_condition = fmt::format("select DATA_SIZE where DATA_PATH = '{}'", dataObjInfo->filePath);
         for (auto&& row : irods::query{rsComm, select_and_condition}) {
             try {
                 size_in_database = boost::lexical_cast<rodsLong_t>(row[0]);
@@ -121,8 +121,8 @@ rsDataObjChksum( rsComm_t *rsComm, dataObjInp_t *dataObjChksumInp,
     // determine the resource hierarchy if one is not provided
     if (!kvp.contains(RESC_HIER_STR_KW)) {
         try {
-            auto result = irods::resolve_resource_hierarchy(irods::OPEN_OPERATION, rsComm, *dataObjChksumInp);
-            kvp[RESC_HIER_STR_KW] = std::get<std::string>(result);
+            auto file_obj = irods::resolve_resource_hierarchy(irods::OPEN_OPERATION, *rsComm, *dataObjChksumInp);
+            kvp[RESC_HIER_STR_KW] = std::get<std::string>(file_obj->winner());
         }
         catch (const irods::exception& e ) {
             irods::log(e);

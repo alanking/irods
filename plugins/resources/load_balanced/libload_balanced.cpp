@@ -695,10 +695,11 @@ irods::error get_load_lists(
 /// @brief
 irods::error load_balanced_redirect_for_create_operation(
     irods::plugin_context& _ctx,
-    const std::string*              _opr,
-    const std::string*              _curr_host,
-    irods::hierarchy_parser*        _out_parser,
-    float*                          _out_vote ) {
+    const std::string&              _opr,
+    const std::string&              _curr_host,
+    irods::hierarchy_parser&        _out_parser,
+    float&                          _out_vote)
+{
     // =-=-=-=-=-=-=-
     // capture the name, time and load lists from the DB
     std::vector< std::string > names;
@@ -776,19 +777,19 @@ irods::error load_balanced_redirect_for_create_operation(
     // forward the redirect call to the child for assertion of the whole operation,
     // there may be more than a leaf beneath us
     float                   vote   = 0.0;
-    irods::hierarchy_parser parser = ( *_out_parser );
+    irods::hierarchy_parser parser = _out_parser;
     irods::error err = selected_resource->call <
-                       const std::string*,
-                       const std::string*,
-                       irods::hierarchy_parser*,
-                       float* > (
+                       const std::string&,
+                       const std::string&,
+                       irods::hierarchy_parser&,
+                       float& > (
                            _ctx.comm(),
                            irods::RESOURCE_OP_RESOLVE_RESC_HIER,
                            _ctx.fco(),
                            _opr,
                            _curr_host,
-                           &parser,
-                           &vote );
+                           parser,
+                           vote );
     std::string hier;
     parser.str( hier );
     rodsLog(
@@ -802,8 +803,8 @@ irods::error load_balanced_redirect_for_create_operation(
 
     // =-=-=-=-=-=-=-
     // set the out variables
-    ( *_out_parser ) = parser;
-    ( *_out_vote )   = vote;
+    _out_parser = parser;
+    _out_vote   = vote;
 
     return SUCCESS();
 
@@ -813,12 +814,12 @@ irods::error load_balanced_redirect_for_create_operation(
 /// @brief
 irods::error load_balanced_redirect_for_open_operation(
     irods::plugin_context& _ctx,
-    const std::string*              _opr,
-    const std::string*              _curr_host,
-    irods::hierarchy_parser*        _out_parser,
-    float*                          _out_vote ) {
+    const std::string&              _opr,
+    const std::string&              _curr_host,
+    irods::hierarchy_parser&        _out_parser,
+    float&                          _out_vote ) {
 
-    *_out_vote = 0.0;
+    _out_vote = 0.0;
 
     // =-=-=-=-=-=-=-
     // data struct to hold parser and vote from the search
@@ -845,23 +846,23 @@ irods::error load_balanced_redirect_for_open_operation(
         // temp results from open redirect call - init parser with incoming
         // hier parser
         float                   vote   = 0.0;
-        irods::hierarchy_parser parser = ( *_out_parser );
+        irods::hierarchy_parser parser = _out_parser;
 
         // =-=-=-=-=-=-=-
         // forward the redirect call to the child for assertion of the whole operation,
         // there may be more than a leaf beneath us
         irods::error err = resc->call <
-                           const std::string*,
-                           const std::string*,
-                           irods::hierarchy_parser*,
-                           float* > (
+                           const std::string&,
+                           const std::string&,
+                           irods::hierarchy_parser&,
+                           float& > (
                                _ctx.comm(),
                                irods::RESOURCE_OP_RESOLVE_RESC_HIER,
                                _ctx.fco(),
                                _opr,
                                _curr_host,
-                               &parser,
-                               &vote );
+                               parser,
+                               vote );
         std::string hier;
         parser.str( hier );
         rodsLog( LOG_DEBUG10, "load_balanced node - hier : [%s], vote %f", hier.c_str(), vote );
@@ -887,8 +888,8 @@ irods::error load_balanced_redirect_for_open_operation(
         return SUCCESS();
     }
     else if ( high_vote > 0.0 ) {
-        ( *_out_parser ) = result_map.rbegin()->second;
-        ( *_out_vote )   = high_vote;
+        _out_parser = result_map.rbegin()->second;
+        _out_vote   = high_vote;
         return SUCCESS();
 
     }
@@ -904,20 +905,16 @@ irods::error load_balanced_redirect_for_open_operation(
 ///        should provide the requested operation
 irods::error load_balanced_file_resolve_hierarchy(
     irods::plugin_context& _ctx,
-    const std::string*              _opr,
-    const std::string*              _curr_host,
-    irods::hierarchy_parser*        _out_parser,
-    float*                          _out_vote ) {
+    const std::string&              _opr,
+    const std::string&              _curr_host,
+    irods::hierarchy_parser&        _out_parser,
+    float&                          _out_vote ) {
 
     // =-=-=-=-=-=-=-
     // check incoming parameters
     irods::error ret = load_balanced_check_params< irods::file_object >( _ctx );
     if ( !ret.ok() ) {
         return PASSMSG( "Invalid resource context.", ret );
-    }
-
-    if ( NULL == _opr || NULL == _curr_host || NULL == _out_parser || NULL == _out_vote ) {
-        return ERROR( SYS_INVALID_INPUT_PARAM, "Invalid parameters." );
     }
 
     // =-=-=-=-=-=-=-
@@ -930,28 +927,28 @@ irods::error load_balanced_file_resolve_hierarchy(
 
     // =-=-=-=-=-=-=-
     // add ourselves into the hierarchy before calling child resources
-    _out_parser->add_child( name );
+    _out_parser.add_child( name );
 
     // =-=-=-=-=-=-=-
     // test the operation to determine which choices to make
-    if ( irods::OPEN_OPERATION   == ( *_opr )  ||
-         irods::WRITE_OPERATION  == ( *_opr ) ||
-         irods::UNLINK_OPERATION == ( *_opr ) ) {
+    if (irods::OPEN_OPERATION   == _opr ||
+        irods::WRITE_OPERATION  == _opr ||
+        irods::UNLINK_OPERATION == _opr) {
         ret = load_balanced_redirect_for_open_operation( _ctx, _opr, _curr_host, _out_parser, _out_vote );
         if ( !ret.ok() ) {
-            ret = PASSMSG( std::string( "failed in resolve hierarchy for [" + ( *_opr ) + "]" ), ret );
+            ret = PASSMSG( std::string( "failed in resolve hierarchy for [" + _opr + "]" ), ret );
         }
     }
-    else if( irods::CREATE_OPERATION == ( *_opr ) ) {
+    else if( irods::CREATE_OPERATION == _opr ) {
         ret = load_balanced_redirect_for_create_operation( _ctx, _opr, _curr_host, _out_parser, _out_vote );
         if ( !ret.ok() ) {
-            ret = PASSMSG( std::string( "failed in resolve hierarchy for [" + ( *_opr ) + "]" ), ret );
+            ret = PASSMSG( std::string( "failed in resolve hierarchy for [" + _opr + "]" ), ret );
         }
     }
     else {
         // =-=-=-=-=-=-=-
         // must have been passed a bad operation
-        ret = ERROR( INVALID_OPERATION, std::string( "Operation not supported: \"" + ( *_opr ) + "\"." ) );
+        ret = ERROR( INVALID_OPERATION, std::string( "Operation not supported: \"" + _opr + "\"." ) );
     }
 
     return ret;
@@ -1174,9 +1171,9 @@ irods::resource* plugin_factory( const std::string& _inst_name,
         function<error(plugin_context&)>(
             load_balanced_file_truncate ) );
 
-    resc->add_operation<const std::string*, const std::string*, irods::hierarchy_parser*, float*>(
+    resc->add_operation<const std::string&, const std::string&, irods::hierarchy_parser&, float&>(
         irods::RESOURCE_OP_RESOLVE_RESC_HIER,
-        function<error(plugin_context&,const std::string*, const std::string*, irods::hierarchy_parser*, float*)>(
+        function<error(plugin_context&,const std::string&, const std::string&, irods::hierarchy_parser&, float&)>(
             load_balanced_file_resolve_hierarchy ) );
 
     resc->add_operation(

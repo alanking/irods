@@ -157,6 +157,7 @@ namespace {
         log::database::trace("binding resc_id:[{}] at [{}]", resc_id, index);
         statement.bind(index, &resc_id);
 
+        log::database::trace("executing statement");
         execute(statement);
     } // set_replica_state
 
@@ -174,7 +175,7 @@ namespace {
                 set_replica_state(_db_conn, _data_id, r.at("before"), after);
             }
 
-            log::database::debug("committing transaction");
+            log::database::trace("committing transaction");
             _trans.commit();
         }
         catch (const nanodbc::database_error& e) {

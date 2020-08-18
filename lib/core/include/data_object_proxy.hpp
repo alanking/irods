@@ -9,6 +9,8 @@
 #include <string_view>
 #include <vector>
 
+#include "json.hpp"
+
 namespace irods::experimental::data_object
 {
     /// \brief Presents a data object-level interface to a dataObjInfo_t legacy iRODS struct.
@@ -225,6 +227,27 @@ namespace irods::experimental::data_object
 
         return {data_object_proxy{*head}, lifetime_manager{*head}};
     } // make_data_object_proxy
+
+    static auto to_json(const data_object_proxy<const dataObjInfo_t> _obj) -> nlohmann::json
+    {
+        nlohmann::json output;
+
+        output["data_id"] = std::to_string(_obj.data_id());
+
+        for (auto&& r : _obj.replicas()) {
+            output["replicas"].push_back(nlohmann::json{
+                {"before", replica::to_json(r)},
+                {"after", replica::to_json(r)}
+            });
+        }
+
+        return output;
+    } // to_json
+
+    static auto to_json(const dataObjInfo_t& _doi) -> nlohmann::json
+    {
+        return to_json(data_object_proxy{_doi});
+    } // to_json
 } // namespace irods::experimental::data_object
 
 #endif // #ifndef IRODS_DATA_OBJECT_PROXY_HPP

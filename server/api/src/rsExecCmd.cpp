@@ -83,9 +83,8 @@ rsExecCmd( rsComm_t *rsComm, execCmd_t *execCmdInp, execCmdOut_t **execCmdOut ) 
         char*       resc_hier_ptr = getValByKey( &dataObjInp.condInput, RESC_HIER_STR_KW );
         if ( resc_hier_ptr == NULL ) {
             try {
-                auto result = irods::resolve_resource_hierarchy(irods::OPEN_OPERATION, rsComm, dataObjInp);
-                auto file_obj = std::get<irods::file_object_ptr>(result);
-                const auto& resc_hier = std::get<std::string>(result);
+                auto file_obj = irods::resolve_resource_hierarchy(irods::OPEN_OPERATION, *rsComm, dataObjInp);
+                const auto& resc_hier = std::get<std::string>(file_obj->winner());
                 addKeyVal( &dataObjInp.condInput, RESC_HIER_STR_KW, resc_hier.c_str() );
                 addKeyVal( &execCmdInp->condInput, RESC_HIER_STR_KW, resc_hier.c_str() );
             }

@@ -1261,10 +1261,10 @@ irods::error unix_file_sync_to_arch(
 // should provide the requested operation
 irods::error unix_file_resolve_hierarchy(
     irods::plugin_context&   _ctx,
-    const std::string*       _opr,
-    const std::string*       _curr_host,
-    irods::hierarchy_parser* _out_parser,
-    float*                   _out_vote )
+    const std::string&       _opr,
+    const std::string&       _curr_host,
+    irods::hierarchy_parser& _out_parser,
+    float&                   _out_vote )
 {
     namespace irv = irods::experimental::resource::voting;
 
@@ -1272,11 +1272,7 @@ irods::error unix_file_resolve_hierarchy(
         return PASSMSG("Invalid resource context.", ret);
     }
 
-    if (!_opr || !_curr_host || !_out_parser || !_out_vote) {
-        return ERROR(SYS_INVALID_INPUT_PARAM, "Invalid input parameter.");
-    }
-
-    if (irods::CREATE_OPERATION == *_opr) {
+    if (irods::CREATE_OPERATION == _opr) {
         warn_if_deprecated_context_string_set(_ctx);
     }
 
@@ -1287,10 +1283,10 @@ irods::error unix_file_resolve_hierarchy(
             __FUNCTION__ % RECURSIVE_OPR__KW).str());
     }
 
-    _out_parser->add_child(irods::get_resource_name(_ctx));
-    *_out_vote = irv::vote::zero;
+    _out_parser.add_child(irods::get_resource_name(_ctx));
+    _out_vote = irv::vote::zero;
     try {
-        *_out_vote = irv::calculate(*_opr, _ctx, *_curr_host, *_out_parser);
+        _out_vote = irv::calculate(_opr, _ctx, _curr_host, _out_parser);
         return SUCCESS();
     }
     catch(const std::out_of_range& e) {
@@ -1516,9 +1512,9 @@ irods::resource* plugin_factory( const std::string& _inst_name, const std::strin
         function<error(plugin_context&)>(
             unix_file_truncate ) );
 
-    resc->add_operation<const std::string*, const std::string*, irods::hierarchy_parser*, float*>(
+    resc->add_operation<const std::string&, const std::string&, irods::hierarchy_parser&, float&>(
         irods::RESOURCE_OP_RESOLVE_RESC_HIER,
-        function<error(plugin_context&,const std::string*, const std::string*, irods::hierarchy_parser*, float*)>(
+        function<error(plugin_context&,const std::string&, const std::string&, irods::hierarchy_parser&, float&)>(
             unix_file_resolve_hierarchy ) );
 
     resc->add_operation(

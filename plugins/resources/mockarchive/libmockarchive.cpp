@@ -666,20 +666,16 @@ irods::error mock_archive_redirect_open(
 // should provide the requested operation
 irods::error mock_archive_file_resolve_hierarchy(
     irods::plugin_context& _ctx,
-    const std::string*                  _opr,
-    const std::string*                  _curr_host,
-    irods::hierarchy_parser*           _out_parser,
-    float*                              _out_vote ) {
+    const std::string&                  _opr,
+    const std::string&                  _curr_host,
+    irods::hierarchy_parser&           _out_parser,
+    float&                              _out_vote ) {
 
     // =-=-=-=-=-=-=-
     // check the context validity
     irods::error ret = _ctx.valid< irods::file_object >();
     if ( !ret.ok() ) {
         return PASSMSG( "Invalid plugin context.", ret );
-    }
-
-    if ( NULL == _opr || NULL == _curr_host || NULL == _out_parser || NULL == _out_vote ) {
-        return ERROR( SYS_INVALID_INPUT_PARAM, "Invalid input parameters." );
     }
 
     // =-=-=-=-=-=-=-
@@ -690,28 +686,26 @@ irods::error mock_archive_file_resolve_hierarchy(
         return PASSMSG( "Failed to get property for resource name.", ret );
     }
 
-    // =-=-=-=-=-=-=-
-    // add ourselves to the hierarchy parser by default
-    _out_parser->add_child( resc_name );
+    _out_parser.add_child(resc_name);
 
     // =-=-=-=-=-=-=-
     // test the operation to determine which choices to make
-    if ( irods::OPEN_OPERATION == ( *_opr ) || irods::UNLINK_OPERATION == ( *_opr )) {
+    if ( irods::OPEN_OPERATION == _opr || irods::UNLINK_OPERATION == _opr) {
         // =-=-=-=-=-=-=-
         // cast down the chain to our understood object type
         irods::file_object_ptr file_obj = boost::dynamic_pointer_cast< irods::file_object >( _ctx.fco() );
 
         // =-=-=-=-=-=-=-
         // call redirect determination for 'open' operation
-        ret = mock_archive_redirect_open( _ctx.prop_map(), file_obj, resc_name, ( *_curr_host ), ( *_out_vote ) );
+        ret = mock_archive_redirect_open( _ctx.prop_map(), file_obj, resc_name, _curr_host, _out_vote );
     }
-    else if ( irods::CREATE_OPERATION == ( *_opr ) ) {
+    else if ( irods::CREATE_OPERATION == _opr ) {
         ret = ERROR( SYS_INVALID_INPUT_PARAM, "Create operation not supported for an archive" );
     }
     else {
         // =-=-=-=-=-=-=-
         // must have been passed a bad operation
-        ret = ERROR( SYS_INVALID_INPUT_PARAM, std::string( "Operation not supported: \"" + ( *_opr ) + "\"." ) );
+        ret = ERROR( SYS_INVALID_INPUT_PARAM, std::string( "Operation not supported: \"" + _opr + "\"." ) );
     }
 
     return ret;
@@ -839,9 +833,9 @@ irods::resource* plugin_factory( const std::string& _inst_name, const std::strin
         function<error(plugin_context&)>(
             mock_archive_file_truncate ) );
 
-    resc->add_operation<const std::string*, const std::string*, irods::hierarchy_parser*, float*>(
+    resc->add_operation<const std::string&, const std::string&, irods::hierarchy_parser&, float&>(
         irods::RESOURCE_OP_RESOLVE_RESC_HIER,
-        function<error(plugin_context&,const std::string*, const std::string*, irods::hierarchy_parser*, float*)>(
+        function<error(plugin_context&,const std::string&, const std::string&, irods::hierarchy_parser&, float&)>(
             mock_archive_file_resolve_hierarchy ) );
 
     resc->add_operation(

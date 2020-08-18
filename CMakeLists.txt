@@ -797,6 +797,7 @@ set(
   ${CMAKE_SOURCE_DIR}/server/core/src/irods_server_state.cpp
   ${CMAKE_SOURCE_DIR}/server/core/src/irods_signal.cpp
   ${CMAKE_SOURCE_DIR}/server/core/src/irods_structured_object.cpp
+  ${CMAKE_SOURCE_DIR}/server/core/src/logical_locking.cpp
   ${CMAKE_SOURCE_DIR}/server/core/src/miscServerFunct.cpp
   ${CMAKE_SOURCE_DIR}/server/core/src/objDesc.cpp
   ${CMAKE_SOURCE_DIR}/server/core/src/objMetaOpr.cpp

@@ -12,16 +12,16 @@
 #include <map>
 #include <string>
 
-// Define some types
-typedef std::vector<irods::hierarchy_parser> child_list_t;
-typedef std::list<irods::object_oper> object_list_t;
 // define this so we sort children from highest vote to lowest
 struct child_comp {
     bool operator()( float _lhs, float _rhs ) const {
         return _lhs > _rhs;
     }
 };
-typedef std::multimap<float, irods::hierarchy_parser, child_comp> redirect_map_t;
+using redirect_map_t = std::multimap<float, irods::hierarchy_parser, child_comp>;
+
+using child_list_t   = std::vector<irods::hierarchy_parser>;
+using object_list_t  = std::list<irods::object_oper>;
 
 // define some constants
 const std::string CHILD_LIST_PROP{"child_list"};

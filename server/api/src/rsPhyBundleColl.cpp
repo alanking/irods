@@ -79,10 +79,10 @@ rsPhyBundleColl( rsComm_t*                 rsComm,
     char* hier_kw = getValByKey( &phyBundleCollInp->condInput, RESC_HIER_STR_KW );
     if ( hier_kw == NULL ) {
         try {
-            auto result = irods::resolve_resource_hierarchy(irods::CREATE_OPERATION, rsComm, data_inp);
-            hier = std::get<std::string>(result);
-        }   
-        catch (const irods::exception& e ) { 
+            auto file_obj = irods::resolve_resource_hierarchy(irods::CREATE_OPERATION, *rsComm, data_inp);
+            hier = std::get<std::string>(file_obj->winner());
+        }
+        catch (const irods::exception& e ) {
             irods::log(e);
             return e.code();
         }
@@ -358,11 +358,10 @@ replAndAddSubFileToDir( rsComm_t *rsComm, curSubFileCond_t *curSubFileCond,
             }
 
             // Find the replica and copy information into the phybun struct
-            const auto result = irods::resolve_resource_hierarchy(irods::OPEN_OPERATION, rsComm, data_obj_inp);
-            const auto& out_hier = std::get<std::string>(result);
-            const auto& file_obj = std::get<irods::file_object_ptr>(result);
-            for (const auto& r : file_obj->replicas()) {
-                if (out_hier == r.resc_hier()) {
+            const auto file_obj = irods::resolve_resource_hierarchy(irods::OPEN_OPERATION, *rsComm, data_obj_inp);
+            const auto& hier = std::get<std::string>(file_obj->winner());
+            for (auto&& r : file_obj->replicas()) {
+                if (r.resc_hier() == hier) {
                     setSubPhyPath( phyBunDir, curSubFileCond->dataId, curSubFileCond->subPhyPath );
                     rstrcpy(curSubFileCond->cachePhyPath, r.path().c_str(), MAX_NAME_LEN);
                     curSubFileCond->cacheReplNum = r.repl_num();

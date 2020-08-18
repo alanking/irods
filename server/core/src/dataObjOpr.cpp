@@ -490,17 +490,8 @@ int create_and_sort_data_obj_info_for_open(
 	// initialize output list
 	*data_obj_info_head = NULL;
 
-// check C++11 support
-#if __cplusplus > 199711L
 	// iterate over replicas
-	for (auto& replica : file_obj->replicas()) {
-
-#else
-	// iterate over replicas
-	std::vector< irods::physical_object >::iterator itr;
-	for (itr = file_obj->replicas().begin(); itr != file_obj->replicas().end(); ++itr) {
-		irods::physical_object replica = *itr;
-#endif
+	for (auto&& replica : file_obj->replicas()) {
 
 		// look for replica with matching resource hierarchy
 		if (replica.resc_hier() == resc_hier) {

@@ -1,57 +1,64 @@
+#include "apiNumber.h"
 #include "dataObjClose.h"
-#include "key_value_proxy.hpp"
-#include "rodsErrorTable.h"
-#include "rodsLog.h"
-#include "regReplica.h"
-#include "modDataObjMeta.h"
-#include "modAVUMetadata.h"
+#include "dataObjLock.h"
 #include "dataObjOpr.hpp"
-#include "objMetaOpr.hpp"
-#include "physPath.hpp"
-#include "resource.hpp"
-#include "dataObjUnlink.h"
-#include "rsGlobalExtern.hpp"
-#include "rcGlobalExtern.h"
-#include "ruleExecSubmit.h"
-#include "subStructFileRead.h"
-#include "subStructFileStat.h"
-#include "subStructFileClose.h"
-#include "regDataObj.h"
 #include "dataObjRepl.h"
 #include "dataObjTrim.h"
-#include "dataObjLock.h"
+#include "dataObjUnlink.h"
 #include "fileClose.h"
 #include "fileStat.h"
 #include "getRescQuota.h"
+#include "key_value_proxy.hpp"
 #include "miscServerFunct.hpp"
+#include "modAVUMetadata.h"
+#include "modDataObjMeta.h"
+#include "objMetaOpr.hpp"
+#include "physPath.hpp"
+#include "rcGlobalExtern.h"
+#include "regDataObj.h"
+#include "regReplica.h"
+#include "resource.hpp"
+#include "rodsErrorTable.h"
+#include "rodsLog.h"
 #include "rsDataObjClose.hpp"
-#include "apiNumber.h"
-#include "rsModDataObjMeta.hpp"
 #include "rsDataObjTrim.hpp"
 #include "rsDataObjUnlink.hpp"
-#include "rsRegReplica.hpp"
-#include "rsGetRescQuota.hpp"
-#include "rsSubStructFileClose.hpp"
 #include "rsFileClose.hpp"
-#include "rsRegDataObj.hpp"
-#include "rsSubStructFileStat.hpp"
 #include "rsFileStat.hpp"
+#include "rsGetRescQuota.hpp"
+#include "rsGlobalExtern.hpp"
+#include "rsModDataObjMeta.hpp"
+#include "rsRegDataObj.hpp"
+#include "rsRegReplica.hpp"
+#include "rsSubStructFileClose.hpp"
+#include "rsSubStructFileStat.hpp"
+#include "rs_data_object_finalize.hpp"
+#include "ruleExecSubmit.h"
+#include "subStructFileClose.h"
+#include "subStructFileRead.h"
+#include "subStructFileStat.h"
 
 // =-=-=-=-=-=-=-
-#include "irods_resource_backport.hpp"
-#include "irods_stacktrace.hpp"
-#include "irods_hierarchy_parser.hpp"
-#include "irods_file_object.hpp"
+#include "irods_at_scope_exit.hpp"
 #include "irods_exception.hpp"
+#include "irods_file_object.hpp"
+#include "irods_hierarchy_parser.hpp"
+#include "irods_resource_backport.hpp"
 #include "irods_serialization.hpp"
 #include "irods_server_api_call.hpp"
 #include "irods_server_properties.hpp"
-#include "irods_at_scope_exit.hpp"
+#include "irods_stacktrace.hpp"
 #include "key_value_proxy.hpp"
+#include "logical_locking.hpp"
 #include "replica_access_table.hpp"
+
+#define IRODS_REPLICA_ENABLE_SERVER_SIDE_API
+#include "data_object_proxy.hpp"
 
 #include <memory>
 #include <functional>
+
+#include <boost/shared_ptr.hpp>
 
 #include <sys/types.h>
 #include <unistd.h>
@@ -120,312 +127,303 @@ void apply_static_peps(
     }
 } // apply_static_peps
 
-int trimDataObjInfo(
-    rsComm_t*      rsComm,
-    dataObjInfo_t* dataObjInfo)
+auto trimDataObjInfo(
+    rsComm_t&            _comm,
+    const dataObjInfo_t& _info) -> int
 {
+    const auto replica = irods::experimental::replica::make_replica_proxy(_info);
+
     // =-=-=-=-=-=-=-
     // add the hier to a parser to get the leaf
     //std::string cache_resc = irods::hierarchy_parser{dataObjInfo->rescHier}.last_resc();
 
     dataObjInp_t dataObjInp{};
-    rstrcpy( dataObjInp.objPath,  dataObjInfo->objPath, MAX_NAME_LEN );
-    char tmpStr[NAME_LEN]{};
-    snprintf( tmpStr, NAME_LEN, "1" );
-    addKeyVal( &dataObjInp.condInput, COPIES_KW, tmpStr );
+    rstrcpy( dataObjInp.objPath, replica.logical_path().data(), MAX_NAME_LEN );
+
+    auto cond_input = irods::experimental::make_key_value_proxy(dataObjInp.condInput);
+    cond_input[COPIES_KW] = "1";
 
     // =-=-=-=-=-=-=-
     // specify the cache repl num to trim just the cache
-    addKeyVal( &dataObjInp.condInput, REPL_NUM_KW, std::to_string(dataObjInfo->replNum).c_str() );
-    addKeyVal( &dataObjInp.condInput, RESC_HIER_STR_KW, dataObjInfo->rescHier );
+    cond_input[REPL_NUM_KW] = std::to_string(replica.replica_number());
+    cond_input[RESC_HIER_STR_KW] = replica.hierarchy();
 
     ix::log::api::debug("[{}:{}] - trimming [{}] repl num:[{}],hier:[{}]",
-        __FUNCTION__, __LINE__, dataObjInfo->objPath, dataObjInfo->replNum, dataObjInfo->rescHier);
+        __FUNCTION__, __LINE__, replica.logical_path(), replica.replica_number(), replica.hierarchy());
 
-    int status = rsDataObjTrim( rsComm, &dataObjInp );
+    int status = rsDataObjTrim(&_comm, &dataObjInp );
     clearKeyVal( &dataObjInp.condInput );
     if ( status < 0 ) {
         rodsLogError( LOG_ERROR, status,
-                      "%s: error trimming obj info for [%s]", __FUNCTION__, dataObjInfo->objPath );
+                      "%s: error trimming obj info for [%s]", __FUNCTION__, replica.logical_path().data());
     }
     return status;
 } // trimDataObjInfo
 
-auto purge_cache(rsComm_t* rsComm, const int l1descInx) -> int
+auto purge_cache(rsComm_t& _comm, const int _l1descInx) -> int
 {
-    if (L1desc[l1descInx].purgeCacheFlag <= 0) {
+    auto& l1desc = L1desc[_l1descInx];
+    if (l1desc.purgeCacheFlag <= 0) {
         return 0;
     }
 
     ix::log::api::debug("[{}:{}] - purging cache file; info ptr:[{}]",
-        __FUNCTION__, __LINE__, (void*)L1desc[l1descInx].dataObjInfo);
+        __FUNCTION__, __LINE__, (void*)l1desc.dataObjInfo);
 
-    const int trim_status = trimDataObjInfo(rsComm, L1desc[l1descInx].dataObjInfo);
+    const int trim_status = trimDataObjInfo(_comm, *l1desc.dataObjInfo);
     if (trim_status < 0) {
         rodsLogError(LOG_ERROR, trim_status,
                 "%s: trimDataObjInfo error for %s",
-                __FUNCTION__, L1desc[l1descInx].dataObjInfo->objPath);
+                __FUNCTION__, l1desc.dataObjInfo->objPath);
     }
     return trim_status;
 } // purge_cache
 
 int _modDataObjSize(
-    rsComm_t*      _comm,
-    int            _l1descInx,
-    dataObjInfo_t* _info)
+    rsComm_t&      _comm,
+    const int      _l1_desc_inx,
+    dataObjInfo_t& _info)
 {
 
     keyValPair_t regParam;
     modDataObjMeta_t modDataObjMetaInp;
     memset( &regParam, 0, sizeof( regParam ) );
     char tmpStr[MAX_NAME_LEN];
-    snprintf( tmpStr, sizeof( tmpStr ), "%ji", ( intmax_t ) _info->dataSize );
+    snprintf( tmpStr, sizeof( tmpStr ), "%ji", ( intmax_t ) _info.dataSize );
     addKeyVal( &regParam, DATA_SIZE_KW, tmpStr );
-    addKeyVal( &regParam, IN_PDMO_KW, _info->rescHier ); // to stop resource hierarchy recursion
+    addKeyVal( &regParam, IN_PDMO_KW, _info.rescHier ); // to stop resource hierarchy recursion
     if ( getValByKey(
-            &L1desc[_l1descInx].dataObjInp->condInput,
+            &L1desc[_l1_desc_inx].dataObjInp->condInput,
             ADMIN_KW ) != NULL ) {
         addKeyVal( &regParam, ADMIN_KW, "" );
     }
-    char* repl_status = getValByKey(&L1desc[_l1descInx].dataObjInp->condInput, REPL_STATUS_KW);
+    char* repl_status = getValByKey(&L1desc[_l1_desc_inx].dataObjInp->condInput, REPL_STATUS_KW);
     if (repl_status) {
         addKeyVal(&regParam, REPL_STATUS_KW, repl_status);
+        L1desc[_l1_desc_inx].dataObjInfo->replStatus = std::stoi(repl_status);
     }
 
-    if (getValByKey(&L1desc[_l1descInx].dataObjInp->condInput, STALE_ALL_INTERMEDIATE_REPLICAS_KW)) {
+    if (getValByKey(&L1desc[_l1_desc_inx].dataObjInp->condInput, STALE_ALL_INTERMEDIATE_REPLICAS_KW)) {
         addKeyVal(&regParam, STALE_ALL_INTERMEDIATE_REPLICAS_KW, "");
     }
 
-    modDataObjMetaInp.dataObjInfo = _info;
+    modDataObjMetaInp.dataObjInfo = &_info;
     modDataObjMetaInp.regParam = &regParam;
-    int status = rsModDataObjMeta( _comm, &modDataObjMetaInp );
+    int status = rsModDataObjMeta(&_comm, &modDataObjMetaInp );
     if ( status < 0 ) {
         rodsLog( LOG_NOTICE,
                  "%s: rsModDataObjMeta failed, dataSize [%d] status = %d",
-                 __FUNCTION__, _info->dataSize, status );
+                 __FUNCTION__, _info.dataSize, status );
     }
     return status;
 } // _modDataObjSize
 
-int procChksumForClose(
-    rsComm_t *rsComm,
-    int l1descInx,
-    char **chksumStr)
+auto procChksumForClose(rsComm_t& _comm, const int _l1_desc_inx) -> std::string_view
 {
+    namespace replica = irods::experimental::replica;
+
     int status = 0;
-    dataObjInfo_t *dataObjInfo = L1desc[l1descInx].dataObjInfo;
-    int oprType = L1desc[l1descInx].oprType;
-    int srcL1descInx = 0;
-    dataObjInfo_t *srcDataObjInfo;
+    auto l1desc = L1desc[_l1_desc_inx];
+    auto target_replica = replica::make_replica_proxy(*l1desc.dataObjInfo);
+    int oprType = l1desc.oprType;
 
-    *chksumStr = NULL;
+    char* tmp_checksum_str{};
+
+    const irods::at_scope_exit<std::function<void()>> free_temp_string{[tmp_checksum_str]
+    {
+        if (tmp_checksum_str) free(tmp_checksum_str);
+    }};
+
     if ( oprType == REPLICATE_DEST || oprType == PHYMV_DEST ) {
-        srcL1descInx = L1desc[l1descInx].srcL1descInx;
+        const int srcL1descInx = l1desc.srcL1descInx;
         if ( srcL1descInx <= 2 ) {
-            rodsLog( LOG_NOTICE,
-                     "procChksumForClose: srcL1descInx %d out of range",
-                     srcL1descInx );
-            return SYS_FILE_DESC_OUT_OF_RANGE;
+            THROW(SYS_FILE_DESC_OUT_OF_RANGE, fmt::format("srcL1descInx %d out of range", srcL1descInx));
         }
 
-        srcDataObjInfo = L1desc[srcL1descInx].dataObjInfo;
-        if ( strlen( srcDataObjInfo->chksum ) > 0 ) {
-            addKeyVal( &dataObjInfo->condInput, ORIG_CHKSUM_KW, srcDataObjInfo->chksum );
+        const auto source_replica = replica::make_replica_proxy(*L1desc[srcL1descInx].dataObjInfo);
+        if (!source_replica.checksum().empty()) {
+            target_replica.cond_input()[ORIG_CHKSUM_KW] = source_replica.checksum();
         }
 
-        if ( strlen( srcDataObjInfo->chksum ) > 0 &&
-                srcDataObjInfo->replStatus > 0 ) {
+        if (!source_replica.checksum().empty() && source_replica.replica_status() > 0) {
             /* the source has chksum. Must verify chksum */
-            status = _dataObjChksum( rsComm, dataObjInfo, chksumStr );
+            status = _dataObjChksum(&_comm, target_replica.get(), &tmp_checksum_str);
+
             if ( status < 0 ) {
-                dataObjInfo->chksum[0] = '\0';
-                if ( status == DIRECT_ARCHIVE_ACCESS ) {
-                    *chksumStr = strdup( srcDataObjInfo->chksum );
-                    rstrcpy( dataObjInfo->chksum, *chksumStr, NAME_LEN );
-                    return 0;
+                target_replica.checksum("");
+                if (DIRECT_ARCHIVE_ACCESS != status) {
+                    THROW(status, fmt::format("_dataObjChksum error for %s, status = %d", target_replica.logical_path(), status));
                 }
-                else {
-                    rodsLog( LOG_NOTICE,
-                             "procChksumForClose: _dataObjChksum error for %s, status = %d",
-                             dataObjInfo->objPath, status );
-                    return status;
-                }
+
+                target_replica.checksum(source_replica.checksum().data());
+                return target_replica.checksum();
             }
-            else if ( *chksumStr == NULL ) {
-                rodsLog( LOG_ERROR, "chksumStr is NULL" );
-                return SYS_INTERNAL_NULL_INPUT_ERR;
+            else if (!tmp_checksum_str) {
+                THROW(SYS_INTERNAL_NULL_INPUT_ERR, "tmp_checksum_str is NULL");
             }
-            else {
-                rstrcpy( dataObjInfo->chksum, *chksumStr, NAME_LEN );
-                if ( strcmp( srcDataObjInfo->chksum, *chksumStr ) != 0 ) {
-                    rodsLog( LOG_NOTICE,
-                             "procChksumForClose: chksum mismatch for %s src [%s] new [%s]",
-                             dataObjInfo->objPath, srcDataObjInfo->chksum, *chksumStr );
-                    free( *chksumStr );
-                    *chksumStr = NULL;
-                    return USER_CHKSUM_MISMATCH;
-                }
-                else {
-                    return 0;
-                }
+
+            target_replica.checksum(tmp_checksum_str);
+
+            if (source_replica.checksum() != tmp_checksum_str) {
+                THROW(USER_CHKSUM_MISMATCH, fmt::format(
+                    "chksum mismatch for %s src [%s] new [%s]",
+                    target_replica.logical_path(), source_replica.checksum(), tmp_checksum_str));
             }
+
+            return target_replica.checksum();
         }
     }
 
     /* overwriting an old copy. need to verify the chksum again */
-    if ( strlen( L1desc[l1descInx].dataObjInfo->chksum ) > 0 && !L1desc[l1descInx].chksumFlag ) {
-        L1desc[l1descInx].chksumFlag = VERIFY_CHKSUM;
+    if ( !target_replica.checksum().empty() && !l1desc.chksumFlag ) {
+        l1desc.chksumFlag = VERIFY_CHKSUM;
     }
 
-    if ( L1desc[l1descInx].chksumFlag == 0 ) {
-        return 0;
+    if ( l1desc.chksumFlag == 0 ) {
+        ix::log::api::info("[{}:{}] - no checksum flag", __FUNCTION__, __LINE__);
+        return {};
     }
-    else if ( L1desc[l1descInx].chksumFlag == VERIFY_CHKSUM ) {
-        if ( strlen( L1desc[l1descInx].chksum ) > 0 ) {
-            if ( strlen( L1desc[l1descInx].chksum ) > 0 ) {
-                addKeyVal( &dataObjInfo->condInput, ORIG_CHKSUM_KW, L1desc[l1descInx].chksum );
+    else if ( l1desc.chksumFlag == VERIFY_CHKSUM ) {
+        if ( strlen( l1desc.chksum ) > 0 ) {
+            if ( strlen( l1desc.chksum ) > 0 ) {
+                target_replica.cond_input()[ORIG_CHKSUM_KW] = l1desc.chksum;
             }
 
-            status = _dataObjChksum( rsComm, dataObjInfo, chksumStr );
+            status = _dataObjChksum(&_comm, target_replica.get(), &tmp_checksum_str );
 
-            rmKeyVal( &dataObjInfo->condInput, ORIG_CHKSUM_KW );
+            target_replica.cond_input().erase(ORIG_CHKSUM_KW);
+
             if ( status < 0 ) {
-                return status;
+                THROW(status, "checksum operation failed");
             }
+
+            if (!tmp_checksum_str) {
+                THROW(SYS_INTERNAL_NULL_INPUT_ERR, "tmp_checksum_str is NULL");
+            }
+
             /* from a put type operation */
             /* verify against the input value. */
-            if ( strcmp( L1desc[l1descInx].chksum, *chksumStr ) != 0 ) {
-                rodsLog( LOG_NOTICE,
-                         "procChksumForClose: mismatch chksum for %s.inp=%s,compute %s",
-                         dataObjInfo->objPath,
-                         L1desc[l1descInx].chksum, *chksumStr );
-                free( *chksumStr );
-                *chksumStr = NULL;
-                return USER_CHKSUM_MISMATCH;
+            if (0 != strcmp(l1desc.chksum, tmp_checksum_str)) {
+                THROW(USER_CHKSUM_MISMATCH, fmt::format(
+                    "mismatch chksum for %s.inp=%s,compute %s",
+                    target_replica.logical_path(), l1desc.chksum, tmp_checksum_str));
             }
 
-            if ( strcmp( dataObjInfo->chksum, *chksumStr ) == 0 ) {
-                /* the same as in rcat */
-                free( *chksumStr );
-                *chksumStr = NULL;
+            // checksum verified successfully; check if ORM should be updated
+            if (target_replica.checksum() != tmp_checksum_str) {
+                target_replica.checksum(tmp_checksum_str);
             }
+
+            return target_replica.checksum();
         }
         else if ( oprType == REPLICATE_DEST ) {
-            if ( strlen( dataObjInfo->chksum ) > 0 ) {
-                addKeyVal( &dataObjInfo->condInput, ORIG_CHKSUM_KW, dataObjInfo->chksum );
-
+            if (!target_replica.checksum().empty()) {
+                target_replica.cond_input()[ORIG_CHKSUM_KW] = target_replica.checksum();
             }
-            status = _dataObjChksum( rsComm, dataObjInfo, chksumStr );
+
+            status = _dataObjChksum(&_comm, target_replica.get(), &tmp_checksum_str );
+
+            target_replica.cond_input().erase(ORIG_CHKSUM_KW);
+
             if ( status < 0 ) {
-                return status;
-            }
-            if ( *chksumStr == NULL ) {
-                rodsLog( LOG_ERROR, "chksumStr is NULL" );
-                return SYS_INTERNAL_NULL_INPUT_ERR;
+                THROW(status, "checksum operation failed");
             }
 
-            if ( strlen( dataObjInfo->chksum ) > 0 ) {
-                rmKeyVal( &dataObjInfo->condInput, ORIG_CHKSUM_KW );
+            if (!tmp_checksum_str) {
+                THROW(SYS_INTERNAL_NULL_INPUT_ERR, "tmp_checksum_str is NULL");
+            }
 
-                /* for replication, the chksum in dataObjInfo was duplicated */
-                if ( strcmp( dataObjInfo->chksum, *chksumStr ) != 0 ) {
-                    rodsLog( LOG_NOTICE,
-                             "procChksumForClose:mismach chksum for %s.Rcat=%s,comp %s",
-                             dataObjInfo->objPath, dataObjInfo->chksum, *chksumStr );
-                    status = USER_CHKSUM_MISMATCH;
-                }
-                else {
-                    /* not need to register because reg repl will do it */
-                    free( *chksumStr );
-                    *chksumStr = NULL;
-                    status = 0;
+            if (!target_replica.checksum().empty()) {
+                if (target_replica.checksum() != tmp_checksum_str) {
+                    THROW(USER_CHKSUM_MISMATCH, fmt::format(
+                        "mismatch chksum for %s.Rcat=%s,comp %s",
+                        target_replica.logical_path(), target_replica.checksum(), tmp_checksum_str));
                 }
             }
-            return status;
+
+            target_replica.checksum(tmp_checksum_str);
+            return target_replica.checksum();
         }
         else if ( oprType == COPY_DEST ) {
-            /* created through copy */
-            srcL1descInx = L1desc[l1descInx].srcL1descInx;
+            const int srcL1descInx = l1desc.srcL1descInx;
             if ( srcL1descInx <= 2 ) {
-                /* not a valid srcL1descInx */
-                rodsLog( LOG_DEBUG,
-                         "procChksumForClose: invalid srcL1descInx %d for copy",
-                         srcL1descInx );
-                /* just register it for now */
-                return 0;
+                rodsLog( LOG_DEBUG, "%s: invalid srcL1descInx %d for copy", __FUNCTION__, srcL1descInx );
+                target_replica.checksum(tmp_checksum_str);
+                return target_replica.checksum();
             }
-            srcDataObjInfo = L1desc[srcL1descInx].dataObjInfo;
-            if ( strlen( srcDataObjInfo->chksum ) > 0 ) {
-                addKeyVal( &dataObjInfo->condInput, ORIG_CHKSUM_KW, srcDataObjInfo->chksum );
 
+            const auto source_replica = replica::make_replica_proxy(*L1desc[srcL1descInx].dataObjInfo);
+
+            if (!source_replica.checksum().empty()) {
+                target_replica.cond_input()[ORIG_CHKSUM_KW] = source_replica.checksum();
             }
-            status = _dataObjChksum( rsComm, dataObjInfo, chksumStr );
+
+            status = _dataObjChksum(&_comm, target_replica.get(), &tmp_checksum_str );
+
+            target_replica.cond_input().erase(ORIG_CHKSUM_KW);
+
             if ( status < 0 ) {
-                return status;
+                THROW(status, "checksum operation failed");
             }
-            if ( *chksumStr == NULL ) {
-                rodsLog( LOG_ERROR, "chkSumStr is null." );
-                return SYS_INTERNAL_NULL_INPUT_ERR;
+
+            if (!tmp_checksum_str) {
+                THROW(SYS_INTERNAL_NULL_INPUT_ERR, "tmp_checksum_str is NULL");
             }
-            if ( strlen( srcDataObjInfo->chksum ) > 0 ) {
-                rmKeyVal( &dataObjInfo->condInput, ORIG_CHKSUM_KW );
-                if ( strcmp( srcDataObjInfo->chksum, *chksumStr ) != 0 ) {
-                    rodsLog( LOG_NOTICE,
-                             "procChksumForClose:mismach chksum for %s.Rcat=%s,comp %s",
-                             dataObjInfo->objPath, srcDataObjInfo->chksum, *chksumStr );
-                    free( *chksumStr );
-                    *chksumStr = NULL;
-                    return USER_CHKSUM_MISMATCH;
+
+            if (!source_replica.checksum().empty()) {
+                if (source_replica.checksum() != tmp_checksum_str) {
+                    THROW(USER_CHKSUM_MISMATCH, fmt::format(
+                        "mismatch chksum for %s.Rcat=%s,comp %s",
+                        target_replica.logical_path(), source_replica.checksum(), tmp_checksum_str));
                 }
             }
-            /* just register it */
-            return 0;
+
+            target_replica.checksum(tmp_checksum_str);
+            return target_replica.checksum();
         }
     }
     else {	/* REG_CHKSUM */
-        if ( strlen( L1desc[l1descInx].chksum ) > 0 ) {
-            addKeyVal( &dataObjInfo->condInput, ORIG_CHKSUM_KW, L1desc[l1descInx].chksum );
+        if ( strlen( l1desc.chksum ) > 0 ) {
+            target_replica.cond_input()[ORIG_CHKSUM_KW] = l1desc.chksum;
         }
 
-        status = _dataObjChksum( rsComm, dataObjInfo, chksumStr );
+        status = _dataObjChksum(&_comm, target_replica.get(), &tmp_checksum_str );
+
+        target_replica.cond_input().erase(ORIG_CHKSUM_KW);
+
         if ( status < 0 ) {
-            return status;
+            THROW(status, "checksum operation failed");
         }
 
-        if ( strlen( L1desc[l1descInx].chksum ) > 0 ) {
-            rmKeyVal( &dataObjInfo->condInput, ORIG_CHKSUM_KW );
-            /* from a put type operation */
+        target_replica.checksum(tmp_checksum_str);
 
-            if ( strcmp( dataObjInfo->chksum, L1desc[l1descInx].chksum ) == 0 ) {
-                /* same as in icat */
-                free( *chksumStr );
-                *chksumStr = NULL;
+        if ( strlen( l1desc.chksum ) > 0 ) {
+            if (target_replica.checksum() == l1desc.chksum) {
+                return {};
             }
-            return 0;
         }
         else if ( oprType == COPY_DEST ) {
             /* created through copy */
-            srcL1descInx = L1desc[l1descInx].srcL1descInx;
-            if ( srcL1descInx <= 2 ) {
-                /* not a valid srcL1descInx */
-                rodsLog( LOG_DEBUG,
-                         "procChksumForClose: invalid srcL1descInx %d for copy",
-                         srcL1descInx );
-                return 0;
+            const int srcL1descInx = l1desc.srcL1descInx;
+            if (srcL1descInx <= 2) {
+                rodsLog( LOG_DEBUG, "%s: invalid srcL1descInx %d for copy", __FUNCTION__, srcL1descInx );
+                return {};
             }
-            srcDataObjInfo = L1desc[srcL1descInx].dataObjInfo;
-            if ( strlen( srcDataObjInfo->chksum ) == 0 ) {
-                free( *chksumStr );
-                *chksumStr = NULL;
+
+            if (const auto source_replica = replica::make_replica_proxy(*L1desc[srcL1descInx].dataObjInfo);
+                source_replica.checksum().empty()) {
+                return {};
             }
         }
-        return 0;
+
+        return target_replica.checksum();
     }
-    return status;
+
+    return {};
 } // procChksumForClose
 
 int finalize_destination_replica_for_replication(
-    rsComm_t* rsComm,
+    rsComm_t& _comm,
     const openedDataObjInp_t& inp,
     const int l1descInx,
     ix::key_value_proxy<keyValPair_t>& regParam)
@@ -437,8 +435,10 @@ int finalize_destination_replica_for_replication(
                 __FUNCTION__, srcL1descInx));
     }
 
+
     dataObjInfo_t* srcDataObjInfo = L1desc[srcL1descInx].dataObjInfo;
     dataObjInfo_t *destDataObjInfo = L1desc[l1descInx].dataObjInfo;
+    L1desc[l1descInx].dataObjInfo->replStatus = srcDataObjInfo->replStatus;
     regParam[REPL_STATUS_KW] = std::to_string(srcDataObjInfo->replStatus);
     regParam[DATA_SIZE_KW] = std::to_string(srcDataObjInfo->dataSize);
     regParam[DATA_MODIFY_KW] = std::to_string((int)time(nullptr));
@@ -464,7 +464,7 @@ int finalize_destination_replica_for_replication(
     modDataObjMeta_t modDataObjMetaInp{};
     modDataObjMetaInp.dataObjInfo = destDataObjInfo;
     modDataObjMetaInp.regParam = regParam.get();
-    const int status = rsModDataObjMeta(rsComm, &modDataObjMetaInp);
+    const int status = rsModDataObjMeta(&_comm, &modDataObjMetaInp);
 
     if (CREATE_TYPE == L1desc[l1descInx].openType) {
         /* update quota overrun */
@@ -475,7 +475,7 @@ int finalize_destination_replica_for_replication(
         L1desc[l1descInx].oprStatus = status;
         /* don't delete replica with the same filePath */
         if (CATALOG_ALREADY_HAS_ITEM_BY_THAT_NAME != status) {
-            l3Unlink( rsComm, L1desc[l1descInx].dataObjInfo );
+            l3Unlink(&_comm, L1desc[l1descInx].dataObjInfo );
         }
         rodsLog(LOG_NOTICE,
                 "%s: RegReplica/ModDataObjMeta %s err. stat = %d",
@@ -486,7 +486,7 @@ int finalize_destination_replica_for_replication(
 } // finalize_destination_replica_for_replication
 
 int finalize_destination_data_object_for_put_or_copy(
-    rsComm_t* rsComm,
+    rsComm_t& _comm,
     const openedDataObjInp_t& inp,
     const int l1descInx,
     const rodsLong_t size_in_vault,
@@ -497,7 +497,7 @@ int finalize_destination_data_object_for_put_or_copy(
         condInput.contains(CROSS_ZONE_CREATE_KW) &&
         INTERMEDIATE_REPLICA == L1desc[l1descInx].replStatus) {
         /* the comes from a cross zone copy. have not been registered yet */
-        const int status = svrRegDataObj( rsComm, L1desc[l1descInx].dataObjInfo );
+        const int status = svrRegDataObj(&_comm, L1desc[l1descInx].dataObjInfo );
         if (status < 0) {
             L1desc[l1descInx].oprStatus = status;
             rodsLog(LOG_NOTICE,
@@ -518,13 +518,14 @@ int finalize_destination_data_object_for_put_or_copy(
         regParam[DATA_MODIFY_KW] = std::to_string((int)time(nullptr));
     }
     else {
-        regParam[REPL_STATUS_KW] = std::to_string(GOOD_REPLICA);
+        L1desc[l1descInx].dataObjInfo->replStatus = GOOD_REPLICA;
+        regParam[REPL_STATUS_KW] = std::to_string(L1desc[l1descInx].dataObjInfo->replStatus);
     }
 
     modDataObjMeta_t modDataObjMetaInp{};
     modDataObjMetaInp.dataObjInfo = L1desc[l1descInx].dataObjInfo;
     modDataObjMetaInp.regParam = regParam.get();
-    const int status = rsModDataObjMeta(rsComm, &modDataObjMetaInp);
+    const int status = rsModDataObjMeta(&_comm, &modDataObjMetaInp);
     if (status < 0) {
         THROW(status,
             fmt::format("{}: rsModDataObjMeta failed with {}",
@@ -532,12 +533,12 @@ int finalize_destination_data_object_for_put_or_copy(
     }
 
     try {
-        applyACLFromKVP(rsComm, L1desc[l1descInx].dataObjInp);
-        applyMetadataFromKVP(rsComm, L1desc[l1descInx].dataObjInp);
+        applyACLFromKVP(&_comm, L1desc[l1descInx].dataObjInp);
+        applyMetadataFromKVP(&_comm, L1desc[l1descInx].dataObjInp);
     }
     catch (const irods::exception& e) {
         if ( L1desc[l1descInx].dataObjInp->oprType == PUT_OPR ) {
-            rsDataObjUnlink( rsComm, L1desc[l1descInx].dataObjInp );
+            rsDataObjUnlink( &_comm, L1desc[l1descInx].dataObjInp );
         }
         throw;
     }
@@ -551,10 +552,10 @@ int finalize_destination_data_object_for_put_or_copy(
 } // finalize_destination_data_object_for_put_or_copy
 
 int finalize_replica_after_failed_operation(
-    rsComm_t* rsComm,
-    const int l1descInx)
+    rsComm_t& _comm,
+    const int _l1descInx)
 {
-    auto& l1desc = L1desc[l1descInx];
+    auto& l1desc = L1desc[_l1descInx];
 
     ix::log::api::trace("[{}:{}] - path:[{}], hier:[{}]",
         __FUNCTION__, __LINE__, l1desc.dataObjInfo->objPath, l1desc.dataObjInfo->rescHier);
@@ -568,7 +569,7 @@ int finalize_replica_after_failed_operation(
         return l1desc.oprStatus;
     }
 
-    const rodsLong_t vault_size = getSizeInVault(rsComm, l1desc.dataObjInfo);
+    const rodsLong_t vault_size = getSizeInVault(&_comm, l1desc.dataObjInfo);
     if (vault_size < 0) {
         rodsLog( LOG_ERROR,
                  "%s - getSizeInVault failed [%ld]",
@@ -576,11 +577,13 @@ int finalize_replica_after_failed_operation(
         return vault_size;
     }
 
+    L1desc[_l1descInx].dataObjInfo->replStatus = STALE_REPLICA;
+
     auto p = ix::make_key_value_proxy(l1desc.dataObjInp->condInput);
-    p[REPL_STATUS_KW] = std::to_string(STALE_REPLICA);
+    p[REPL_STATUS_KW] = std::to_string(L1desc[_l1descInx].dataObjInfo->replStatus);
     p[STALE_ALL_INTERMEDIATE_REPLICAS_KW] = "";
     l1desc.dataObjInfo->dataSize = vault_size;
-    if (const int status = _modDataObjSize( rsComm, l1descInx, l1desc.dataObjInfo ); status < 0) {
+    if (const int status = _modDataObjSize(_comm, _l1descInx, *l1desc.dataObjInfo); status < 0) {
         rodsLog( LOG_ERROR,
                  "%s - _modDataObjSize failed [%d]",
                  __FUNCTION__, status );
@@ -588,26 +591,26 @@ int finalize_replica_after_failed_operation(
     }
 
     /* an error has occurred */
-    return L1desc[l1descInx].oprStatus;
+    return L1desc[_l1descInx].oprStatus;
 } // finalize_replica_after_failed_operation
 
 int finalize_replica_with_no_bytes_written(
-    rsComm_t* comm,
-    const int l1descInx)
+    rsComm_t& _comm,
+    const int _l1descInx)
 {
-    l1desc_t& l1desc = L1desc[l1descInx];
+    l1desc_t& l1desc = L1desc[_l1descInx];
 
     ix::log::api::trace("[{}:{}] - path:[{}], hier:[{}]",
         __FUNCTION__, __LINE__, l1desc.dataObjInfo->objPath, l1desc.dataObjInfo->rescHier);
 
     try {
-        applyMetadataFromKVP(comm, l1desc.dataObjInp);
-        applyACLFromKVP(comm, l1desc.dataObjInp);
+        applyMetadataFromKVP(&_comm, l1desc.dataObjInp);
+        applyACLFromKVP(&_comm, l1desc.dataObjInp);
     }
     catch ( const irods::exception& e ) {
         rodsLog( LOG_ERROR, "%s", e.what() );
         if ( l1desc.dataObjInp->oprType == PUT_OPR ) {
-            rsDataObjUnlink( comm, l1desc.dataObjInp );
+            rsDataObjUnlink(&_comm, l1desc.dataObjInp );
         }
         return e.code();
     }
@@ -617,26 +620,18 @@ int finalize_replica_with_no_bytes_written(
         return 0;
     }
 
-    char *chksumStr{};
-    const int status = procChksumForClose( comm, l1descInx, &chksumStr );
-    if (status < 0) {
-        return status;
-    }
-
-    std::string checksum = std::string( chksumStr );
-    free( chksumStr );
-
     keyValPair_t regParam{};
-    addKeyVal(&regParam, OPEN_TYPE_KW, std::to_string(l1desc.openType).c_str());
+    auto kvp = ix::make_key_value_proxy(regParam);
+    kvp[OPEN_TYPE_KW] = std::to_string(l1desc.openType);
 
-    if ( !checksum.empty() ) {
-        addKeyVal( &regParam, CHKSUM_KW, checksum.c_str() );
+    if (const std::string_view checksum = procChksumForClose(_comm, _l1descInx); !checksum.empty()) {
+        kvp[CHKSUM_KW] = checksum;
     }
 
     modDataObjMeta_t modDataObjMetaInp{};
     modDataObjMetaInp.dataObjInfo = l1desc.dataObjInfo;
     modDataObjMetaInp.regParam = &regParam;
-    return rsModDataObjMeta( comm, &modDataObjMetaInp );
+    return rsModDataObjMeta(&_comm, &modDataObjMetaInp );
 } // finalize_replica_with_no_bytes_written
 
 bool bytes_written_in_operation(const l1desc_t& l1desc)
@@ -655,10 +650,10 @@ bool cross_zone_write_operation(
 } // cross_zone_write_operation
 
 rodsLong_t get_size_in_vault(
-    rsComm_t* comm,
+    rsComm_t& _comm,
     const l1desc_t& l1desc)
 {
-    rodsLong_t size_in_vault = getSizeInVault(comm, l1desc.dataObjInfo);
+    rodsLong_t size_in_vault = getSizeInVault(&_comm, l1desc.dataObjInfo);
 
     // since we are not filtering out writes to archive resources, the
     // archive plugins report UNKNOWN_FILE_SZ as their size since they may
@@ -699,12 +694,9 @@ void close_physical_file(rsComm_t* comm, const int l1descInx)
     }
 } // close_physical_file
 
-void update_checksum_if_needed(
-    rsComm_t* comm,
-    const int l1descInx,
-    ix::key_value_proxy<keyValPair_t>& p)
+auto update_checksum_if_needed(rsComm_t& _comm, const int _l1descInx) -> std::string_view
 {
-    l1desc_t& l1desc = L1desc[l1descInx];
+    l1desc_t& l1desc = L1desc[_l1descInx];
 
     bool update_checksum = !getValByKey(&l1desc.dataObjInp->condInput, NO_CHK_COPY_LEN_KW);
     if ((OPEN_FOR_WRITE_TYPE == l1desc.openType || CREATE_TYPE == l1desc.openType) &&
@@ -714,59 +706,57 @@ void update_checksum_if_needed(
     }
 
     if (update_checksum) {
-        char *chksumStr{};
-        if (const int status = procChksumForClose(comm, l1descInx, &chksumStr); status < 0) {
-            THROW(status, "procChksumForClose returned an error");
-        }
-        if (chksumStr) {
-            p[CHKSUM_KW] = chksumStr;
-            free(chksumStr);
+        if (const std::string_view checksum = procChksumForClose(_comm, _l1descInx); !checksum.empty()) {
+            return checksum;
         }
     }
+
+    return {};
 } // update_checksum_if_needed
 
 int finalize_replica(
-    rsComm_t* comm,
-    const int inx,
-    openedDataObjInp_t& inp)
+    rsComm_t& _comm,
+    const int _inx,
+    const openedDataObjInp_t& _inp)
 {
     try {
-        auto& l1desc = L1desc[inx];
+        auto& l1desc = L1desc[_inx];
 
         ix::log::api::debug("[{}:{}] - finalizing replica [{}] on [{}]",
             __FUNCTION__, __LINE__, l1desc.dataObjInfo->objPath, l1desc.dataObjInfo->rescHier);
 
         if (l1desc.oprStatus < 0) {
-            return finalize_replica_after_failed_operation(comm, inx);
+            return finalize_replica_after_failed_operation(_comm, _inx);
         }
 
-        if (cross_zone_write_operation(inp, l1desc)) {
-            l1desc.bytesWritten = inp.bytesWritten;
+        if (cross_zone_write_operation(_inp, l1desc)) {
+            l1desc.bytesWritten = _inp.bytesWritten;
         }
 
         if (!bytes_written_in_operation(l1desc)) {
-            purge_cache(comm, inx);
-            return finalize_replica_with_no_bytes_written(comm, inx);
+            purge_cache(_comm, _inx);
+            return finalize_replica_with_no_bytes_written(_comm, _inx);
         }
 
-        const auto size_in_vault = get_size_in_vault(comm, l1desc);
+        const auto size_in_vault = get_size_in_vault(_comm, l1desc);
 
-        auto [p, lm] = ix::make_key_value_proxy({{OPEN_TYPE_KW, std::to_string(l1desc.openType)}});
+        keyValPair_t regParam{};
+        auto p = ix::make_key_value_proxy(regParam);
 
-        update_checksum_if_needed(comm, inx, p);
+        p[CHKSUM_KW] = update_checksum_if_needed(_comm, _inx);
 
         int status{};
         if (REPLICATE_DEST == l1desc.oprType || PHYMV_DEST == l1desc.oprType) {
-            status = finalize_destination_replica_for_replication(comm, inp, inx, p);
+            status = finalize_destination_replica_for_replication(_comm, _inp, _inx, p);
         }
         else if (!l1desc.dataObjInfo->specColl) {
-            status = finalize_destination_data_object_for_put_or_copy(comm, inp, inx, size_in_vault, p);
+            status = finalize_destination_data_object_for_put_or_copy(_comm, _inp, _inx, size_in_vault, p);
         }
 
         l1desc.bytesWritten = size_in_vault;
         l1desc.dataObjInfo->dataSize = size_in_vault;
 
-        purge_cache(comm, inx);
+        purge_cache(_comm, _inx);
 
         return status;
     }
@@ -790,6 +780,21 @@ void unlock_file_descriptor(
         nullptr, (void**)nullptr, nullptr);
     L1desc[l1descInx].lockFd = -1;
 } // unlock_file_descriptor
+
+auto sync_status_with_catalog(rsComm_t& _comm, const l1desc_t& _l1desc) -> void
+{
+    namespace data_object = irods::experimental::data_object;
+
+    const auto input = data_object::to_json(*_l1desc.dataObjInfo);
+
+    ix::log::api::info("[{}:{}] - input:[{}]", __FUNCTION__, __LINE__, input.dump());
+
+    char* output{};
+    if (const auto ec = rs_data_object_finalize(&_comm, input.dump().c_str(), &output); ec) {
+        ix::log::api::error("[{}] - updating data object failed with [{}]", __FUNCTION__, ec);
+        THROW(ec, "failed to update data object");
+    }
+} // sync_status_with_catalog
 
 } // anonymous namespace
 
@@ -896,15 +901,21 @@ int rsDataObjClose(
     }
 
     try {
+        namespace data_object = irods::experimental::data_object;
+
         const int l1descInx = dataObjCloseInp->l1descInx;
 
+        // TODO: is this being closed?
         close_physical_file(rsComm, l1descInx);
 
-        ec = finalize_replica(rsComm, l1descInx, *dataObjCloseInp);
+        ec = finalize_replica(*rsComm, l1descInx, *dataObjCloseInp);
 
         if (l1desc.lockFd > 0) {
             unlock_file_descriptor(rsComm, l1descInx);
         }
+
+        // TODO: Need to extract original replica states, somehow, and restore them here
+        sync_status_with_catalog(*rsComm, L1desc[l1descInx]);
 
         if (ec < 0 || l1desc.oprStatus < 0) {
             freeL1desc(l1descInx);

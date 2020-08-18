@@ -740,21 +740,18 @@ static irods::error capture_weight(
 //                      should provide the requested operation
 irods::error passthru_file_resolve_hierarchy(
     irods::plugin_context& _ctx,
-    const std::string*                  _opr,
-    const std::string*                  _curr_host,
-    irods::hierarchy_parser*           _out_parser,
-    float*                              _out_vote )
+    const std::string&                  _opr,
+    const std::string&                  _curr_host,
+    irods::hierarchy_parser&           _out_parser,
+    float&                              _out_vote )
 {
     irods::error result = SUCCESS();
     irods::error ret = passthru_check_params( _ctx );
     if ( !ret.ok() ) {
         result = PASSMSG( "passthru_file_resolve_hierarchy - invalid resource context.", ret );
     }
-    if (!_opr || !_curr_host || !_out_parser || !_out_vote) {
-        return ERROR(SYS_INVALID_INPUT_PARAM, "Invalid input parameter.");
-    }
 
-    _out_parser->add_child(irods::get_resource_name(_ctx));
+    _out_parser.add_child(irods::get_resource_name(_ctx));
 
     irods::resource_ptr resc;
     ret = passthru_get_first_child_resc( _ctx.prop_map(), resc );
@@ -763,10 +760,10 @@ irods::error passthru_file_resolve_hierarchy(
     }
 
     irods::error final_ret = resc->call <
-                             const std::string*,
-                             const std::string*,
-                             irods::hierarchy_parser*,
-                             float* > (
+                             const std::string&,
+                             const std::string&,
+                             irods::hierarchy_parser&,
+                             float& > (
                                  _ctx.comm(),
                                  irods::RESOURCE_OP_RESOLVE_RESC_HIER,
                                  _ctx.fco(),
@@ -775,28 +772,28 @@ irods::error passthru_file_resolve_hierarchy(
                                  _out_parser,
                                  _out_vote );
  
-    double orig_vote = *_out_vote;
-    if ( irods::OPEN_OPERATION == ( *_opr ) ) {
+    double orig_vote = _out_vote;
+    if ( irods::OPEN_OPERATION == _opr ) {
         double read_weight = 1.0;
         irods::error ret = capture_weight(_ctx, READ_WEIGHT_KW, read_weight);
         if ( !ret.ok() ) {
             irods::log( PASS( ret ) );
         }
         else {
-            ( *_out_vote ) *= read_weight;
+            _out_vote *= read_weight;
             apply_weight_to_object_votes(_ctx, read_weight);
         }
 
     }
-    else if ( ( irods::CREATE_OPERATION == ( *_opr ) ||
-                irods::WRITE_OPERATION == ( *_opr ) ) ) {
+    else if ( ( irods::CREATE_OPERATION == _opr ||
+                irods::WRITE_OPERATION == _opr ) ) {
         double write_weight = 1.0;
         irods::error ret = capture_weight(_ctx, WRITE_WEIGHT_KW, write_weight);
         if ( !ret.ok() ) {
             irods::log( PASS( ret ) );
         }
         else {
-            ( *_out_vote ) *= write_weight;
+            _out_vote *= write_weight;
             apply_weight_to_object_votes(_ctx, write_weight);
         }
     }
@@ -804,9 +801,9 @@ irods::error passthru_file_resolve_hierarchy(
     rodsLog(
         LOG_DEBUG,
         "passthru_file_resolve_hierarchy - [%s] : %f - %f",
-        _opr->c_str(),
+        _opr.c_str(),
         orig_vote,
-        *_out_vote );
+        _out_vote );
 
     return final_ret;
 
@@ -1074,9 +1071,9 @@ irods::resource* plugin_factory( const std::string& _inst_name, const std::strin
         function<error(plugin_context&)>(
             passthru_file_truncate ) );
 
-    resc->add_operation<const std::string*, const std::string*, irods::hierarchy_parser*, float*>(
+    resc->add_operation<const std::string&, const std::string&, irods::hierarchy_parser&, float&>(
         irods::RESOURCE_OP_RESOLVE_RESC_HIER,
-        function<error(plugin_context&,const std::string*, const std::string*, irods::hierarchy_parser*, float*)>(
+        function<error(plugin_context&,const std::string&, const std::string&, irods::hierarchy_parser&, float&)>(
             passthru_file_resolve_hierarchy ) );
 
     resc->add_operation(

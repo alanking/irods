@@ -1,36 +1,32 @@
-/*** Copyright (c), The Regents of the University of California            ***
- *** For more information please refer to files in the COPYRIGHT directory ***/
-/* This is script-generated code (for the most part).  */
-/* See dataObjCopy.h for a description of this API call.*/
-
-#include "dataObjCopy.h"
-#include "rodsLog.h"
-#include "objMetaOpr.hpp"
 #include "collection.hpp"
-#include "specColl.hpp"
-#include "dataObjOpen.h"
 #include "dataObjClose.h"
+#include "dataObjCopy.h"
 #include "dataObjCreate.h"
+#include "dataObjOpen.h"
 #include "dataObjRepl.h"
-#include "regDataObj.h"
-#include "rsGlobalExtern.hpp"
-#include "rcGlobalExtern.h"
 #include "getRemoteZoneResc.h"
-#include "rsDataObjCopy.hpp"
-#include "rsDataObjOpen.hpp"
-#include "rsDataObjCreate.hpp"
-#include "rsDataObjRepl.hpp"
-#include "rsRegDataObj.hpp"
-#include "rsDataObjClose.hpp"
-#include "server_utilities.hpp"
 #include "irods_logger.hpp"
+#include "objMetaOpr.hpp"
+#include "rcGlobalExtern.h"
+#include "regDataObj.h"
+#include "rodsLog.h"
+#include "rsDataObjClose.hpp"
+#include "rsDataObjCopy.hpp"
+#include "rsDataObjCreate.hpp"
+#include "rsDataObjOpen.hpp"
+#include "rsDataObjRepl.hpp"
+#include "rsGlobalExtern.hpp"
+#include "rsRegDataObj.hpp"
+#include "server_utilities.hpp"
 #include "scoped_privileged_client.hpp"
+#include "specColl.hpp"
 
 #define IRODS_FILESYSTEM_ENABLE_SERVER_SIDE_API
 #include "filesystem.hpp"
 
-// =-=-=-=-=-=-=-
+#include "irods_logger.hpp"
 #include "irods_resource_redirect.hpp"
+#include "key_value_proxy.hpp"
 
 #include "boost/format.hpp"
 
@@ -40,8 +36,10 @@ namespace ix = irods::experimental;
 
 namespace {
 
+using log = irods::experimental::log;
+
 int connect_to_remote_zone(
-    rsComm_t *rsComm,
+    rsComm_t& rsComm,
     dataObjCopyInp_t *dataObjCopyInp,
     rodsServerHost_t **rodsServerHost ) {
 
@@ -85,16 +83,17 @@ int connect_to_remote_zone(
     }
 
     /* from the same remote zone. do it in the remote zone */
-    status = getAndConnRemoteZone(rsComm, destDataObjInp, rodsServerHost, REMOTE_CREATE);
+    status = getAndConnRemoteZone(&rsComm, destDataObjInp, rodsServerHost, REMOTE_CREATE);
     return status;
 } // connect_to_remote_zone
 
 int open_source_data_obj(
-    rsComm_t *rsComm,
-    dataObjInp_t& inp) {
+    rsComm_t& rsComm,
+    dataObjInp_t& inp)
+{
     inp.oprType = COPY_SRC;
     inp.openFlags = O_RDONLY;
-    const int srcL1descInx = rsDataObjOpen(rsComm, &inp);
+    const int srcL1descInx = rsDataObjOpen(&rsComm, &inp);
     if (srcL1descInx < 0) {
         char* sys_error{};
         const char* rods_error = rodsErrorName(srcL1descInx, &sys_error);
@@ -111,11 +110,11 @@ int open_source_data_obj(
 } // open_source_data_obj
 
 void close_source_data_obj(
-    rsComm_t *rsComm,
+    rsComm_t& rsComm,
     const int _inx) {
     openedDataObjInp_t dataObjCloseInp{};
     dataObjCloseInp.l1descInx = _inx;
-    const int close_status = rsDataObjClose(rsComm, &dataObjCloseInp);
+    const int close_status = rsDataObjClose(&rsComm, &dataObjCloseInp);
     if (close_status < 0) {
         rodsLog(LOG_NOTICE, "%s - failed closing [%s] with status [%d]",
                 __FUNCTION__,
@@ -126,28 +125,32 @@ void close_source_data_obj(
 } // close_source_data_obj
 
 int open_destination_data_obj(
-    rsComm_t *rsComm,
-    dataObjInp_t& inp)
+    rsComm_t& rsComm,
+    dataObjInp_t& inp,
+    const int source_l1_desc_inx)
 {
     inp.oprType = COPY_DEST;
     inp.openFlags = O_CREAT | O_RDWR;
 
+    auto kvp = irods::experimental::make_key_value_proxy(inp.condInput);
+
     irods::file_object_ptr file_obj(new irods::file_object());
-    std::string hier{};
-    const char* h{getValByKey(&inp.condInput, RESC_HIER_STR_KW)};
-    if (!h) {
-        std::tie(file_obj, hier) = irods::resolve_resource_hierarchy(irods::CREATE_OPERATION, rsComm, inp);
-        addKeyVal(&inp.condInput, RESC_HIER_STR_KW, hier.c_str());
-    }
-    else {
-        hier = h;
-        irods::file_object_ptr obj(new irods::file_object());
-        dataObjInfo_t* dataObjInfoHead{};
-        irods::error fac_err = irods::file_object_factory(rsComm, &inp, obj, &dataObjInfoHead);
+    std::string hier;
+    if (kvp.contains(RESC_HIER_STR_KW)) {
+        hier = kvp.at(RESC_HIER_STR_KW).value().data();
+        log::api::info("hier provided:[{}]", hier);
+        irods::error fac_err = irods::file_object_factory(&rsComm, &inp, file_obj);
         if (!fac_err.ok()) {
             irods::log(fac_err);
         }
+    }
+    else {
+        auto obj = irods::resolve_resource_hierarchy(irods::CREATE_OPERATION, rsComm, inp);
         file_obj.swap(obj);
+        hier = std::get<std::string>(file_obj->winner());
+        kvp[RESC_HIER_STR_KW] = hier;
+
+        log::api::info("hier found:[{}]", hier);
     }
 
     const auto hier_has_replica{[&hier, &replicas = file_obj->replicas()]() {
@@ -161,13 +164,13 @@ int open_destination_data_obj(
         THROW(OVERWRITE_WITHOUT_FORCE_FLAG, "force flag required to overwrite data object for copy");
     }
 
-    int destL1descInx = rsDataObjOpen(rsComm, &inp);
+    int destL1descInx = rsDataObjOpen(&rsComm, &inp);
     if ( destL1descInx == CAT_UNKNOWN_COLLECTION ) {
         /* collection does not exist. make one */
         char parColl[MAX_NAME_LEN], child[MAX_NAME_LEN];
         splitPathByKey(inp.objPath, parColl, MAX_NAME_LEN, child, MAX_NAME_LEN, '/');
-        rsMkCollR( rsComm, "/", parColl );
-        destL1descInx = rsDataObjOpen(rsComm, &inp);
+        rsMkCollR( &rsComm, "/", parColl );
+        destL1descInx = rsDataObjOpen(&rsComm, &inp);
     }
 
     if (destL1descInx < 0) {
@@ -175,7 +178,7 @@ int open_destination_data_obj(
         char* sys_error = NULL;
         const char* rods_error = rodsErrorName( destL1descInx, &sys_error );
         const std::string error_msg = (boost::format(
-            "%s -  - Failed to create destination object: \"%s\" - %s %s") %
+            "%s - Failed to create destination object: \"%s\" - %s %s") %
             __FUNCTION__ % inp.objPath % rods_error % sys_error).str();
         free(sys_error);
         THROW(destL1descInx, error_msg);
@@ -186,7 +189,7 @@ int open_destination_data_obj(
 } // open_destination_data_obj
 
 void close_destination_data_obj(
-    rsComm_t *rsComm,
+    rsComm_t& rsComm,
     const int _inx,
     transferStat_t **transStat)
 {
@@ -200,7 +203,7 @@ void close_destination_data_obj(
     (*transStat)->numThreads = L1desc[_inx].dataObjInp->numThreads;
     dataObjCloseInp.bytesWritten = L1desc[srcL1descInx].dataObjInfo->dataSize;
     rodsLog(LOG_DEBUG, "[%s:%d] - closing [%s]", __FUNCTION__, __LINE__, L1desc[_inx].dataObjInp->objPath);
-    const int close_status = rsDataObjClose(rsComm, &dataObjCloseInp);
+    const int close_status = rsDataObjClose(&rsComm, &dataObjCloseInp);
     if (close_status < 0) {
         rodsLog(LOG_NOTICE, "%s - failed closing [%s] with status [%d]",
                 __FUNCTION__,
@@ -243,7 +246,7 @@ int rsDataObjCopy_impl(
     resolveLinkedPath(rsComm, destDataObjInp->objPath, &specCollCache, &destDataObjInp->condInput);
 
     rodsServerHost_t *rodsServerHost;
-    int remoteFlag = connect_to_remote_zone( rsComm, dataObjCopyInp, &rodsServerHost );
+    int remoteFlag = connect_to_remote_zone(*rsComm, dataObjCopyInp, &rodsServerHost );
     if ( remoteFlag < 0 ) {
         return remoteFlag;
     }
@@ -263,20 +266,20 @@ int rsDataObjCopy_impl(
         int destL1descInx{};
         const irods::at_scope_exit close_objects{[&]() {
             if (destL1descInx > 3) {
-                close_destination_data_obj(rsComm, destL1descInx, transStat);
+                close_destination_data_obj(*rsComm, destL1descInx, transStat);
             }
             if (srcL1descInx > 3) {
-                close_source_data_obj(rsComm, srcL1descInx);
+                close_source_data_obj(*rsComm, srcL1descInx);
             }
         }};
 
-        srcL1descInx = open_source_data_obj(rsComm, *srcDataObjInp);
+        srcL1descInx = open_source_data_obj(*rsComm, *srcDataObjInp);
 
         const int createMode = std::atoi(L1desc[srcL1descInx].dataObjInfo->dataMode);
         if (createMode >= 0100) {
             destDataObjInp->createMode = createMode;
         }
-        destL1descInx = open_destination_data_obj(rsComm, *destDataObjInp);
+        destL1descInx = open_destination_data_obj(*rsComm, *destDataObjInp, srcL1descInx);
 
         L1desc[destL1descInx].srcL1descInx = srcL1descInx;
         L1desc[destL1descInx].dataSize = L1desc[srcL1descInx].dataObjInfo->dataSize;

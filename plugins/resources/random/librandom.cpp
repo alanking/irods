@@ -695,10 +695,11 @@ irods::error random_file_notify(
 /// @brief find the next valid child resource for create operation
 irods::error get_next_valid_child_resource(
     irods::plugin_context&   _ctx,
-    const std::string*       _opr,
-    const std::string*       _curr_host,
-    irods::hierarchy_parser* _out_parser,
-    float*                   _out_vote ) {
+    const std::string&       _opr,
+    const std::string&       _curr_host,
+    irods::hierarchy_parser& _out_parser,
+    float&                   _out_vote)
+{
     irods::error result = SUCCESS();
     irods::error ret;
 
@@ -734,18 +735,16 @@ irods::error get_next_valid_child_resource(
         // pick resource in pool at random index
         irods::resource_ptr resc = candidate_resources[rand_index];
 
-        irods::hierarchy_parser hierarchy_copy(*_out_parser);
+        irods::hierarchy_parser hierarchy_copy(_out_parser);
 
         // =-=-=-=-=-=-=-
         // forward the 'create' redirect to the appropriate child
-        ret = resc->call< const std::string*, const std::string*, irods::hierarchy_parser*, float* >( _ctx.comm(),
-                irods::RESOURCE_OP_RESOLVE_RESC_HIER,
-                _ctx.fco(), _opr, _curr_host, &hierarchy_copy,
-                _out_vote );
+        ret = resc->call< const std::string&, const std::string&, irods::hierarchy_parser&, float& >( _ctx.comm(),
+                irods::RESOURCE_OP_RESOLVE_RESC_HIER, _ctx.fco(), _opr, _curr_host, hierarchy_copy, _out_vote );
         // Found a valid child
-        if ( ret.ok() && *_out_vote != 0 ) {
+        if ( ret.ok() && _out_vote != 0 ) {
             child_found = true;
-            *_out_parser = hierarchy_copy;
+            _out_parser = hierarchy_copy;
         }
         else {
             // =-=-=-=-=-=-=-
@@ -768,20 +767,16 @@ irods::error get_next_valid_child_resource(
 ///        should provide the requested operation
 irods::error random_file_resolve_hierarchy(
     irods::plugin_context&   _ctx,
-    const std::string*       _opr,
-    const std::string*       _curr_host,
-    irods::hierarchy_parser* _out_parser,
-    float*                   _out_vote ) {
+    const std::string&       _opr,
+    const std::string&       _curr_host,
+    irods::hierarchy_parser& _out_parser,
+    float&                   _out_vote ) {
 
     // =-=-=-=-=-=-=-
     // check incoming parameters
     irods::error ret = random_check_params< irods::file_object >( _ctx );
     if ( !ret.ok() ) {
         return PASSMSG( "Invalid resource context.", ret );
-    }
-
-    if ( NULL == _opr || NULL == _curr_host || NULL == _out_parser || NULL == _out_vote ) {
-        return ERROR( SYS_INVALID_INPUT_PARAM, "Invalid parameters." );
     }
 
     // =-=-=-=-=-=-=-
@@ -794,13 +789,13 @@ irods::error random_file_resolve_hierarchy(
 
     // =-=-=-=-=-=-=-
     // add ourselves into the hierarchy before calling child resources
-    _out_parser->add_child( name );
+    _out_parser.add_child( name );
 
     // =-=-=-=-=-=-=-
     // test the operation to determine which choices to make
-    if ( irods::OPEN_OPERATION   == ( *_opr )  ||
-         irods::WRITE_OPERATION  == ( *_opr ) ||
-         irods::UNLINK_OPERATION == ( *_opr )) {
+    if ( irods::OPEN_OPERATION   == _opr  ||
+         irods::WRITE_OPERATION  == _opr ||
+         irods::UNLINK_OPERATION == _opr) {
         // =-=-=-=-=-=-=-
         // cast down the chain to our understood object type
         irods::file_object_ptr file_obj = boost::dynamic_pointer_cast< irods::file_object >( _ctx.fco() );
@@ -813,20 +808,18 @@ irods::error random_file_resolve_hierarchy(
             // =-=-=-=-=-=-=-
             // forward the redirect call to the child for assertion of the whole operation,
             // there may be more than a leaf beneath us
-            ret = resc->call< const std::string*, const std::string*, irods::hierarchy_parser*, float* >( _ctx.comm(),
-                    irods::RESOURCE_OP_RESOLVE_RESC_HIER,
-                    _ctx.fco(), _opr, _curr_host, _out_parser,
-                    _out_vote );
+            ret = resc->call< const std::string&, const std::string&, irods::hierarchy_parser&, float& >( _ctx.comm(),
+                    irods::RESOURCE_OP_RESOLVE_RESC_HIER, _ctx.fco(), _opr, _curr_host, _out_parser, _out_vote );
             if ( !ret.ok() ) {
                 ret = PASSMSG( "Failed calling child operation.", ret );
             }
         }
         else if ( REPLICA_NOT_IN_RESC == ret.code() ) {
-            *_out_vote = 0;
+            _out_vote = 0;
             ret = SUCCESS();
         }
     }
-    else if ( irods::CREATE_OPERATION == ( *_opr ) ) {
+    else if ( irods::CREATE_OPERATION == _opr) {
         // =-=-=-=-=-=-=-
         // get the next_child resource for create
         ret = get_next_valid_child_resource( _ctx, _opr, _curr_host, _out_parser, _out_vote );
@@ -837,7 +830,7 @@ irods::error random_file_resolve_hierarchy(
     else {
         // =-=-=-=-=-=-=-
         // must have been passed a bad operation
-        ret = ERROR( INVALID_OPERATION, std::string( "Operation not supported: \"" + ( *_opr )  + "\"." ) );
+        ret = ERROR( INVALID_OPERATION, std::string( "Operation not supported: \"" + _opr + "\"." ) );
     }
 
     return ret;
@@ -1032,9 +1025,9 @@ irods::resource* plugin_factory( const std::string& _inst_name,
         function<error(plugin_context&)>(
             random_file_truncate ) );
 
-    resc->add_operation<const std::string*, const std::string*, irods::hierarchy_parser*, float*>(
+    resc->add_operation<const std::string&, const std::string&, irods::hierarchy_parser&, float&>(
         irods::RESOURCE_OP_RESOLVE_RESC_HIER,
-        function<error(plugin_context&,const std::string*, const std::string*, irods::hierarchy_parser*, float*)>(
+        function<error(plugin_context&,const std::string&, const std::string&, irods::hierarchy_parser&, float&)>(
             random_file_resolve_hierarchy ) );
 
     resc->add_operation(

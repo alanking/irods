@@ -3,6 +3,7 @@
 #include "irods_resource_manager.hpp"
 #include "irods_hierarchy_parser.hpp"
 #include "irods_log.hpp"
+#include "irods_logger.hpp"
 #include "irods_stacktrace.hpp"
 #include "irods_hierarchy_parser.hpp"
 #include "irods_resource_backport.hpp"
@@ -16,6 +17,8 @@
 // =-=-=-=-=-=-=-
 // boost includes
 #include <boost/asio/ip/host_name.hpp>
+
+#include "json.hpp"
 
 namespace irods {
 // =-=-=-=-=-=-=-
@@ -107,8 +110,8 @@ namespace irods {
 // from dataObjInfo
     file_object::file_object(
         rsComm_t*            _rsComm,
-        const dataObjInfo_t* _dataObjInfo ) {
-
+        const dataObjInfo_t* _dataObjInfo)
+    {
         data_type_      = _dataObjInfo->dataType;
         comm_           = _rsComm;
         data_id_        = _dataObjInfo->dataId;
@@ -129,6 +132,11 @@ namespace irods {
         }
         else {
             file_descriptor_ = -1;
+        }
+        const dataObjInfo_t* tmp = _dataObjInfo;
+        while (tmp) {
+            replicas_.push_back({*tmp});
+            tmp = tmp->next;
         }
     }
 
@@ -346,38 +354,13 @@ namespace irods {
         dataObjInfo_t* info_ptr = head_ptr;
         std::vector< physical_object > objects;
         while ( info_ptr ) {
-            physical_object obj;
+            objects.push_back({*info_ptr});
 
-            obj.replica_status( info_ptr->replStatus );
-            obj.repl_num( info_ptr->replNum );
-            obj.map_id( info_ptr->dataMapId );
-            if(info_ptr->dataSize > 0) {
-                obj.size( info_ptr->dataSize );
+            if(info_ptr->dataSize <= 0) {
+                auto& obj = objects.back();
+                obj.size(_data_obj_inp->dataSize);
             }
-            else {
-                obj.size( _data_obj_inp->dataSize );
-            }
-            obj.id( info_ptr->dataId );
-            obj.coll_id( info_ptr->collId );
-            obj.name( info_ptr->objPath );
-            obj.version( info_ptr->version );
-            obj.type_name( info_ptr->dataType );
-            obj.resc_name( info_ptr->rescName );
-            obj.path( info_ptr->filePath );
-            obj.owner_name( info_ptr->dataOwnerName );
-            obj.owner_zone( info_ptr->dataOwnerZone );
-            obj.status( info_ptr->statusString );
-            obj.checksum( info_ptr->chksum );
-            obj.expiry_ts( info_ptr->dataExpiry );
-            obj.mode( info_ptr->dataMode );
-            obj.r_comment( info_ptr->dataComments );
-            obj.create_ts( info_ptr->dataCreate );
-            obj.modify_ts( info_ptr->dataModify );
 
-            obj.resc_hier( info_ptr->rescHier );
-            obj.resc_id( info_ptr->rescId );
-
-            objects.push_back( obj );
             info_ptr = info_ptr->next;
 
         } // while
@@ -409,5 +392,20 @@ namespace irods {
 
         return obj;
     } // make_file_object
+
+    auto irods::file_object::to_json() -> nlohmann::json
+    {
+        using log = irods::experimental::log;
+
+        nlohmann::json out;
+
+        for (auto&& r : replicas()) {
+            out["replicas"].push_back(r.to_json());
+            log::server::debug("[{}:{}] - pushing back [{}]",
+                __FUNCTION__, __LINE__, out["replicas"].back().dump());
+        }
+
+        return out;
+    } // to_json
 
 } // namespace irods

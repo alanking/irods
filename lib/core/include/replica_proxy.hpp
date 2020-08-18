@@ -1,6 +1,10 @@
 #ifndef IRODS_REPLICA_PROXY_HPP
 #define IRODS_REPLICA_PROXY_HPP
 
+#ifdef IRODS_REPLICA_ENABLE_SERVER_SIDE_API
+    #define IRODS_FILESYSTEM_ENABLE_SERVER_SIDE_API
+#endif
+
 #include "filesystem.hpp"
 #include "irods_exception.hpp"
 #include "key_value_proxy.hpp"
@@ -476,6 +480,11 @@ namespace irods::experimental::replica
             {"modify_ts",       _proxy.mtime()},
             {"resc_id",         std::to_string(_proxy.resource_id())}
         };
+    } // to_json
+
+    static auto to_json(const dataObjInfo_t& _doi) -> nlohmann::json
+    {
+        return to_json(replica_proxy{_doi});
     } // to_json
 } // namespace irods::experimental::replica
 

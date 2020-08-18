@@ -108,8 +108,8 @@ getPhyPath(
         dataObjInp_t data_inp{};
         snprintf(data_inp.objPath, sizeof( data_inp.objPath ), "%s", _obj_name);
         try {
-            auto result = irods::resolve_resource_hierarchy(irods::OPEN_OPERATION, _comm, data_inp);
-            resc_hier = std::get<std::string>(result);
+            auto file_obj = irods::resolve_resource_hierarchy(irods::OPEN_OPERATION, *_comm, data_inp);
+            resc_hier = std::get<std::string>(file_obj->winner());
         }
         catch (const irods::exception& e) {
             irods::log(e);
