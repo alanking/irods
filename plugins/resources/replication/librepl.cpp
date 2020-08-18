@@ -1308,22 +1308,6 @@ irods::error repl_file_sync_to_arch(
     return result;
 } // repl_file_sync_to_arch
 
-/// @brief Adds the current resource to the specified resource hierarchy
-irods::error add_self_to_hierarchy(
-    irods::plugin_context& _ctx,
-    irods::hierarchy_parser& _parser ) {
-    std::string name;
-    auto ret{_ctx.prop_map().get<std::string>(irods::RESOURCE_NAME, name)};
-    if (!ret.ok()) {
-        return PASS(ret);
-    }
-    ret = _parser.add_child(name);
-    if (!ret.ok()) {
-        return PASS(ret);
-    }
-    return SUCCESS();
-} // add_self_to_hierarchy
-
 /// @brief Loop through the children and call resolve hierarchy on each one to populate the hierarchy vector
 std::pair<redirect_map_t, irods::error> resolve_children(
     irods::plugin_context& ctx,
@@ -1332,6 +1316,12 @@ std::pair<redirect_map_t, irods::error> resolve_children(
     irods::hierarchy_parser& out_parser)
 {
     redirect_map_t map;
+    std::string name;
+    auto ret = ctx.prop_map().get<std::string>(irods::RESOURCE_NAME, name);
+    if (!ret.ok()) {
+        return {map, PASS(ret)};
+    }
+
     irods::resource_child_map* cmap_ref;
     ctx.prop_map().get<irods::resource_child_map*>(irods::RESC_CHILD_MAP_PROP, cmap_ref);
     if (cmap_ref->empty()) {
@@ -1342,8 +1332,9 @@ std::pair<redirect_map_t, irods::error> resolve_children(
     float out_vote{};
     for (auto& entry : *cmap_ref) {
         auto parser{out_parser};
-        const auto ret{entry.second.second->call<const std::string*, const std::string*, irods::hierarchy_parser*, float*>(
-                        ctx.comm(), irods::RESOURCE_OP_RESOLVE_RESC_HIER, ctx.fco(), &operation, &local_hostname, &parser, &out_vote)};
+        const auto ret = entry.second.second->call<
+            const std::string*, const std::string*, irods::hierarchy_parser*, float*>(
+            ctx.comm(), irods::RESOURCE_OP_RESOLVE_RESC_HIER, ctx.fco(), &operation, &local_hostname, &parser, &out_vote);
         if (!ret.ok() && CHILD_NOT_FOUND != ret.code()) {
             rodsLog(LOG_WARNING,
                 "[%s] - failed resolving hierarchy for [%s]",
@@ -1351,6 +1342,7 @@ std::pair<redirect_map_t, irods::error> resolve_children(
             last_err = ret;
         }
         else {
+            parser.add_parent(name);
             map.insert({out_vote, parser});
         }
     }
@@ -1440,20 +1432,18 @@ irods::error repl_file_resolve_hierarchy(
         return SUCCESS();
     }
 
-    // add ourselves to the hierarchy parser
-    auto ret = add_self_to_hierarchy(_ctx, *_inout_parser);
-    if (!ret.ok()) {
-        return PASS(ret);
-    }
-
     // Resolve each one of our children and put into redirect_map
     auto [redirect_map, last_err] = resolve_children(_ctx, *_operation, *_curr_host, *_inout_parser);
+    if (!last_err.ok()) {
+        log::resource::info(last_err.result());
+    }
+
     if (redirect_map.empty()) {
         return last_err;
     }
 
     // Select a resolved hierarchy from redirect_map for the operation
-    ret = select_child(_ctx, *_operation, redirect_map, _inout_parser, _out_vote);
+    auto ret = select_child(_ctx, *_operation, redirect_map, _inout_parser, _out_vote);
     if (!ret.ok()) {
         return PASS(ret);
     }
