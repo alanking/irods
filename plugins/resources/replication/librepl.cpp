@@ -1342,7 +1342,6 @@ std::pair<redirect_map_t, irods::error> resolve_children(
             last_err = ret;
         }
         else {
-            parser.add_parent(name);
             map.insert({out_vote, parser});
         }
     }

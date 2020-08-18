@@ -7,6 +7,7 @@
 #include "irods_first_class_object.hpp"
 
 #include <functional>
+#include <string_view>
 
 namespace irods {
 
@@ -48,6 +49,14 @@ namespace irods {
             error resolve( rodsLong_t,      // resource id
                            resource_ptr& ); // resource out variable
 
+            /// \brief resovle and return a resource from a key into the resource table
+            /// \param[in] _key key into the resource table
+            /// \returns irods::resource_ptr
+            /// \retval a pointer to an irods::resource
+            /// \throws irods::exception _key is empty or not found
+            /// \since 4.2.9
+            resource_ptr resolve(std::string_view _key);
+
             // =-=-=-=-=-=-=-
             // @brief  resolve a resource from a match with a given property
             error validate_vault_path( std::string,       // physical path  of the data object
@@ -77,6 +86,14 @@ namespace irods {
             // =-=-=-=-=-=-=-
             /// @brief create a partial hier string for a given resource to the root
             error get_hier_to_root_for_resc( const std::string&, std::string& );
+
+            /// \brief create a partial hier string for a given resource to the root
+            /// \param[in] _resc_name name of the resource at the bottom
+            /// \returns irods::hierarchy_parser
+            /// \retval the resolved hierarchy up to the root
+            /// \throws irods::exception
+            /// \since 4.2.9
+            irods::hierarchy_parser get_hier_to_root_for_resc(std::string_view _resc_name);
 
             // =-=-=-=-=-=-=-
             /// @brief groups decedent leafs by child

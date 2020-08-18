@@ -214,24 +214,21 @@ namespace {
                 max_vote,
                 vote,
                 voted_hier.c_str());
+
+            auto hier = resc_mgr.get_hier_to_root_for_resc(voted_hier);
+
             if (ret.ok() && vote > max_vote) {
                 max_vote = vote;
-                max_hier = voted_hier;
+                max_hier = hier.str();
             }
 
             if (ret.ok() && irv::vote::zero != vote && !kw_match_found && !_key_word.empty() && root_resc.first == _key_word) {
-                rodsLog(LOG_DEBUG,
-                    "[%s:%d] - with keyword... kw:[%s],root:[%s],max_hier:[%s],max_vote:[%f],vote:[%f],hier:[%s]",
-                    __FUNCTION__,
-                    __LINE__,
-                    _key_word.c_str(),
-                    root_resc.first.c_str(),
-                    max_hier.c_str(),
-                    max_vote,
-                    vote,
-                    voted_hier.c_str());
+                log::server::debug(
+                    "[{}:{}] - with keyword... kw:[{}],root:[{}],max_hier:[{}],max_vote:[{}],vote:[{}],hier:[{}]",
+                    __FUNCTION__, __LINE__, _key_word.c_str(), root_resc.first.c_str(), max_hier.c_str(), max_vote, vote, hier.str());
+
                 kw_match_found = true;
-                _file_obj->resc_hier(voted_hier);
+                _file_obj->resc_hier(hier.str());
             }
         }
 
@@ -269,7 +266,7 @@ namespace {
             THROW(ret.code(), ret.result());
         }
 
-        return hier;
+        return resc_mgr.get_hier_to_root_for_resc(hier).str();
     } // resolve_hier_for_create
 
 } // anonymous namespace
