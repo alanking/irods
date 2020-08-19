@@ -11,12 +11,15 @@
 #include "rsGetRescQuota.hpp"
 
 // =-=-=-=-=-=-=
+#include "irods_logger.hpp"
 #include "irods_resource_redirect.hpp"
 #include "irods_hierarchy_parser.hpp"
 #include "irods_resource_backport.hpp"
 #include "voting.hpp"
 
 namespace {
+
+    using log = irods::experimental::log;
 
     std::string get_keyword_from_inp(
         const dataObjInp_t& _data_obj_inp)

@@ -77,11 +77,11 @@ namespace irods {
             THROW(SYS_INVALID_INPUT_PARAM, "empty key");
         }
 
-        if (resource_name_map_.has_entry(_key)) {
-            return resource_name_map_[ _key ];
+        if (resource_name_map_.has_entry(_key.data())) {
+            return resource_name_map_[ _key.data() ];
         }
 
-        THROW(SYS_RESC_DOES_NOT_EXIST, fmt::format("no resource found for name [{}]", _key));
+        THROW(SYS_RESC_DOES_NOT_EXIST, fmt::format("no resource found for name [{}]", _key.data()));
     } // resolve
 
 // =-=-=-=-=-=-=-
@@ -484,8 +484,8 @@ namespace irods {
 
     irods::hierarchy_parser resource_manager::get_hier_to_root_for_resc(std::string_view _resc_name)
     {
-        irods::hierarchy_parser hierarchy{_resc_name};
-        std::string parent_name = _resc_name;
+        irods::hierarchy_parser hierarchy{_resc_name.data()};
+        std::string parent_name = _resc_name.data();
 
         while(!parent_name.empty()) {
             auto resc = resolve(parent_name);
@@ -500,7 +500,7 @@ namespace irods {
             }
 
             if(!parent_name.empty()) {
-                _hierarchy.add_parent(parent_name);
+                hierarchy.add_parent(parent_name);
             }
         } // while
 
