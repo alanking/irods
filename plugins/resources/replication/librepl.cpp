@@ -1358,9 +1358,9 @@ std::pair<redirect_map_t, irods::error> resolve_children(
 /// @brief honor the read context string keyword if present
 irods::error process_redirect_map_for_random_open(
     const redirect_map_t&    _redirect_map,
-    irods::hierarchy_parser* _out_parser,
-    float*                   _out_vote ) {
-
+    irods::hierarchy_parser& _out_parser,
+    float&                   _out_vote)
+{
     std::vector<std::pair<float, irods::hierarchy_parser>> items;
     redirect_map_t::const_iterator itr = _redirect_map.cbegin();
     for( ; itr != _redirect_map.cend(); ++itr ) {
@@ -1372,8 +1372,8 @@ irods::error process_redirect_map_for_random_open(
     size_t rand_index = irods::getRandom<size_t>() % items.size();
     std::vector<std::pair<float, irods::hierarchy_parser>>::iterator a_itr = items.begin();
     std::advance(a_itr, rand_index);
-    *_out_vote   = a_itr->first;
-    *_out_parser = a_itr->second;
+    _out_vote   = a_itr->first;
+    _out_parser = a_itr->second;
 
     return SUCCESS();
 } // process_redirect_map_for_random_open
@@ -1383,9 +1383,10 @@ irods::error select_child(
     irods::plugin_context&   _ctx,
     const std::string&       _operation,
     const redirect_map_t&    _redirect_map,
-    irods::hierarchy_parser* _out_parser,
-    float*                   _out_vote ) {
-    (*_out_vote) = 0.0;
+    irods::hierarchy_parser& _out_parser,
+    float&                   _out_vote)
+{
+    _out_vote = 0.0;
     if (_redirect_map.empty()) {
         // there are no votes to consider
         return SUCCESS();
@@ -1408,38 +1409,31 @@ irods::error select_child(
     const auto& it{_redirect_map.begin()};
     const auto& vote{it->first};
     const auto& parser{it->second};
-    *_out_parser = parser;
-    *_out_vote = vote;
+    _out_parser = parser;
+    _out_vote = vote;
     return SUCCESS();
 } // select_child
 
 /// @brief Determines which child should be used for the specified operation
 irods::error repl_file_resolve_hierarchy(
     irods::plugin_context&   _ctx,
-    const std::string*       _operation,
-    const std::string*       _curr_host,
-    irods::hierarchy_parser* _inout_parser,
-    float*                   _out_vote ) {
-    if (nullptr == _operation || nullptr == _curr_host || nullptr == _inout_parser || nullptr == _out_vote) {
-        return ERROR(SYS_INVALID_INPUT_PARAM,
-                     (boost::format(
-                      "[%s]: null parameters passed to redirect") %
-                      __FUNCTION__).str().c_str() ); 
-    }
-
+    const std::string&       _operation,
+    const std::string&       _curr_host,
+    irods::hierarchy_parser& _inout_parser,
+    float&                   _out_vote ) {
     // If child list property exists, use previously selected parser for the vote
     irods::file_object_ptr file_obj = boost::dynamic_pointer_cast<irods::file_object >( ( _ctx.fco() ) );
     const auto hier_str{getValByKey(&file_obj->cond_input(), RESC_HIER_STR_KW)};
     if (hier_str) {
         irods::hierarchy_parser selected_parser{};
         selected_parser.set_string(hier_str);
-        *_out_vote = 1.0;
-        *_inout_parser = selected_parser;
+        _out_vote = 1.0;
+        _inout_parser = selected_parser;
         return SUCCESS();
     }
 
     // Resolve each one of our children and put into redirect_map
-    auto [redirect_map, last_err] = resolve_children(_ctx, *_operation, *_curr_host, *_inout_parser);
+    auto [redirect_map, last_err] = resolve_children(_ctx, _operation, _curr_host, _inout_parser);
     if (!last_err.ok()) {
         log::resource::info(last_err.result());
     }
@@ -1449,7 +1443,7 @@ irods::error repl_file_resolve_hierarchy(
     }
 
     // Select a resolved hierarchy from redirect_map for the operation
-    auto ret = select_child(_ctx, *_operation, redirect_map, _inout_parser, _out_vote);
+    auto ret = select_child(_ctx, _operation, redirect_map, _inout_parser, _out_vote);
     if (!ret.ok()) {
         return PASS(ret);
     }
@@ -1829,9 +1823,9 @@ irods::resource* plugin_factory( const std::string& _inst_name, const std::strin
         function<error(plugin_context&)>(
             repl_file_truncate ) );
 
-    resc->add_operation<const std::string*, const std::string*, irods::hierarchy_parser*, float*>(
+    resc->add_operation<const std::string&, const std::string&, irods::hierarchy_parser&, float&>(
         irods::RESOURCE_OP_RESOLVE_RESC_HIER,
-        function<error(plugin_context&,const std::string*, const std::string*, irods::hierarchy_parser*, float*)>(
+        function<error(plugin_context&,const std::string&, const std::string&, irods::hierarchy_parser&, float&)>(
             repl_file_resolve_hierarchy ) );
 
     resc->add_operation(

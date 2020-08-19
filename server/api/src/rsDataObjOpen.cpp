@@ -783,7 +783,7 @@ int rsDataObjOpen(
             std::string hier{};
             const auto operation = (dataObjInp->openFlags & O_CREAT) ?
                 irods::CREATE_OPERATION : irods::OPEN_OPERATION;
-            std::tie(file_obj, hier) = irods::resolve_resource_hierarchy(operation, rsComm, *dataObjInp, &dataObjInfoHead);
+            std::tie(file_obj, hier) = irods::resolve_resource_hierarchy(operation, *rsComm, *dataObjInp, &dataObjInfoHead);
             kvp[RESC_HIER_STR_KW] = hier;
         }
         else {

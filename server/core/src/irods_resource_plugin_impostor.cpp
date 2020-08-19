@@ -145,12 +145,12 @@ irods::error impostor_file_sync_to_arch(
 // should provide the requested operation
 irods::error impostor_file_resolve_hierarchy(
     irods::plugin_context&   _ctx,
-    const std::string*       _opr,
-    const std::string*       _curr_host,
-    irods::hierarchy_parser* _out_parser,
-    float*                   _out_vote ) {
-    *_out_vote = irods::experimental::resource::voting::vote::zero;
-    _out_parser->add_child(irods::get_resource_name(_ctx));
+    const std::string&       _opr,
+    const std::string&       _curr_host,
+    irods::hierarchy_parser& _out_parser,
+    float&                   _out_vote ) {
+    _out_vote = irods::experimental::resource::voting::vote::zero;
+    _out_parser.add_child(irods::get_resource_name(_ctx));
     return SUCCESS();
 } // impostor_file_resolve_hierarchy
 
@@ -280,9 +280,9 @@ namespace irods {
             function<error(plugin_context&)>(
                 impostor_file_truncate ) );
 
-        add_operation<const std::string*, const std::string*, irods::hierarchy_parser*, float*>(
+        add_operation<const std::string&, const std::string&, irods::hierarchy_parser&, float&>(
             irods::RESOURCE_OP_RESOLVE_RESC_HIER,
-            function<error(plugin_context&,const std::string*, const std::string*, irods::hierarchy_parser*, float*)>(
+            function<error(plugin_context&,const std::string&, const std::string&, irods::hierarchy_parser&, float&)>(
                 impostor_file_resolve_hierarchy ) );
 
         add_operation(

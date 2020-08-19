@@ -196,7 +196,7 @@ rsDataObjGet( rsComm_t *rsComm, dataObjInp_t *dataObjInp,
     // we know that the redirection decision has already been made
     if ( getValByKey( &dataObjInp->condInput, RESC_HIER_STR_KW ) == NULL ) {
         try {
-            auto result = irods::resolve_resource_hierarchy(irods::OPEN_OPERATION, rsComm, *dataObjInp);
+            auto result = irods::resolve_resource_hierarchy(irods::OPEN_OPERATION, *rsComm, *dataObjInp);
             const auto hier = std::get<std::string>(result);
             addKeyVal( &dataObjInp->condInput, RESC_HIER_STR_KW, hier.c_str() );
         }

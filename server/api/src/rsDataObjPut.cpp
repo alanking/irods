@@ -324,12 +324,8 @@ int rsDataObjPut(
         std::string hier{};
         const char* h{getValByKey(&dataObjInp->condInput, RESC_HIER_STR_KW)};
         if (!h) {
-            auto fobj_tuple = std::make_tuple(file_obj, fac_err);
             std::tie(file_obj, hier) = irods::resolve_resource_hierarchy(
-                rsComm,
-                irods::CREATE_OPERATION,
-                *dataObjInp,
-                fobj_tuple);
+                *rsComm, irods::CREATE_OPERATION, *dataObjInp, file_obj, fac_err);
             addKeyVal(&dataObjInp->condInput, RESC_HIER_STR_KW, hier.c_str());
         }
         else {

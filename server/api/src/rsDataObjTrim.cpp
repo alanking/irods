@@ -91,7 +91,7 @@ namespace {
     }
 
     std::vector<irods::physical_object> get_replica_list(
-        rsComm_t *rsComm,
+        rsComm_t& rsComm,
         dataObjInp_t& dataObjInp) {
         if (!getValByKey(&dataObjInp.condInput, RESC_HIER_STR_KW)) {
             auto result = irods::resolve_resource_hierarchy(irods::UNLINK_OPERATION, rsComm, dataObjInp);
@@ -100,7 +100,7 @@ namespace {
         }
         else {
             irods::file_object_ptr file_obj( new irods::file_object() );
-            irods::error fac_err = irods::file_object_factory(rsComm, &dataObjInp, file_obj);
+            irods::error fac_err = irods::file_object_factory(&rsComm, &dataObjInp, file_obj);
             if (!fac_err.ok()) {
                 THROW(fac_err.code(), "file_object_factory failed");
             }
@@ -227,7 +227,7 @@ int rsDataObjTrim(
             repl_num_str = repl_num;
             rmKeyVal(&dataObjInp->condInput, REPL_NUM_KW);
         }
-        const std::vector<irods::physical_object> repl_list = get_replica_list(rsComm, *dataObjInp);
+        const std::vector<irods::physical_object> repl_list = get_replica_list(*rsComm, *dataObjInp);
         if (!repl_num_str.empty()) {
             addKeyVal(&dataObjInp->condInput, REPL_NUM_KW, repl_num_str.c_str());
         }

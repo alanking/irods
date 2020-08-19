@@ -356,14 +356,14 @@ namespace {
             // then we need to query the target resource and ask it to determine a dest resc hier for the repl
             std::string host_name{};
             float vote = 0.0;
-            const irods::error err_vote = dst_resc->call<const std::string*, const std::string*, irods::hierarchy_parser*, float*>(
+            const irods::error err_vote = dst_resc->call<const std::string&, const std::string&, irods::hierarchy_parser&, float&>(
                 _ctx.comm(),
                 irods::RESOURCE_OP_RESOLVE_RESC_HIER,
                 f_ptr,
-                &irods::CREATE_OPERATION,
-                &host_name,
-                &parser,
-                &vote );
+                irods::CREATE_OPERATION,
+                host_name,
+                parser,
+                vote );
             if (!err_vote.ok()) {
                 THROW(err_resolve.code(), boost::format("failed to get dest hierarchy. child resc [%s] parent resc [%s] bundle index [%d] bundles [%s] data id [%lld]. vote message [%s]") %
                       _child_resc_name %

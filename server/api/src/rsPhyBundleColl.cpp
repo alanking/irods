@@ -82,7 +82,7 @@ rsPhyBundleColl( rsComm_t*                 rsComm,
     char* hier_kw = getValByKey( &phyBundleCollInp->condInput, RESC_HIER_STR_KW );
     if ( hier_kw == NULL ) {
         try {
-            auto result = irods::resolve_resource_hierarchy(irods::CREATE_OPERATION, rsComm, data_inp);
+            auto result = irods::resolve_resource_hierarchy(irods::CREATE_OPERATION, *rsComm, data_inp);
             hier = std::get<std::string>(result);
         }   
         catch (const irods::exception& e ) { 
@@ -660,7 +660,7 @@ replDataObjForBundle(
     }
 
     try {
-        auto result = irods::resolve_resource_hierarchy(irods::OPEN_OPERATION, rsComm, dataObjInp);
+        auto result = irods::resolve_resource_hierarchy(irods::OPEN_OPERATION, *rsComm, dataObjInp);
         auto out_hier = std::get<std::string>(result);
         auto file_obj = std::get<irods::file_object_ptr>(result);
         for (const auto& r : file_obj->replicas()) {

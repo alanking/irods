@@ -1376,9 +1376,9 @@ irods::error compound_file_notify(
 irods::error compound_file_redirect_create(
     irods::plugin_context& _ctx,
     const std::string&               _operation,
-    const std::string*               _curr_host,
-    irods::hierarchy_parser*        _out_parser,
-    float*                           _out_vote ) {
+    const std::string&               _curr_host,
+    irods::hierarchy_parser&        _out_parser,
+    float&                           _out_vote ) {
     // =-=-=-=-=-=-=-
     // determine if the resource is down
     int resc_status = 0;
@@ -1390,7 +1390,7 @@ irods::error compound_file_redirect_create(
     // =-=-=-=-=-=-=-
     // if the status is down, vote no.
     if ( INT_RESC_STATUS_DOWN == resc_status ) {
-        ( *_out_vote ) = 0.0;
+        _out_vote = 0.0;
         return SUCCESS();
     }
 
@@ -1404,11 +1404,8 @@ irods::error compound_file_redirect_create(
 
     // =-=-=-=-=-=-=-
     // ask the cache if it is willing to accept a new file, politely
-    ret = resc->call < const std::string*, const std::string*,
-    irods::hierarchy_parser*, float* > (
-        _ctx.comm(), irods::RESOURCE_OP_RESOLVE_RESC_HIER, _ctx.fco(),
-        &_operation, _curr_host,
-        _out_parser, _out_vote );
+    ret = resc->call < const std::string&, const std::string&, irods::hierarchy_parser&, float& > (
+        _ctx.comm(), irods::RESOURCE_OP_RESOLVE_RESC_HIER, _ctx.fco(), _operation, _curr_host, _out_parser, _out_vote );
 
     // =-=-=-=-=-=-=-
     // set the operation type to signal that we need to do some work
@@ -1424,9 +1421,10 @@ irods::error compound_file_redirect_create(
 irods::error compound_file_redirect_unlink(
     irods::plugin_context& _ctx,
     const std::string&               _operation,
-    const std::string*               _curr_host,
-    irods::hierarchy_parser*         _out_parser,
-    float*                           _out_vote ) {
+    const std::string&               _curr_host,
+    irods::hierarchy_parser&         _out_parser,
+    float&                           _out_vote)
+{
     // =-=-=-=-=-=-=-
     // determine if the resource is down
     int resc_status = 0;
@@ -1438,7 +1436,7 @@ irods::error compound_file_redirect_unlink(
     // =-=-=-=-=-=-=-
     // if the status is down, vote no.
     if ( INT_RESC_STATUS_DOWN == resc_status ) {
-        ( *_out_vote ) = 0.0;
+        _out_vote = 0.0;
         return SUCCESS();
     }
 
@@ -1452,15 +1450,12 @@ irods::error compound_file_redirect_unlink(
 
     // =-=-=-=-=-=-=-
     // ask the cache if it is willing to accept a new file, politely
-    ret = resc->call < const std::string*, const std::string*,
-    irods::hierarchy_parser*, float* > (
-        _ctx.comm(), irods::RESOURCE_OP_RESOLVE_RESC_HIER, _ctx.fco(),
-        &_operation, _curr_host,
-        _out_parser, _out_vote );
+    ret = resc->call < const std::string&, const std::string&, irods::hierarchy_parser&, float& > (
+        _ctx.comm(), irods::RESOURCE_OP_RESOLVE_RESC_HIER, _ctx.fco(), _operation, _curr_host, _out_parser, _out_vote );
 
     // =-=-=-=-=-=-=-
     // if cache votes non zero we're done
-    if (*_out_vote > 0.0) {
+    if (_out_vote > 0.0) {
         return SUCCESS();
     }
 
@@ -1473,11 +1468,8 @@ irods::error compound_file_redirect_unlink(
 
     // =-=-=-=-=-=-=-
     // ask the archive if it is willing to accept a new file, politely
-    ret = resc->call < const std::string*, const std::string*,
-    irods::hierarchy_parser*, float* > (
-        _ctx.comm(), irods::RESOURCE_OP_RESOLVE_RESC_HIER, _ctx.fco(),
-        &_operation, _curr_host,
-        _out_parser, _out_vote );
+    ret = resc->call < const std::string&, const std::string&, irods::hierarchy_parser&, float& > (
+        _ctx.comm(), irods::RESOURCE_OP_RESOLVE_RESC_HIER, _ctx.fco(), _operation, _curr_host, _out_parser, _out_vote );
 
     return ret;
 
@@ -1657,23 +1649,11 @@ irods::error open_for_prefer_archive_policy(
 /// @brief - handler for prefer cache policy
 irods::error open_for_prefer_cache_policy(
     irods::plugin_context& _ctx,
-    const std::string*               _opr,
-    const std::string*               _curr_host,
-    irods::hierarchy_parser*        _out_parser,
-    float*                           _out_vote )
+    const std::string&               _opr,
+    const std::string&               _curr_host,
+    irods::hierarchy_parser&        _out_parser,
+    float&                           _out_vote )
 {
-    // =-=-=-=-=-=-=-
-    // check incoming parameters
-    if ( !_curr_host ) {
-        return ERROR( SYS_INVALID_INPUT_PARAM, "null operation" );
-    }
-    if ( !_out_parser ) {
-        return ERROR( SYS_INVALID_INPUT_PARAM, "null outgoing hier parser" );
-    }
-    if ( !_out_vote ) {
-        return ERROR( SYS_INVALID_INPUT_PARAM, "null outgoing vote" );
-    }
-
     // =-=-=-=-=-=-=-
     // get the archive resource
     irods::resource_ptr arch_resc;
@@ -1697,8 +1677,8 @@ irods::error open_for_prefer_cache_policy(
         irods::hierarchy_parser parser;
         parser.set_string(hier);
         if (parser.resc_in_hier(archive_resc_name)) {
-            *_out_vote = 1.0;
-            *_out_parser = parser;
+            _out_vote = 1.0;
+            _out_parser = parser;
             return SUCCESS();
         }
     }
@@ -1728,11 +1708,9 @@ irods::error open_for_prefer_cache_policy(
     // =-=-=-=-=-=-=-
     // ask the cache if it has the data object in question, politely
     float                    cache_check_vote   = 0.0;
-    irods::hierarchy_parser cache_check_parser = ( *_out_parser );
-    ret = cache_resc->call < const std::string*, const std::string*, irods::hierarchy_parser*, float* > (
-        _ctx.comm(), irods::RESOURCE_OP_RESOLVE_RESC_HIER, _ctx.fco(),
-        &operation, _curr_host,
-        &cache_check_parser, &cache_check_vote );
+    irods::hierarchy_parser cache_check_parser = _out_parser;
+    ret = cache_resc->call < const std::string&, const std::string&, irods::hierarchy_parser&, float& > (
+        _ctx.comm(), irods::RESOURCE_OP_RESOLVE_RESC_HIER, _ctx.fco(), operation, _curr_host, cache_check_parser, cache_check_vote );
     if ( !ret.ok() ) {
         irods::log(ret);
         return PASS( ret );
@@ -1750,25 +1728,22 @@ irods::error open_for_prefer_cache_policy(
         // =-=-=-=-=-=-=-
         // ask the archive if it has the data object in question, politely
         float                    arch_check_vote   = 0.0;
-        irods::hierarchy_parser arch_check_parser = ( *_out_parser );
-        ret = arch_resc->call < const std::string*, const std::string*,
-        irods::hierarchy_parser*, float* > (
-            _ctx.comm(), irods::RESOURCE_OP_RESOLVE_RESC_HIER, _ctx.fco(),
-            &operation, _curr_host,
-            &arch_check_parser, &arch_check_vote );
+        irods::hierarchy_parser arch_check_parser = _out_parser;
+        ret = arch_resc->call < const std::string&, const std::string&, irods::hierarchy_parser&, float& > (
+            _ctx.comm(), irods::RESOURCE_OP_RESOLVE_RESC_HIER, _ctx.fco(), operation, _curr_host, arch_check_parser, arch_check_vote );
         if ( !ret.ok() ) {
             irods::log(ret);
             return PASS( ret );
         }
 
         if( 0.0 == arch_check_vote ) {
-            *_out_vote = 0.0;
+            _out_vote = 0.0;
             return SUCCESS();
         }
 
-        if( irods::UNLINK_OPERATION == ( *_opr ) ) {
-            ( *_out_parser ) = arch_check_parser;
-            ( *_out_vote )   = arch_check_vote;
+        if( irods::UNLINK_OPERATION == _opr) {
+            _out_parser = arch_check_parser;
+            _out_vote   = arch_check_vote;
             return SUCCESS();
         }
 
@@ -1796,16 +1771,16 @@ irods::error open_for_prefer_cache_policy(
         // object is in the cache as to not hit the DB again
         // the first vote was zero so we must add the name to
         // the resource hierarchy
-        ( *_out_parser ) = cache_check_parser;
-        ( *_out_vote ) = arch_check_vote;
+        _out_parser = cache_check_parser;
+        _out_vote = arch_check_vote;
         std::string hier;
         cache_check_parser.str(hier);
     }
     else {
         // =-=-=-=-=-=-=-
         // else it is in the cache so assign the parser
-        ( *_out_vote )   = cache_check_vote;
-        ( *_out_parser ) = cache_check_parser;
+        _out_vote   = cache_check_vote;
+        _out_parser = cache_check_parser;
     }
 
     return SUCCESS();
@@ -1818,23 +1793,11 @@ irods::error open_for_prefer_cache_policy(
 ///          otherwise the default is to compare checksum
 irods::error compound_file_redirect_open(
     irods::plugin_context& _ctx,
-    const std::string*               _opr,
-    const std::string*               _curr_host,
-    irods::hierarchy_parser*        _out_parser,
-    float*                           _out_vote )
+    const std::string&               _opr,
+    const std::string&               _curr_host,
+    irods::hierarchy_parser&        _out_parser,
+    float&                           _out_vote )
 {
-    // =-=-=-=-=-=-=-
-    // check incoming parameters
-    if ( !_curr_host ) {
-        return ERROR( SYS_INVALID_INPUT_PARAM, "null operation" );
-    }
-    if ( !_out_parser ) {
-        return ERROR( SYS_INVALID_INPUT_PARAM, "null outgoing hier parser" );
-    }
-    if ( !_out_vote ) {
-        return ERROR( SYS_INVALID_INPUT_PARAM, "null outgoing vote" );
-    }
-
     // =-=-=-=-=-=-=-
     // determine if the resource is down
     int resc_status = 0;
@@ -1846,7 +1809,7 @@ irods::error compound_file_redirect_open(
     // =-=-=-=-=-=-=-
     // if the status is down, vote no.
     if ( INT_RESC_STATUS_DOWN == resc_status ) {
-        ( *_out_vote ) = 0.0;
+        _out_vote = 0.0;
         return SUCCESS();
     }
 
@@ -1866,7 +1829,7 @@ irods::error compound_file_redirect_open(
     // if the policy is always, then if the archive has it
     // stage from archive to cache and return an upvote
     else if ( irods::RESOURCE_STAGE_PREFER_ARCHIVE == policy ) {
-        return open_for_prefer_archive_policy( _ctx, *_curr_host, *_out_parser, *_out_vote );
+        return open_for_prefer_archive_policy( _ctx, _curr_host, _out_parser, _out_vote );
     }
     else {
         std::stringstream msg;
@@ -1909,10 +1872,10 @@ void replace_archive_for_replica(
 ///          should provide the requested operation
 irods::error compound_file_resolve_hierarchy(
     irods::plugin_context& _ctx,
-    const std::string*                  _opr,
-    const std::string*                  _curr_host,
-    irods::hierarchy_parser*           _out_parser,
-    float*                              _out_vote ) {
+    const std::string&                  _opr,
+    const std::string&                  _curr_host,
+    irods::hierarchy_parser&           _out_parser,
+    float&                              _out_vote ) {
     // =-=-=-=-=-=-=-
     // check the context validity
 
@@ -1923,22 +1886,7 @@ irods::error compound_file_resolve_hierarchy(
         return PASSMSG( msg.str(), ret );
     }
 
-    // =-=-=-=-=-=-=-
-    // check incoming parameters
-    if ( !_opr ) {
-        return ERROR( SYS_INVALID_INPUT_PARAM, "null operation" );
-    }
-    if ( !_curr_host ) {
-        return ERROR( SYS_INVALID_INPUT_PARAM, "null operation" );
-    }
-    if ( !_out_parser ) {
-        return ERROR( SYS_INVALID_INPUT_PARAM, "null outgoing hier parser" );
-    }
-    if ( !_out_vote ) {
-        return ERROR( SYS_INVALID_INPUT_PARAM, "null outgoing vote" );
-    }
-
-    ( *_out_vote ) = 0.0f;
+    _out_vote = 0.0f;
 
     // =-=-=-=-=-=-=-
     // get the name of this resource
@@ -1952,31 +1900,31 @@ irods::error compound_file_resolve_hierarchy(
 
     // =-=-=-=-=-=-=-
     // test the operation to determine which choices to make
-    if (irods::OPEN_OPERATION == *_opr || irods::WRITE_OPERATION == *_opr) {
-        _ctx.prop_map().set< std::string >( OPERATION_TYPE, ( *_opr ) );
+    if (irods::OPEN_OPERATION == _opr || irods::WRITE_OPERATION == _opr) {
+        _ctx.prop_map().set< std::string >( OPERATION_TYPE, _opr );
         // If the hierarchy contains the archive, just vote 1.0 and return, don't get the cache
         auto ret = compound_file_redirect_open( _ctx, _opr, _curr_host, _out_parser, _out_vote );
         if (ret.ok()) {
-            replace_archive_for_replica(_ctx, *_out_parser);
+            replace_archive_for_replica(_ctx, _out_parser);
         }
         return ret;
     }
-    else if ( irods::CREATE_OPERATION == ( *_opr )) {
+    else if ( irods::CREATE_OPERATION == _opr) {
         // =-=-=-=-=-=-=-
         // call redirect determination for 'create' operation
-        return compound_file_redirect_create( _ctx, ( *_opr ), _curr_host, _out_parser, _out_vote );
+        return compound_file_redirect_create( _ctx, _opr, _curr_host, _out_parser, _out_vote );
     }
-    else if ( irods::UNLINK_OPERATION == ( *_opr )) {
+    else if ( irods::UNLINK_OPERATION == _opr) {
         // =-=-=-=-=-=-=-
         // call redirect determination for 'unlink' operation
-        return compound_file_redirect_unlink( _ctx, ( *_opr ), _curr_host, _out_parser, _out_vote );
+        return compound_file_redirect_unlink( _ctx, _opr, _curr_host, _out_parser, _out_vote );
     }
 
     // =-=-=-=-=-=-=-
     // must have been passed a bad operation
     std::stringstream msg;
     msg << "operation not supported [";
-    msg << ( *_opr ) << "]";
+    msg << _opr << "]";
     return ERROR( -1, msg.str() );
 
 } // compound_file_resolve_hierarchy
@@ -2200,9 +2148,9 @@ irods::resource* plugin_factory( const std::string& _inst_name,
         function<error(plugin_context&)>(
             compound_file_truncate ) );
 
-    resc->add_operation<const std::string*, const std::string*, irods::hierarchy_parser*, float*>(
+    resc->add_operation<const std::string&, const std::string&, irods::hierarchy_parser&, float&>(
         irods::RESOURCE_OP_RESOLVE_RESC_HIER,
-        function<error(plugin_context&,const std::string*, const std::string*, irods::hierarchy_parser*, float*)>(
+        function<error(plugin_context&,const std::string&, const std::string&, irods::hierarchy_parser&, float&)>(
             compound_file_resolve_hierarchy ) );
 
     resc->add_operation(

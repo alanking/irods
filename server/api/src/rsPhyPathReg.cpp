@@ -1292,7 +1292,7 @@ int rsPhyPathReg(
             // root node and pathological situation
             else {
                 try {
-                    auto result = irods::resolve_resource_hierarchy(irods::CREATE_OPERATION, rsComm, *phyPathRegInp);
+                    auto result = irods::resolve_resource_hierarchy(irods::CREATE_OPERATION, *rsComm, *phyPathRegInp);
                     hier = std::get<std::string>(result);
                     addKeyVal( &phyPathRegInp->condInput, RESC_HIER_STR_KW, hier.c_str() );
                 }
@@ -1306,7 +1306,7 @@ int rsPhyPathReg(
             // =-=-=-=-=-=-=-
             // no resc is specified, request a hierarchy given the default resource
             try {
-                auto result = irods::resolve_resource_hierarchy(irods::CREATE_OPERATION, rsComm, *phyPathRegInp);
+                auto result = irods::resolve_resource_hierarchy(irods::CREATE_OPERATION, *rsComm, *phyPathRegInp);
                 hier = std::get<std::string>(result);
             }
             catch (const irods::exception& e) {

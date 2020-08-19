@@ -65,7 +65,7 @@ rsQuerySpecColl( rsComm_t *rsComm, dataObjInp_t *dataObjInp,
     char* hier_kw = getValByKey( &dataObjInp->condInput, RESC_HIER_STR_KW );
     if (!hier_kw) {
         try {
-            auto result = irods::resolve_resource_hierarchy(irods::OPEN_OPERATION, rsComm, *dataObjInp);
+            auto result = irods::resolve_resource_hierarchy(irods::OPEN_OPERATION, *rsComm, *dataObjInp);
             const auto& hier = std::get<std::string>(result);
             addKeyVal( &dataObjInp->condInput, RESC_HIER_STR_KW, hier.c_str() );
         }

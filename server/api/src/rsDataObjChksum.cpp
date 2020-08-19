@@ -91,7 +91,7 @@ rsDataObjChksum( rsComm_t *rsComm, dataObjInp_t *dataObjChksumInp,
         // determine the resource hierarchy if one is not provided
         if ( getValByKey( &dataObjChksumInp->condInput, RESC_HIER_STR_KW ) == NULL ) {
             try {
-                auto result = irods::resolve_resource_hierarchy(irods::OPEN_OPERATION, rsComm, *dataObjChksumInp);
+                auto result = irods::resolve_resource_hierarchy(irods::OPEN_OPERATION, *rsComm, *dataObjChksumInp);
                 const auto hier = std::get<std::string>(result);
                 addKeyVal( &dataObjChksumInp->condInput, RESC_HIER_STR_KW, hier.c_str() );
             }   

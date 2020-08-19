@@ -54,7 +54,7 @@ rsGetRemoteZoneResc( rsComm_t *rsComm, dataObjInp_t *dataObjInp,
 
     std::string hier{};
     try {
-        auto result = irods::resolve_resource_hierarchy(oper, rsComm, *dataObjInp);
+        auto result = irods::resolve_resource_hierarchy(oper, *rsComm, *dataObjInp);
         hier = std::get<std::string>(result);
     }   
     catch (const irods::exception& e) { 

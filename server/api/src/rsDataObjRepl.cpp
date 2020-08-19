@@ -67,7 +67,7 @@ using log = irods::experimental::log;
 
 using repl_input_tuple = std::tuple<dataObjInp_t, irods::file_object_ptr>;
 repl_input_tuple construct_input_tuple(
-    rsComm_t* rsComm,
+    rsComm_t& _comm,
     dataObjInp_t& _inp,
     const char* kw_hier,
     const std::string& _operation) {
@@ -75,20 +75,20 @@ repl_input_tuple construct_input_tuple(
         std::string hier = kw_hier;
         addKeyVal( &_inp.condInput, RESC_HIER_STR_KW, hier.c_str() );
         irods::file_object_ptr obj{new irods::file_object()};
-        irods::error err = irods::file_object_factory(rsComm, &_inp, obj);
+        irods::error err = irods::file_object_factory(&_comm, &_inp, obj);
         if (!err.ok()) {
             THROW(err.code(), err.result());
         }
         return {_inp, obj};
     }
 
-    auto [obj, hier] = irods::resolve_resource_hierarchy(_operation, rsComm, _inp);
+    auto [obj, hier] = irods::resolve_resource_hierarchy(_operation, _comm, _inp);
     addKeyVal(&_inp.condInput, RESC_HIER_STR_KW, hier.c_str());
     return {_inp, obj};
 } // construct_input_tuple
 
 repl_input_tuple init_destination_replica_input(
-    rsComm_t* rsComm,
+    rsComm_t& _comm,
     const dataObjInp_t& dataObjInp) {
     dataObjInp_t destination_data_obj_inp = dataObjInp;
     replKeyVal(&dataObjInp.condInput, &destination_data_obj_inp.condInput);
@@ -120,14 +120,14 @@ repl_input_tuple init_destination_replica_input(
         addKeyVal(&destination_data_obj_inp.condInput, DEST_RESC_NAME_KW, dest_resc);
     }
     return construct_input_tuple(
-        rsComm,
+        _comm,
         destination_data_obj_inp,
         getValByKey(&destination_data_obj_inp.condInput, DEST_RESC_HIER_STR_KW),
         irods::CREATE_OPERATION);
 } // init_destination_replica_input
 
 repl_input_tuple init_source_replica_input(
-    rsComm_t* rsComm,
+    rsComm_t& _comm,
     const dataObjInp_t& dataObjInp) {
     dataObjInp_t source_data_obj_inp = dataObjInp;
     replKeyVal(&dataObjInp.condInput, &source_data_obj_inp.condInput);
@@ -137,14 +137,14 @@ repl_input_tuple init_source_replica_input(
     rmKeyVal(&source_data_obj_inp.condInput, DEST_RESC_HIER_STR_KW);
 
     return construct_input_tuple(
-        rsComm,
+        _comm,
         source_data_obj_inp,
         getValByKey(&source_data_obj_inp.condInput, RESC_HIER_STR_KW),
         irods::OPEN_OPERATION);
 } // init_source_replica_input
 
 int close_replica(
-    rsComm_t* rsComm,
+    rsComm_t& _comm,
     const int _inx,
     const int _status) {
     openedDataObjInp_t dataObjCloseInp{};
@@ -154,7 +154,7 @@ int close_replica(
     if (pdmo_kw) {
         addKeyVal(&dataObjCloseInp.condInput, IN_PDMO_KW, pdmo_kw);
     }
-    const int status = rsDataObjClose( rsComm, &dataObjCloseInp);
+    const int status = rsDataObjClose(&_comm, &dataObjCloseInp);
     if (status < 0) {
         rodsLog(LOG_ERROR, "[%s] - rsDataObjClose failed with [%d]", __FUNCTION__, status);
     }
@@ -163,12 +163,12 @@ int close_replica(
 } // close_replica
 
 int open_source_replica(
-    rsComm_t* rsComm,
+    rsComm_t& _comm,
     dataObjInp_t& source_data_obj_inp)
 {
     source_data_obj_inp.oprType = REPLICATE_SRC;
     source_data_obj_inp.openFlags = O_RDONLY;
-    int source_l1descInx = rsDataObjOpen(rsComm, &source_data_obj_inp);
+    int source_l1descInx = rsDataObjOpen(&_comm, &source_data_obj_inp);
     if (source_l1descInx < 0) {
         return source_l1descInx;
     }
@@ -177,14 +177,14 @@ int open_source_replica(
     // TODO: Consider using force flag and making this part of the voting process
     if (GOOD_REPLICA != L1desc[source_l1descInx].dataObjInfo->replStatus) {
         const int status = SYS_NO_GOOD_REPLICA;
-        close_replica(rsComm, source_l1descInx, status);
+        close_replica(_comm, source_l1descInx, status);
         return status;
     }
     return source_l1descInx;
 } // open_source_replica
 
 int open_destination_replica(
-    rsComm_t* rsComm,
+    rsComm_t& _comm,
     dataObjInp_t& destination_data_obj_inp,
     const int source_l1desc_inx)
 {
@@ -202,44 +202,44 @@ int open_destination_replica(
             destination_data_obj_inp.objPath,
             kvp.at(DATA_ID_KW).value(),
             kvp.at(RESC_HIER_STR_KW).value());
-    return rsDataObjOpen(rsComm, &destination_data_obj_inp);
+    return rsDataObjOpen(&_comm, &destination_data_obj_inp);
 } // open_destination_replica
 
 int replicate_data(
-    rsComm_t* rsComm,
+    rsComm_t& _comm,
     dataObjInp_t& source_inp,
     dataObjInp_t& destination_inp)
 {
     // Open source replica
-    int source_l1descInx = open_source_replica(rsComm, source_inp);
+    int source_l1descInx = open_source_replica(_comm, source_inp);
     if (source_l1descInx < 0) {
         THROW(source_l1descInx, "Failed opening source replica");
     }
 
     // Open destination replica
-    int destination_l1descInx = open_destination_replica(rsComm, destination_inp, source_l1descInx);
+    int destination_l1descInx = open_destination_replica(_comm, destination_inp, source_l1descInx);
     if (destination_l1descInx < 0) {
-        close_replica(rsComm, source_l1descInx, source_l1descInx);
+        close_replica(_comm, source_l1descInx, source_l1descInx);
         THROW(destination_l1descInx, "Failed opening destination replica");
     }
     L1desc[destination_l1descInx].srcL1descInx = source_l1descInx;
 
     // Copy data from source to destination
-    const int status = dataObjCopy(rsComm, destination_l1descInx);
+    const int status = dataObjCopy(&_comm, destination_l1descInx);
     if (status < 0) {
         rodsLog(LOG_ERROR, "[%s] - dataObjCopy failed for [%s]", __FUNCTION__, destination_inp.objPath);
     }
     L1desc[destination_l1descInx].bytesWritten = L1desc[destination_l1descInx].dataObjInfo->dataSize;
 
     // Close destination replica
-    int close_status = close_replica(rsComm, destination_l1descInx, status);
+    int close_status = close_replica(_comm, destination_l1descInx, status);
     if (close_status < 0) {
         rodsLog(LOG_ERROR,
                 "[%s] - closing destination replica [%s] failed with [%d]",
                 __FUNCTION__, destination_inp.objPath, close_status);
     }
     // Close source replica
-    close_status = close_replica(rsComm, source_l1descInx, status);
+    close_status = close_replica(_comm, source_l1descInx, status);
     if (close_status < 0) {
         rodsLog(LOG_ERROR,
                 "[%s] - closing source replica [%s] failed with [%d]",
@@ -249,7 +249,7 @@ int replicate_data(
 } // replicate_data
 
 int repl_data_obj(
-    rsComm_t* rsComm,
+    rsComm_t& _comm,
     const dataObjInp_t& dataObjInp)
 {
     namespace irv = irods::experimental::resource::voting;
@@ -261,11 +261,11 @@ int repl_data_obj(
         clearKeyVal(&destination_inp.condInput);
         clearKeyVal(&source_inp.condInput);
     }};
-    auto dest_inp_tuple = init_destination_replica_input(rsComm, dataObjInp);
+    auto dest_inp_tuple = init_destination_replica_input(_comm, dataObjInp);
     destination_inp = std::get<dataObjInp_t>(dest_inp_tuple);
     auto file_obj = std::get<irods::file_object_ptr>(dest_inp_tuple);
 
-    auto source_inp_tuple = init_source_replica_input(rsComm, dataObjInp);
+    auto source_inp_tuple = init_source_replica_input(_comm, dataObjInp);
     source_inp = std::get<dataObjInp_t>(source_inp_tuple);
 
     int status{};
@@ -282,7 +282,7 @@ int repl_data_obj(
             }
             if (r.vote() > irv::vote::zero) {
                 addKeyVal(&destination_inp.condInput, RESC_HIER_STR_KW, r.resc_hier().c_str());
-                status = replicate_data(rsComm, source_inp, destination_inp);
+                status = replicate_data(_comm, source_inp, destination_inp);
             }
         }
     }
@@ -294,7 +294,7 @@ int repl_data_obj(
                 return 0;
             }
         }
-        status = replicate_data(rsComm, source_inp, destination_inp);
+        status = replicate_data(_comm, source_inp, destination_inp);
     }
     return status;
 } // repl_data_obj
@@ -392,8 +392,7 @@ int rsDataObjRepl(
     const irods::at_scope_exit free_data_obj_info{[dataObjInfo]() {
         freeAllDataObjInfo(dataObjInfo);
     }};
-    int status = resolvePathInSpecColl( rsComm, dataObjInp->objPath,
-                                    READ_COLL_PERM, 0, &dataObjInfo );
+    int status = resolvePathInSpecColl( rsComm, dataObjInp->objPath, READ_COLL_PERM, 0, &dataObjInfo );
     if (status == DATA_OBJ_T && dataObjInfo && dataObjInfo->specColl) {
         if (dataObjInfo->specColl->collClass != LINKED_COLL) {
             return SYS_REG_OBJ_IN_SPEC_COLL;
@@ -415,7 +414,7 @@ int rsDataObjRepl(
 
     try {
         addKeyVal(&dataObjInp->condInput, IN_REPL_KW, "");
-        status = repl_data_obj(rsComm, *dataObjInp);
+        status = repl_data_obj(*rsComm, *dataObjInp);
         rmKeyVal(&dataObjInp->condInput, IN_REPL_KW);
     }
     catch (const irods::exception& e) {
