@@ -690,9 +690,7 @@ irods::error mock_archive_file_resolve_hierarchy(
         return PASSMSG( "Failed to get property for resource name.", ret );
     }
 
-    // =-=-=-=-=-=-=-
-    // add ourselves to the hierarchy parser by default
-    _out_parser->add_child( resc_name );
+    _out_parser->set_string(resc_name);
 
     // =-=-=-=-=-=-=-
     // test the operation to determine which choices to make
