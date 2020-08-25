@@ -1326,8 +1326,7 @@ irods::error repl_file_sync_to_arch(
 std::pair<redirect_map_t, irods::error> resolve_children(
     irods::plugin_context& ctx,
     const std::string& operation,
-    const std::string& local_hostname,
-    irods::hierarchy_parser& out_parser)
+    const std::string& local_hostname)
 {
     redirect_map_t map;
     std::string name;
@@ -1345,7 +1344,7 @@ std::pair<redirect_map_t, irods::error> resolve_children(
     irods::error last_err = SUCCESS();
     float out_vote{};
     for (auto& entry : *cmap_ref) {
-        auto parser{out_parser};
+        irods::hierarchy_parser parser{};
         const auto ret = entry.second.second->call<
             const std::string&, const std::string&, irods::hierarchy_parser&, float&>(
             ctx.comm(), irods::RESOURCE_OP_RESOLVE_RESC_HIER, ctx.fco(), operation, local_hostname, parser, out_vote);
