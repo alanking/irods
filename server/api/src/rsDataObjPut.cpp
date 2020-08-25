@@ -266,10 +266,8 @@ int rsDataObjPut(
     rodsServerHost_t *rodsServerHost{};
     specCollCache_t *specCollCache{};
 
-    resolveLinkedPath( rsComm, dataObjInp->objPath, &specCollCache,
-                       &dataObjInp->condInput );
-    int remoteFlag = getAndConnRemoteZone( rsComm, dataObjInp, &rodsServerHost,
-                                       REMOTE_CREATE );
+    resolveLinkedPath( rsComm, dataObjInp->objPath, &specCollCache, &dataObjInp->condInput );
+    int remoteFlag = getAndConnRemoteZone( rsComm, dataObjInp, &rodsServerHost, REMOTE_CREATE );
 
     if (const char* acl_string = getValByKey( &dataObjInp->condInput, ACL_INCLUDED_KW)) {
         try {
@@ -322,8 +320,7 @@ int rsDataObjPut(
         throw_if_force_put_to_new_resource(rsComm, *dataObjInp, file_obj);
 
         std::string hier{};
-        const char* h{getValByKey(&dataObjInp->condInput, RESC_HIER_STR_KW)};
-        if (!h) {
+        if (const char* h = getValByKey(&dataObjInp->condInput, RESC_HIER_STR_KW); !h) {
             std::tie(file_obj, hier) = irods::resolve_resource_hierarchy(
                 *rsComm, irods::CREATE_OPERATION, *dataObjInp, file_obj, fac_err);
             addKeyVal(&dataObjInp->condInput, RESC_HIER_STR_KW, hier.c_str());
@@ -335,12 +332,13 @@ int rsDataObjPut(
             hier = h;
         }
 
-        const auto hier_has_replica{[&hier, &replicas = file_obj->replicas()]() {
+        const auto hier_has_replica = [&hier, &replicas = file_obj->replicas()]()
+        {
             return std::any_of(replicas.begin(), replicas.end(),
-                [&](const irods::physical_object& replica) {
+                [&hier](const irods::physical_object& replica) {
                     return replica.resc_hier() == hier;
                 });
-            }()};
+        }();
 
         if (hier_has_replica && !getValByKey(&dataObjInp->condInput, FORCE_FLAG_KW)) {
             return OVERWRITE_WITHOUT_FORCE_FLAG;
@@ -355,8 +353,6 @@ int rsDataObjPut(
     if ( status2 < 0 ) {
         return ( status2 );
     }
-
-    dataObjInp->openFlags = O_RDWR;
 
     if (getValByKey(&dataObjInp->condInput, DATA_INCLUDED_KW)) {
         return single_buffer_put(rsComm, dataObjInp, dataObjInpBBuf);

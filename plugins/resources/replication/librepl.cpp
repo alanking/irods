@@ -438,8 +438,8 @@ irods::error create_replication_list(
         // Resolve child and add to repl list based on vote
         irods::hierarchy_parser parser{};
         parser.set_string(current_resc_hier_str);
-        ret = child->call<const std::string*, const std::string*, irods::hierarchy_parser*, float*>(
-                  _ctx.comm(), irods::RESOURCE_OP_RESOLVE_RESC_HIER, _ctx.fco(), &operation, &host_name, &parser, &out_vote );
+        ret = child->call<const std::string&, const std::string&, irods::hierarchy_parser&, float&>(
+                  _ctx.comm(), irods::RESOURCE_OP_RESOLVE_RESC_HIER, _ctx.fco(), operation, host_name, parser, out_vote );
         if (!ret.ok() && CHILD_NOT_FOUND != ret.code()) {
             rodsLog(LOG_WARNING,
                 "[%s] - failed resolving hierarchy for [%s]",
@@ -1340,8 +1340,8 @@ std::pair<redirect_map_t, irods::error> resolve_children(
     for (auto& entry : *cmap_ref) {
         auto parser{out_parser};
         const auto ret = entry.second.second->call<
-            const std::string*, const std::string*, irods::hierarchy_parser*, float*>(
-            ctx.comm(), irods::RESOURCE_OP_RESOLVE_RESC_HIER, ctx.fco(), &operation, &local_hostname, &parser, &out_vote);
+            const std::string&, const std::string&, irods::hierarchy_parser&, float&>(
+            ctx.comm(), irods::RESOURCE_OP_RESOLVE_RESC_HIER, ctx.fco(), operation, local_hostname, parser, out_vote);
         if (!ret.ok() && CHILD_NOT_FOUND != ret.code()) {
             rodsLog(LOG_WARNING,
                 "[%s] - failed resolving hierarchy for [%s]",
