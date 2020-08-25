@@ -126,20 +126,19 @@ int parallel_transfer_put(
     return SYS_NO_HANDLER_REPLY_MSG;
 } // parallel_transfer_put
 
-int single_buffer_put(
-    rsComm_t* rsComm,
-    dataObjInp_t* dataObjInp,
-    bytesBuf_t* dataObjInpBBuf)
+void single_buffer_put(
+    rsComm_t&       _comm,
+    dataObjInp_t&   _inp,
+    bytesBuf_t&     _input_buf) -> int
 {
-
-    dataObjInp->openFlags |= (O_CREAT | O_RDWR | O_TRUNC);
-    int l1descInx = rsDataObjOpen(rsComm, dataObjInp);
+    _inp.openFlags |= (O_CREAT | O_RDWR | O_TRUNC);
+    int l1descInx = rsDataObjOpen(&_comm, &_inp);
     if (l1descInx <= 2) {
         if ( l1descInx >= 0 ) {
             rodsLog( LOG_ERROR,
                     "%s: rsDataObjOpen of %s error, status = %d",
                     __FUNCTION__,
-                    dataObjInp->objPath,
+                    _inp.objPath,
                     l1descInx );
             return SYS_FILE_DESC_OUT_OF_RANGE;
         }
@@ -148,19 +147,19 @@ int single_buffer_put(
 
     dataObjInfo_t *myDataObjInfo = L1desc[l1descInx].dataObjInfo;
     openedDataObjInp_t dataObjWriteInp{};
-    dataObjWriteInp.len = dataObjInpBBuf->len;
+    dataObjWriteInp.len = _input_buf.len;
     dataObjWriteInp.l1descInx = l1descInx;
 
     bytesBuf_t dataObjWriteInpBBuf{};
-    dataObjWriteInpBBuf.buf = dataObjInpBBuf->buf;
-    dataObjWriteInpBBuf.len = dataObjInpBBuf->len;
-    int bytesWritten = rsDataObjWrite(rsComm, &dataObjWriteInp, &dataObjWriteInpBBuf);
+    dataObjWriteInpBBuf.buf = _input_buf.buf;
+    dataObjWriteInpBBuf.len = _input_buf.len;
+    int bytesWritten = rsDataObjWrite(&_comm, &dataObjWriteInp, &dataObjWriteInpBBuf);
     if ( bytesWritten < 0 ) {
         rodsLog(LOG_NOTICE,
                 "%s: rsDataObjWrite for %s failed with %d",
                 __FUNCTION__, L1desc[l1descInx].dataObjInfo->filePath, bytesWritten );
         dataObjInfo_t* data_obj_info = L1desc[l1descInx].dataObjInfo;
-        const int unlink_status = dataObjUnlinkS(rsComm, L1desc[l1descInx].dataObjInp, data_obj_info);
+        const int unlink_status = dataObjUnlinkS(&_comm, L1desc[l1descInx].dataObjInp, data_obj_info);
         if (unlink_status < 0) {
             irods::log(ERROR(unlink_status,
                 (boost::format("dataObjUnlinkS failed for [%s] with [%d]") %
@@ -176,13 +175,13 @@ int single_buffer_put(
         L1desc[l1descInx].bytesWritten = bytesWritten;
     }
 
-    L1desc[l1descInx].dataSize = dataObjInp->dataSize;
+    L1desc[l1descInx].dataSize = _inp.dataSize;
 
     openedDataObjInp_t dataObjCloseInp{};
     dataObjCloseInp.l1descInx = l1descInx;
     L1desc[l1descInx].oprStatus = bytesWritten;
     L1desc[l1descInx].oprType = PUT_OPR;
-    int status = rsDataObjClose(rsComm, &dataObjCloseInp);
+    int status = rsDataObjClose(&_comm, &dataObjCloseInp);
     if ( status < 0 ) {
         rodsLog( LOG_DEBUG,
                 "%s: rsDataObjClose of %d error, status = %d",
@@ -197,17 +196,16 @@ int single_buffer_put(
         return status;
     }
 
-    if (getValByKey(&dataObjInp->condInput, ALL_KW)) {
+    if (getValByKey(&_inp.condInput, ALL_KW)) {
         /* update the rest of copies */
         transferStat_t *transStat{};
-        status = rsDataObjRepl( rsComm, dataObjInp, &transStat );
+        status = rsDataObjRepl(&_comm, &_inp, &transStat );
         if (transStat) {
             free(transStat);
         }
     }
     if (status >= 0) {
-        status = applyRuleForPostProcForWrite(
-                rsComm, dataObjInpBBuf, dataObjInp->objPath);
+        status = applyRuleForPostProcForWrite(&_comm, &_input_buf, &_inp->objPath);
         if (status >= 0) {
             status = 0;
         }
@@ -216,7 +214,6 @@ int single_buffer_put(
 } // single_buffer_put
 
 void throw_if_force_put_to_new_resource(
-    rsComm_t* comm,
     dataObjInp_t& data_obj_inp,
     irods::file_object_ptr file_obj)
 {
@@ -229,15 +226,13 @@ void throw_if_force_put_to_new_resource(
         return;
     }
 
-    const auto hier_match{
-        [&dst_resc_kw, &replicas = file_obj->replicas()]()
-        {
-            return std::any_of(replicas.cbegin(), replicas.cend(),
+    const auto hier_match = [&dst_resc_kw, &replicas = file_obj->replicas()]
+    {
+        return std::any_of(replicas.cbegin(), replicas.cend(),
             [&dst_resc_kw](const auto& r) {
                 return irods::hierarchy_parser{r.resc_hier()}.first_resc() == dst_resc_kw;
             });
-        }()
-    };
+    }();
     if (!hier_match) {
         THROW(HIERARCHY_ERROR,
               (boost::format("cannot force put [%s] to a different resource [%s]") %
@@ -317,7 +312,7 @@ int rsDataObjPut(
         file_obj->logical_path(dataObjInp->objPath);
         irods::error fac_err = irods::file_object_factory(rsComm, dataObjInp, file_obj, &dataObjInfoHead);
 
-        throw_if_force_put_to_new_resource(rsComm, *dataObjInp, file_obj);
+        throw_if_force_put_to_new_resource(*dataObjInp, file_obj);
 
         std::string hier{};
         if (const char* h = getValByKey(&dataObjInp->condInput, RESC_HIER_STR_KW); !h) {
@@ -349,13 +344,14 @@ int rsDataObjPut(
         return e.code();
     }
 
-    int status2 = applyRuleForPostProcForWrite( rsComm, dataObjInpBBuf, dataObjInp->objPath );
-    if ( status2 < 0 ) {
-        return ( status2 );
+    // TODO: ???
+    if (const int status = applyRuleForPostProcForWrite(rsComm, dataObjInpBBuf, dataObjInp->objPath);
+        status < 0) {
+        return status;
     }
 
     if (getValByKey(&dataObjInp->condInput, DATA_INCLUDED_KW)) {
-        return single_buffer_put(rsComm, dataObjInp, dataObjInpBBuf);
+        return single_buffer_put(*rsComm, *dataObjInp, *dataObjInpBBuf);
     }
 
     return parallel_transfer_put( rsComm, dataObjInp, portalOprOut );

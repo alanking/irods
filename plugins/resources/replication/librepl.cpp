@@ -385,7 +385,8 @@ irods::error repl_file_unregistered(
 
 irods::error create_replication_list(
     irods::plugin_context& _ctx,
-    const std::string& operation) {
+    const std::string& operation)
+{
     // Get selected hierarchy parser
     irods::hierarchy_parser selected_parser{};
     irods::error ret = get_selected_hierarchy(_ctx, selected_parser);
@@ -557,8 +558,8 @@ irods::error repl_file_modified(irods::plugin_context& _ctx) {
 
 // =-=-=-=-=-=-=-
 // interface for POSIX create
-irods::error repl_file_create(
-    irods::plugin_context& _ctx ) {
+irods::error repl_file_create(irods::plugin_context& _ctx)
+{
     irods::error result = SUCCESS();
     irods::error ret;
 
@@ -597,8 +598,8 @@ irods::error repl_file_create(
 
 // =-=-=-=-=-=-=-
 // interface for POSIX Open
-irods::error repl_file_open(
-    irods::plugin_context& _ctx ) {
+irods::error repl_file_open(irods::plugin_context& _ctx)
+{
     irods::error result = SUCCESS();
     irods::error ret;
 
