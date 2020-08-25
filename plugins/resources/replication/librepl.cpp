@@ -1421,20 +1421,10 @@ irods::error repl_file_resolve_hierarchy(
     const std::string&       _operation,
     const std::string&       _curr_host,
     irods::hierarchy_parser& _inout_parser,
-    float&                   _out_vote ) {
-    // If child list property exists, use previously selected parser for the vote
-    irods::file_object_ptr file_obj = boost::dynamic_pointer_cast<irods::file_object >( ( _ctx.fco() ) );
-    const auto hier_str{getValByKey(&file_obj->cond_input(), RESC_HIER_STR_KW)};
-    if (hier_str) {
-        irods::hierarchy_parser selected_parser{};
-        selected_parser.set_string(hier_str);
-        _out_vote = 1.0;
-        _inout_parser = selected_parser;
-        return SUCCESS();
-    }
-
+    float&                   _out_vote)
+{
     // Resolve each one of our children and put into redirect_map
-    auto [redirect_map, last_err] = resolve_children(_ctx, _operation, _curr_host, _inout_parser);
+    auto [redirect_map, last_err] = resolve_children(_ctx, _operation, _curr_host);
     if (!last_err.ok()) {
         log::resource::info(last_err.result());
     }
