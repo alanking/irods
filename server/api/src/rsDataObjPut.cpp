@@ -126,7 +126,7 @@ int parallel_transfer_put(
     return SYS_NO_HANDLER_REPLY_MSG;
 } // parallel_transfer_put
 
-void single_buffer_put(
+auto single_buffer_put(
     rsComm_t&       _comm,
     dataObjInp_t&   _inp,
     bytesBuf_t&     _input_buf) -> int
@@ -205,7 +205,7 @@ void single_buffer_put(
         }
     }
     if (status >= 0) {
-        status = applyRuleForPostProcForWrite(&_comm, &_input_buf, &_inp->objPath);
+        status = applyRuleForPostProcForWrite(&_comm, &_input_buf, _inp.objPath);
         if (status >= 0) {
             status = 0;
         }

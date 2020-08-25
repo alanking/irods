@@ -1,8 +1,3 @@
-/*** Copyright (c), The Regents of the University of California            ***
- *** For more information please refer to files in the COPYRIGHT directory ***/
-/* This is script-generated code (for the most part).  */
-/* See dataObjGet.h for a description of this API call.*/
-
 #include "dataObjGet.h"
 #include "rodsLog.h"
 #include "dataGet.h"
@@ -28,15 +23,24 @@
 // =-=-=-=-=-=-=-
 #include "irods_resource_redirect.hpp"
 #include "irods_hierarchy_parser.hpp"
+#include "irods_logger.hpp"
 #include "irods_resource_backport.hpp"
+#include "data_object_proxy.hpp"
+
+#include "json.hpp"
 
 namespace {
+
+    using dop   = irods::experimental::data_object_proxy<dataObjInfo_t>;
+    using log   = irods::experimental::log;
+    using json  = nlohmann::json;
+
     int _rsDataObjGet(
         rsComm_t *rsComm,
         dataObjInp_t *dataObjInp,
         portalOprOut_t **portalOprOut,
-        bytesBuf_t *dataObjOutBBuf,
-        int handlerFlag) {
+        bytesBuf_t *dataObjOutBBuf)
+    {
 
         char *chksumStr = NULL;
 
@@ -46,6 +50,10 @@ namespace {
 
         if ( l1descInx < 0 ) {
             return l1descInx;
+        }
+
+        if (L1desc[l1descInx].dataObjInfo && L1desc[l1descInx].dataObjInfo->next) {
+            log::server::debug("this thang got replicas");
         }
 
         L1desc[l1descInx].oprType = GET_OPR;
@@ -128,16 +136,9 @@ namespace {
             rsDataObjClose( rsComm, &dataObjCloseInp );
         }
 
-        if ( handlerFlag & INTERNAL_SVR_CALL ) {
-            /* internal call. want to know the real status */
-            return retval;
-        }
-        else {
-            /* already send the client the status */
-            return SYS_NO_HANDLER_REPLY_MSG;
-        }
+        return SYS_NO_HANDLER_REPLY_MSG;
 
-    }
+    } // _rsDataObjGet
 }
 
 int
@@ -194,9 +195,10 @@ rsDataObjGet( rsComm_t *rsComm, dataObjInp_t *dataObjInp,
     // working on the "home zone", determine if we need to redirect to a different
     // server in this zone for this operation.  if there is a RESC_HIER_STR_KW then
     // we know that the redirection decision has already been made
+    dataObjInfo_t* info{};
     if ( getValByKey( &dataObjInp->condInput, RESC_HIER_STR_KW ) == NULL ) {
         try {
-            auto result = irods::resolve_resource_hierarchy(irods::OPEN_OPERATION, *rsComm, *dataObjInp);
+            auto result = irods::resolve_resource_hierarchy(irods::OPEN_OPERATION, *rsComm, *dataObjInp, &info);
             const auto hier = std::get<std::string>(result);
             addKeyVal( &dataObjInp->condInput, RESC_HIER_STR_KW, hier.c_str() );
         }
@@ -205,8 +207,20 @@ rsDataObjGet( rsComm_t *rsComm, dataObjInp_t *dataObjInp,
             return e.code();
         }
     }
-    return _rsDataObjGet(rsComm, dataObjInp, portalOprOut, dataObjOutBBuf, BRANCH_MSG);
-}
+    else {
+        irods::file_object_ptr tmp{new irods::file_object()};
+
+        if (auto err = irods::file_object_factory(rsComm, dataObjInp, tmp, &info); !err.ok()) {
+            log::api::info("[{}] - failed in file_object factory; error:[{}],code:[{}]", __FUNCTION__, err.result(), err.code());
+            return err.code();
+        }
+    }
+
+    log::database::debug("[{}:{}] - JSON:[{}]",
+        __FUNCTION__, __LINE__, dop{*info}.to_json().dump());
+
+    return _rsDataObjGet(rsComm, dataObjInp, portalOprOut, dataObjOutBBuf);
+} // rsDataObjGet
 
 
 /* preProcParaGet - preprocessing for parallel get. Basically it calls
