@@ -316,8 +316,9 @@ int rsDataObjPut(
 
         std::string hier{};
         if (const char* h = getValByKey(&dataObjInp->condInput, RESC_HIER_STR_KW); !h) {
-            std::tie(file_obj, hier) = irods::resolve_resource_hierarchy(
+            file_obj = irods::resolve_resource_hierarchy(
                 *rsComm, irods::CREATE_OPERATION, *dataObjInp, file_obj, fac_err);
+            hier = std::get<std::string>(file_obj->winner());
             addKeyVal(&dataObjInp->condInput, RESC_HIER_STR_KW, hier.c_str());
         }
         else {

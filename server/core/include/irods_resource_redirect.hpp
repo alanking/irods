@@ -11,8 +11,6 @@
 
 namespace irods {
 
-    using resolve_hierarchy_result_type = std::tuple<irods::file_object_ptr, std::string>;
-
     const std::string CREATE_OPERATION( "CREATE" );
     const std::string WRITE_OPERATION( "WRITE" );
     const std::string OPEN_OPERATION( "OPEN" );
@@ -27,13 +25,13 @@ namespace irods {
         int&,                // flag stating LOCAL_HOST or REMOTE_HOST
         dataObjInfo_t**    _data_obj_info = nullptr );
 
-    irods::resolve_hierarchy_result_type resolve_resource_hierarchy(
+    irods::file_object_ptr resolve_resource_hierarchy(
         const std::string& _oper,
         rsComm_t&          _comm,
         dataObjInp_t&      _data_obj_inp,
         dataObjInfo_t**    _data_obj_info = nullptr);
 
-    irods::resolve_hierarchy_result_type resolve_resource_hierarchy(
+    irods::file_object_ptr resolve_resource_hierarchy(
         rsComm_t&               _comm,
         const std::string&      _oper_in,
         dataObjInp_t&           _data_obj_inp,

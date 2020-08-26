@@ -94,8 +94,7 @@ namespace {
         rsComm_t& rsComm,
         dataObjInp_t& dataObjInp) {
         if (!getValByKey(&dataObjInp.condInput, RESC_HIER_STR_KW)) {
-            auto result = irods::resolve_resource_hierarchy(irods::UNLINK_OPERATION, rsComm, dataObjInp);
-            auto file_obj = std::get<irods::file_object_ptr>(result);
+            auto file_obj = irods::resolve_resource_hierarchy(irods::UNLINK_OPERATION, rsComm, dataObjInp);
             return file_obj->replicas();
         }
         else {

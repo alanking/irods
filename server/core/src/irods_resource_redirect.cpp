@@ -174,7 +174,7 @@ namespace {
         return SUCCESS();
     } // request_vote_for_file_object
 
-    std::string resolve_hier_for_open_or_write(
+    irods::file_object_ptr resolve_hier_for_open_or_write(
         rsComm_t&              _comm,
         irods::file_object_ptr _file_obj,
         const std::string&     _key_word,
@@ -229,6 +229,7 @@ namespace {
 
                 kw_match_found = true;
                 _file_obj->resc_hier(hier.str());
+                _file_obj->winner({hier.str(), vote});
             }
         }
 
@@ -236,15 +237,18 @@ namespace {
         if (diff <= irv::vote::zero) {
             THROW(HIERARCHY_ERROR, "no valid resource found for data object");
         }
-        if (kw_match_found) {
-            return _file_obj->resc_hier();
+
+        // set the max vote as the winner if a keyword was not being considered
+        if (!kw_match_found) {
+            _file_obj->resc_hier(max_hier);
+            _file_obj->winner({max_hier, max_vote});
         }
-        _file_obj->resc_hier(max_hier);
-        return max_hier;
+
+        return _file_obj;
     } // resolve_hier_for_open_or_write
 
     // function to handle resolving the hier given the fco and resource keyword
-    std::string resolve_hier_for_create(
+    irods::file_object_ptr resolve_hier_for_create(
         rsComm_t&              _comm,
         irods::file_object_ptr _file_obj,
         const std::string&     _key_word)
@@ -266,13 +270,14 @@ namespace {
             THROW(ret.code(), ret.result());
         }
 
-        return resc_mgr.get_hier_to_root_for_resc(hier).str();
+        _file_obj->winner({resc_mgr.get_hier_to_root_for_resc(hier).str(), vote});
+        return _file_obj;
     } // resolve_hier_for_create
 
 } // anonymous namespace
 
 namespace irods {
-    irods::resolve_hierarchy_result_type resolve_resource_hierarchy(
+    irods::file_object_ptr resolve_resource_hierarchy(
         const std::string&   _oper,
         rsComm_t&            _comm,
         dataObjInp_t&        _data_obj_inp,
@@ -286,7 +291,7 @@ namespace irods {
         return resolve_resource_hierarchy(_comm, _oper, _data_obj_inp, file_obj, fac_err);
     } // resolve_resource_hierarchy
 
-    irods::resolve_hierarchy_result_type resolve_resource_hierarchy(
+    irods::file_object_ptr resolve_resource_hierarchy(
         rsComm_t&               _comm,
         const std::string&      _oper_in,
         dataObjInp_t&           _data_obj_inp,
@@ -302,7 +307,8 @@ namespace irods {
         if (collStat(&_comm, &_data_obj_inp, &rodsObjStatOut) >= 0 && rodsObjStatOut->specColl) {
             std::string hier = rodsObjStatOut->specColl->rescHier;
             freeRodsObjStat( rodsObjStatOut );
-            return {{}, hier};
+            _file_obj->winner({hier, 1.0f});
+            return _file_obj;
         }
         freeRodsObjStat(rodsObjStatOut);
 
@@ -338,8 +344,7 @@ namespace irods {
                 oper = irods::WRITE_OPERATION;
             }
             else {
-                const auto hier = resolve_hier_for_create( _comm, _file_obj, create_resc_name);
-                return {_file_obj, hier};
+                return resolve_hier_for_create( _comm, _file_obj, create_resc_name);
             }
         }
 
@@ -362,8 +367,7 @@ namespace irods {
             }
 
             // attempt to resolve for an open
-            const auto hier = resolve_hier_for_open_or_write(_comm, _file_obj, key_word, oper);
-            return {_file_obj, hier};
+            return resolve_hier_for_open_or_write(_comm, _file_obj, key_word, oper);
         }
         // should not get here
         THROW(SYS_NOT_SUPPORTED, (boost::format("operation not supported [%s]") % oper).str());
@@ -387,8 +391,8 @@ namespace irods {
         // resolve the resource hierarchy for this given operation and dataObjInp
         std::string resc_hier{};
         try {
-            auto result = resolve_resource_hierarchy( _oper, *_comm, *_data_obj_inp, _data_obj_info);
-            resc_hier = std::get<std::string>(result);
+            auto file_obj = resolve_resource_hierarchy( _oper, *_comm, *_data_obj_inp, _data_obj_info);
+            resc_hier = std::get<std::string>(file_obj->winner());
         }
         catch (const irods::exception& e) {
             std::stringstream msg;

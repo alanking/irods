@@ -131,7 +131,8 @@ int open_destination_data_obj(
     std::string hier{};
     const char* h{getValByKey(&inp.condInput, RESC_HIER_STR_KW)};
     if (!h) {
-        std::tie(file_obj, hier) = irods::resolve_resource_hierarchy(irods::CREATE_OPERATION, rsComm, inp);
+        auto file_obj = irods::resolve_resource_hierarchy(irods::CREATE_OPERATION, rsComm, inp);
+        const auto& hier = std::get<std::string>(file_obj->winner());
         addKeyVal(&inp.condInput, RESC_HIER_STR_KW, hier.c_str());
     }
     else {

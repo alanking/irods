@@ -82,8 +82,8 @@ rsPhyBundleColl( rsComm_t*                 rsComm,
     char* hier_kw = getValByKey( &phyBundleCollInp->condInput, RESC_HIER_STR_KW );
     if ( hier_kw == NULL ) {
         try {
-            auto result = irods::resolve_resource_hierarchy(irods::CREATE_OPERATION, *rsComm, data_inp);
-            hier = std::get<std::string>(result);
+            auto file_obj = irods::resolve_resource_hierarchy(irods::CREATE_OPERATION, *rsComm, data_inp);
+            hier = std::get<std::string>(file_obj->winner());
         }   
         catch (const irods::exception& e ) { 
             irods::log(e);
@@ -660,9 +660,8 @@ replDataObjForBundle(
     }
 
     try {
-        auto result = irods::resolve_resource_hierarchy(irods::OPEN_OPERATION, *rsComm, dataObjInp);
-        auto out_hier = std::get<std::string>(result);
-        auto file_obj = std::get<irods::file_object_ptr>(result);
+        auto file_obj = irods::resolve_resource_hierarchy(irods::OPEN_OPERATION, *rsComm, dataObjInp);
+        auto out_hier = std::get<std::string>(file_obj->winner());
         for (const auto& r : file_obj->replicas()) {
             if (out_hier == r.resc_hier()) {
                 _obj = std::move(r);

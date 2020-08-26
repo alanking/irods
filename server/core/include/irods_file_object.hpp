@@ -17,6 +17,7 @@
 #include <tuple>
 
 namespace irods {
+    using vote_type = std::tuple<std::string, float>;
 
     class file_object : public data_object {
         public:
@@ -102,6 +103,9 @@ namespace irods {
             virtual long                           coll_id()         const {
                 return coll_id_;
             }
+            const vote_type&                       winner()          const {
+                return winner_;
+            }
 
             // =-=-=-=-=-=-=-
             // Mutators
@@ -135,6 +139,9 @@ namespace irods {
             virtual void coll_id(const long _coll_id) {
                 coll_id_ = _coll_id;
             }
+            void winner(const vote_type& _w) {
+                winner_ = _w;
+            }
 
         protected:
             // =-=-=-=-=-=-=-
@@ -157,6 +164,9 @@ namespace irods {
             long                           coll_id_;
             // by factory fcn from
             // dataObjInfoHead
+            long                           data_id_;
+            long                           coll_id_;
+            vote_type                      winner_; // winner of the vote
 
     }; // class file_object
 

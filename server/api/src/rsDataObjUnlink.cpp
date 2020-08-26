@@ -289,8 +289,8 @@ int rsDataObjUnlink(
     // determine the resource hierarchy if one is not provided
     if (!getValByKey(&dataObjUnlinkInp->condInput, RESC_HIER_STR_KW)) {
         try {
-            auto result = irods::resolve_resource_hierarchy(irods::UNLINK_OPERATION, *rsComm, *dataObjUnlinkInp);
-            const auto hier = std::get<std::string>(result);
+            auto file_obj = irods::resolve_resource_hierarchy(irods::UNLINK_OPERATION, *rsComm, *dataObjUnlinkInp);
+            const auto& hier = std::get<std::string>(file_obj->winner());
             addKeyVal(&dataObjUnlinkInp->condInput, RESC_HIER_STR_KW, hier.c_str());
         }
         catch (const irods::exception& e) {

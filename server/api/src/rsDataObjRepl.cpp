@@ -82,7 +82,8 @@ repl_input_tuple construct_input_tuple(
         return {_inp, obj};
     }
 
-    auto [obj, hier] = irods::resolve_resource_hierarchy(_operation, _comm, _inp);
+    auto obj = irods::resolve_resource_hierarchy(_operation, _comm, _inp);
+    const std::string& hier = std::get<std::string>(obj->winner());
     addKeyVal(&_inp.condInput, RESC_HIER_STR_KW, hier.c_str());
     return {_inp, obj};
 } // construct_input_tuple
