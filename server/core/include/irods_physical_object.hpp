@@ -5,6 +5,7 @@
 // stl includes
 #include <string>
 #include "rodsType.h"
+#include "json.hpp"
 namespace irods {
 
     class physical_object {
@@ -167,6 +168,8 @@ namespace irods {
             {
                 vote_ = vote;
             } // vote
+
+            nlohmann::json to_json();
 
         private:
             int         replica_status_;

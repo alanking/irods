@@ -16,6 +16,8 @@
 #include <vector>
 #include <tuple>
 
+#include "json.hpp"
+
 namespace irods {
     using vote_type = std::tuple<std::string, float>;
 
@@ -106,6 +108,8 @@ namespace irods {
             const vote_type&                       winner()          const {
                 return winner_;
             }
+
+            auto to_json() -> nlohmann::json;
 
             // =-=-=-=-=-=-=-
             // Mutators

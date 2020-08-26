@@ -355,7 +355,6 @@ namespace irods {
                 std::stringstream msg;
                 msg << __FUNCTION__;
                 msg << " :: failed in file_object_factory";
-                irods::log(LOG_ERROR, msg.str());
                 THROW(_fac_err.code(), msg.str());
             }
 

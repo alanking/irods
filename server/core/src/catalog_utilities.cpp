@@ -12,10 +12,10 @@ namespace irods::experimental::catalog {
 
     auto bind_string_to_statement(bind_parameters& _bp) -> void
     {
-        const auto& v = _bp.json_input.at(_bp.column_name.data()).get<std::string>();
+        const std::string& v = _bp.json_input.at(_bp.column_name.data()).get<std::string>();
         _bp.bind_values.push_back(v);
 
-        const auto& value = std::get<std::string>(_bp.bind_values.back());
+        const std::string& value = std::get<std::string>(_bp.bind_values.back());
         log::database::trace("[{}:{}] - binding [{}] to [{}] at [{}]", __FUNCTION__, __LINE__, _bp.column_name, value, _bp.index);
 
         _bp.statement.bind(_bp.index, value.c_str());
@@ -23,10 +23,10 @@ namespace irods::experimental::catalog {
 
     auto bind_bigint_to_statement(bind_parameters& _bp) -> void
     {
-        const auto v = std::stoul(_bp.json_input.at(_bp.column_name.data()).get<std::string>());
+        const std::uint64_t v = std::stoul(_bp.json_input.at(_bp.column_name.data()).get<std::string>());
         _bp.bind_values.push_back(v);
 
-        const auto value = std::get<std::uint64_t>(_bp.bind_values.back());
+        const std::uint64_t& value = std::get<std::uint64_t>(_bp.bind_values.back());
         log::database::trace("[{}:{}] - binding [{}] to [{}] at [{}]", __FUNCTION__, __LINE__, _bp.column_name, value, _bp.index);
 
         _bp.statement.bind(_bp.index, &value);
@@ -34,10 +34,10 @@ namespace irods::experimental::catalog {
 
     auto bind_integer_to_statement(bind_parameters& _bp) -> void
     {
-        const auto v = std::stoi(_bp.json_input.at(_bp.column_name.data()).get<std::string>());
+        const int v = std::stoi(_bp.json_input.at(_bp.column_name.data()).get<std::string>());
         _bp.bind_values.push_back(v);
 
-        const auto value = std::get<int>(_bp.bind_values.back());
+        const int& value = std::get<int>(_bp.bind_values.back());
         log::database::trace("[{}:{}] - binding [{}] to [{}] at [{}]", __FUNCTION__, __LINE__, _bp.column_name, value, _bp.index);
 
         _bp.statement.bind(_bp.index, &value);

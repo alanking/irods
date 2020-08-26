@@ -903,6 +903,7 @@ int rsDataObjClose(
     try {
         const int l1descInx = dataObjCloseInp->l1descInx;
 
+        // TODO: is this being closed?
         close_physical_file(rsComm, l1descInx);
 
         ec = finalize_replica(rsComm, l1descInx, *dataObjCloseInp);

@@ -114,7 +114,9 @@ typedef int repl_status_t;
 enum {
     STALE_REPLICA,
     GOOD_REPLICA,
-    INTERMEDIATE_REPLICA
+    INTERMEDIATE_REPLICA,
+    READ_LOCK,
+    WRITE_LOCK
 };
 
 /* keyValPair_t - str key, str value pair */

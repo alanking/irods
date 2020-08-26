@@ -3,6 +3,7 @@
 #include "irods_resource_manager.hpp"
 #include "irods_hierarchy_parser.hpp"
 #include "irods_log.hpp"
+#include "irods_logger.hpp"
 #include "irods_stacktrace.hpp"
 #include "irods_hierarchy_parser.hpp"
 #include "irods_resource_backport.hpp"
@@ -16,6 +17,8 @@
 // =-=-=-=-=-=-=-
 // boost includes
 #include <boost/asio/ip/host_name.hpp>
+
+#include "json.hpp"
 
 namespace irods {
 // =-=-=-=-=-=-=-
@@ -409,5 +412,20 @@ namespace irods {
 
         return obj;
     } // make_file_object
+
+    auto irods::file_object::to_json() -> nlohmann::json
+    {
+        using log = irods::experimental::log;
+
+        nlohmann::json out;
+
+        for (auto&& r : replicas()) {
+            out["replicas"].push_back(r.to_json());
+            log::server::debug("[{}:{}] - pushing back [{}]",
+                __FUNCTION__, __LINE__, out["replicas"].back().dump());
+        }
+
+        return out;
+    } // to_json
 
 } // namespace irods

@@ -26,7 +26,9 @@ auto rs_finalize_data_object(
 
     const auto ec = irods::server_api_call(FINALIZE_DATA_OBJECT_APN, _comm, &input, &output);
 
-    *_json_output = static_cast<char*>(output->buf);
+    if (output) {
+        *_json_output = static_cast<char*>(output->buf);
+    }
 
     return ec;
 } // rs_finalize_data_object

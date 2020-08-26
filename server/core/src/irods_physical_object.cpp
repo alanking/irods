@@ -1,6 +1,9 @@
 // =-=-=-=-=-=-=-
 #include "irods_physical_object.hpp"
 
+#define IRODS_FILESYSTEM_ENABLE_SERVER_SIDE_API
+#include "filesystem.hpp"
+
 
 namespace irods {
 
@@ -83,6 +86,33 @@ namespace irods {
         return *this;
 
     } // operator=
+
+    auto irods::physical_object::to_json() -> nlohmann::json
+    {
+        namespace fs = irods::experimental::filesystem;
+        return nlohmann::json{
+            {"data_id", std::to_string(id())},
+            {"coll_id", std::to_string(coll_id())},
+            {"data_name", fs::path{name()}.object_name()},
+            {"data_repl_num", std::to_string(repl_num())},
+            {"data_version", version()},
+            {"data_type_name", type_name()},
+            {"data_size", std::to_string(size())},
+            {"data_path", path()},
+            {"data_owner_name", owner_name()},
+            {"data_owner_zone", owner_zone()},
+            {"data_is_dirty", std::to_string(replica_status())},
+            {"data_status", status()},
+            {"data_checksum", checksum()},
+            {"data_expiry_ts", expiry_ts()},
+            {"data_map_id", std::to_string(map_id())},
+            {"data_mode", mode()},
+            {"r_comment", r_comment()},
+            {"create_ts", create_ts()},
+            {"modify_ts", modify_ts()},
+            {"resc_id", std::to_string(resc_id())}
+        };
+    } // to_json
 
 
 }; // namespace irods

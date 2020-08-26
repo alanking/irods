@@ -54,6 +54,7 @@
 #include "rsGetRescQuota.hpp"
 #include "rsUnregDataObj.hpp"
 #include "rsModDataObjMeta.hpp"
+#include "rs_finalize_data_object.hpp"
 
 // =-=-=-=-=-=-=-
 #include "irods_resource_backport.hpp"
@@ -707,6 +708,54 @@ int close_replica(rsComm_t& conn, int l1desc_index)
     return rsDataObjClose(&conn, &input);
 }
 
+void lock_data_object(
+    rsComm_t& _comm,
+    const dataObjInp_t& _inp,
+    irods::file_object_ptr _obj,
+    const repl_status_t _lock_type)
+{
+
+    // construct json object
+    json input;
+
+    // add data_id
+    input["data_id"] = std::to_string(_obj->data_id());
+
+    for (auto&& r : _obj->replicas()) {
+        // loop over replicas and add information to "before"
+        json before = r.to_json();
+
+        // take a modified form of the replica
+        irods::physical_object modified_r = r;
+        modified_r.r_comment(fmt::format("lol [{}]", r.repl_num()));
+
+        // add modified information to "after"
+        json after = modified_r.to_json();
+
+        log::api::info("[{}:{}] - before:[{}],after:[{}]",
+            __FUNCTION__, __LINE__, before.dump(), after.dump());
+
+        // push back the "before" and "after" on the replicas json::array
+        input["replicas"].push_back(
+        {
+            {"before", before},
+            {"after", after}
+        });
+    }
+
+    log::api::info("[{}:{}] - json input:[{}]", __FUNCTION__, __LINE__, input.dump());
+
+    // call rs_finalize_data_object
+    char* output{};
+    if (const auto ec = rs_finalize_data_object(&_comm, input.dump().c_str(), &output); ec) {
+        log::api::error("[{}] - updating data object failed with [{}]", __FUNCTION__, ec);
+        THROW(ec, "error locking data object");
+    }
+
+    // TODO: need to pass back the "before" information to the caller
+
+} // lock_data_object
+
 } // anonymous namespace
 
 int rsDataObjOpen(
@@ -829,6 +878,7 @@ int rsDataObjOpen(
 
         // Determine if this is a replica creation and do so
         const int writeFlag = getWriteFlag(dataObjInp->openFlags);
+
         if (dataObjInp->openFlags & O_CREAT && writeFlag > 0) {
             const auto hier_has_replica{
                 [&kvp, &replicas = file_obj->replicas()]()
@@ -890,6 +940,8 @@ int rsDataObjOpen(
             kvp[DEST_RESC_NAME_KW] = irods::hierarchy_parser{hier.data()}.first_resc();
             kvp[OPEN_TYPE_KW] = std::to_string(OPEN_FOR_WRITE_TYPE);
         }
+
+        lock_data_object(*rsComm, *dataObjInp, file_obj, writeFlag ? WRITE_LOCK : READ_LOCK);
 
         // sort replica list based on some set of criteria
         int status = sortObjInfoForOpen(&dataObjInfoHead, kvp.get(), writeFlag);
