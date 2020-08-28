@@ -1899,6 +1899,10 @@ irods::error compound_file_resolve_hierarchy(
     }
 
     // =-=-=-=-=-=-=-
+    // add ourselves to the hierarchy parser by default
+    _out_parser.add_child( resc_name );
+
+    // =-=-=-=-=-=-=-
     // test the operation to determine which choices to make
     if (irods::OPEN_OPERATION == _opr || irods::WRITE_OPERATION == _opr) {
         _ctx.prop_map().set< std::string >( OPERATION_TYPE, _opr );

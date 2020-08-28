@@ -751,6 +751,8 @@ irods::error passthru_file_resolve_hierarchy(
         result = PASSMSG( "passthru_file_resolve_hierarchy - invalid resource context.", ret );
     }
 
+    _out_parser.add_child(irods::get_resource_name(_ctx));
+
     irods::resource_ptr resc;
     ret = passthru_get_first_child_resc( _ctx.prop_map(), resc );
     if ( !ret.ok() ) {

@@ -720,7 +720,7 @@ irods::error univ_mss_file_resolve_hierarchy(
         return PASSMSG("Invalid resource context.", ret);
     }
 
-    _out_parser.set_string(irods::get_resource_name(_ctx));
+    _out_parser.add_child(irods::get_resource_name(_ctx));
     _out_vote = irv::vote::zero;
     try {
         _out_vote = irv::calculate(_opr, _ctx, _curr_host, _out_parser);

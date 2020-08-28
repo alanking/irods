@@ -789,6 +789,10 @@ irods::error deferred_file_resolve_hierarchy(
     }
 
     // =-=-=-=-=-=-=-
+    // add ourselves into the hierarchy before calling child resources
+    _out_parser.add_child( name );
+
+    // =-=-=-=-=-=-=-
     // test the operation to determine which choices to make
     if (irods::OPEN_OPERATION   == _opr ||
         irods::WRITE_OPERATION  == _opr ||
