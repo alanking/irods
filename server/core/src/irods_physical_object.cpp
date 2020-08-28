@@ -4,6 +4,9 @@
 #define IRODS_FILESYSTEM_ENABLE_SERVER_SIDE_API
 #include "filesystem.hpp"
 
+namespace {
+    namespace fs = irods::experimental::filesystem;
+} // anonymous namesapce
 
 namespace irods {
 
@@ -48,6 +51,33 @@ namespace irods {
     {
     } // cctor
 
+    physical_object::physical_object(const dataObjInfo_t& _rhs)
+        : replica_status_{_rhs.replStatus}
+        , repl_num_{_rhs.replNum}
+        , map_id_{_rhs.dataMapId}
+        , size_{_rhs.dataSize}
+        , id_{_rhs.dataId}
+        , coll_id_{_rhs.collId}
+        , name_{fs::path{_rhs.objPath}.object_name()}
+        , version_{_rhs.version}
+        , type_name_{_rhs.dataType}
+        , resc_name_{_rhs.rescName}
+        , path_{_rhs.filePath}
+        , owner_name_{_rhs.dataOwnerName}
+        , owner_zone_{_rhs.dataOwnerZone}
+        , status_{_rhs.statusString}
+        , checksum_{_rhs.chksum}
+        , expiry_ts_{_rhs.dataExpiry}
+        , mode_{_rhs.dataMode}
+        , r_comment_{_rhs.dataComments}
+        , create_ts_{_rhs.dataCreate}
+        , modify_ts_{_rhs.dataModify}
+        , resc_hier_{_rhs.rescHier}
+        , resc_id_{_rhs.rescId}
+        , vote_{}
+    {
+    }
+
 // =-=-=-=-=-=-=-
 // public - destructor
     physical_object::~physical_object() {
@@ -89,7 +119,6 @@ namespace irods {
 
     auto irods::physical_object::to_json() -> nlohmann::json
     {
-        namespace fs = irods::experimental::filesystem;
         return nlohmann::json{
             {"data_id", std::to_string(id())},
             {"coll_id", std::to_string(coll_id())},

@@ -54,7 +54,6 @@
 #include "rsGetRescQuota.hpp"
 #include "rsUnregDataObj.hpp"
 #include "rsModDataObjMeta.hpp"
-#include "rs_finalize_data_object.hpp"
 
 // =-=-=-=-=-=-=-
 #include "irods_resource_backport.hpp"
@@ -66,6 +65,7 @@
 #include "irods_server_api_call.hpp"
 #include "irods_at_scope_exit.hpp"
 #include "key_value_proxy.hpp"
+#include "logical_locking.hpp"
 #include "replica_access_table.hpp"
 #include "replica_proxy.hpp"
 
@@ -157,7 +157,7 @@ void enable_creation_of_additional_replicas(rsComm_t& _comm)
 
 auto register_intermediate_replica_for_new_data_object(
     rsComm_t& _comm,
-    const int _dest_l1_desc_inx) -> int
+    const int _dest_l1_desc_inx) -> std::tuple<int, dataObjInfo_t*>
 {
     auto dest_replica = ix::make_replica_proxy(*L1desc[_dest_l1_desc_inx].dataObjInfo);
 
@@ -167,7 +167,7 @@ auto register_intermediate_replica_for_new_data_object(
 
     log::server::debug("[{}:{}]: registering new data object [{}]", __FUNCTION__, __LINE__, dest_replica.logical_path());
 
-    return rsRegDataObj(&_comm, dest_replica.get(), &out);
+    return {rsRegDataObj(&_comm, dest_replica.get(), &out), out};
 } // register_intermediate_replica_for_new_data_object
 
 auto register_intermediate_replica_for_existing_data_object(
@@ -389,6 +389,10 @@ auto create_new_replica(
     dataObjInfo_t* dataObjInfo = (dataObjInfo_t*)malloc(sizeof(dataObjInfo_t));
     initDataObjInfoWithInp(dataObjInfo, &_inp);
 
+    // populate missing pieces...
+    rstrcpy(dataObjInfo->dataOwnerName, _comm.clientUser.userName, NAME_LEN);
+    rstrcpy(dataObjInfo->dataOwnerZone, _comm.clientUser.rodsZone, NAME_LEN);
+
     if (cond_input.contains(RESC_HIER_STR_KW)) {
         // we need to favor the results from the PEP acSetRescSchemeForCreate
         const char* resc_hier = cond_input.at(RESC_HIER_STR_KW).value().data();
@@ -403,6 +407,8 @@ auto create_new_replica(
         return ret.code();
     }
 
+    cond_input[COLL_ID_KW] = std::to_string(_obj->coll_id());
+
     dataObjInfo->replStatus = INTERMEDIATE_REPLICA;
     fillL1desc(l1descInx, &_inp, dataObjInfo, dataObjInfo->replStatus, _inp.dataSize);
 
@@ -414,11 +420,16 @@ auto create_new_replica(
 
     // register replica in the intermediate state
     if (_obj->replicas().empty()) {
-        status = register_intermediate_replica_for_new_data_object(_comm, l1descInx);
-        if (status < 0) {
+        auto [ec, out_info] = register_intermediate_replica_for_new_data_object(_comm, l1descInx);
+        if (ec < 0) {
             freeL1desc(l1descInx);
-            return status;
+            return ec;
         }
+        if (!out_info) {
+            freeL1desc(l1descInx);
+            return SYS_INTERNAL_NULL_INPUT_ERR;
+        }
+        L1desc[l1descInx].dataObjInfo->collId = out_info->collId;
     }
     else {
         status = register_intermediate_replica_for_existing_data_object(_comm, l1descInx, cond_input);
@@ -708,54 +719,6 @@ int close_replica(rsComm_t& conn, int l1desc_index)
     return rsDataObjClose(&conn, &input);
 }
 
-void lock_data_object(
-    rsComm_t& _comm,
-    const dataObjInp_t& _inp,
-    irods::file_object_ptr _obj,
-    const repl_status_t _lock_type)
-{
-
-    // construct json object
-    json input;
-
-    // add data_id
-    input["data_id"] = std::to_string(_obj->data_id());
-
-    for (auto&& r : _obj->replicas()) {
-        // loop over replicas and add information to "before"
-        json before = r.to_json();
-
-        // take a modified form of the replica
-        irods::physical_object modified_r = r;
-        modified_r.r_comment(fmt::format("lol [{}]", r.repl_num()));
-
-        // add modified information to "after"
-        json after = modified_r.to_json();
-
-        log::api::info("[{}:{}] - before:[{}],after:[{}]",
-            __FUNCTION__, __LINE__, before.dump(), after.dump());
-
-        // push back the "before" and "after" on the replicas json::array
-        input["replicas"].push_back(
-        {
-            {"before", before},
-            {"after", after}
-        });
-    }
-
-    log::api::info("[{}:{}] - json input:[{}]", __FUNCTION__, __LINE__, input.dump());
-
-    // call rs_finalize_data_object
-    char* output{};
-    if (const auto ec = rs_finalize_data_object(&_comm, input.dump().c_str(), &output); ec) {
-        log::api::error("[{}] - updating data object failed with [{}]", __FUNCTION__, ec);
-        THROW(ec, "error locking data object");
-    }
-
-    // TODO: need to pass back the "before" information to the caller
-
-} // lock_data_object
-
 } // anonymous namespace
 
 int rsDataObjOpen(
@@ -931,6 +894,8 @@ int rsDataObjOpen(
                     return e.code();
                 }
 
+                log::api::info("[{}:{}] - collId:[{}]", __FUNCTION__, __LINE__, L1desc[l1descInx].dataObjInfo->collId);
+
                 return l1descInx;
             }
 
@@ -941,7 +906,7 @@ int rsDataObjOpen(
             kvp[OPEN_TYPE_KW] = std::to_string(OPEN_FOR_WRITE_TYPE);
         }
 
-        lock_data_object(*rsComm, *dataObjInp, file_obj, writeFlag ? WRITE_LOCK : READ_LOCK);
+        irods::experimental::lock_data_object(*rsComm, file_obj, writeFlag ? WRITE_LOCK : READ_LOCK);
 
         // sort replica list based on some set of criteria
         int status = sortObjInfoForOpen(&dataObjInfoHead, kvp.get(), writeFlag);
@@ -1083,8 +1048,7 @@ int rsDataObjOpen(
         return l1descInx;
     }
     catch (const irods::exception& e) {
-        rodsLog(LOG_ERROR, "[%s] - resolve_resource_hierarchy failed with [%d] when opening [%s]",
-                __FUNCTION__, e.code(), dataObjInp->objPath);
+        log::api::error(e.what());
         return e.code();
     }
 } // rsDataObjOpen

@@ -48,10 +48,13 @@
 #include "irods_server_properties.hpp"
 #include "irods_at_scope_exit.hpp"
 #include "key_value_proxy.hpp"
+#include "logical_locking.hpp"
 #include "replica_access_table.hpp"
 
 #include <memory>
 #include <functional>
+
+#include <boost/shared_ptr.hpp>
 
 #include <sys/types.h>
 #include <unistd.h>
@@ -190,6 +193,7 @@ int _modDataObjSize(
     char* repl_status = getValByKey(&L1desc[_l1descInx].dataObjInp->condInput, REPL_STATUS_KW);
     if (repl_status) {
         addKeyVal(&regParam, REPL_STATUS_KW, repl_status);
+        L1desc[_l1descInx].dataObjInfo->replStatus = std::stoi(repl_status);
     }
 
     if (getValByKey(&L1desc[_l1descInx].dataObjInp->condInput, STALE_ALL_INTERMEDIATE_REPLICAS_KW)) {
@@ -437,8 +441,10 @@ int finalize_destination_replica_for_replication(
                 __FUNCTION__, srcL1descInx));
     }
 
+
     dataObjInfo_t* srcDataObjInfo = L1desc[srcL1descInx].dataObjInfo;
     dataObjInfo_t *destDataObjInfo = L1desc[l1descInx].dataObjInfo;
+    L1desc[l1descInx].dataObjInfo->replStatus = srcDataObjInfo->replStatus;
     regParam[REPL_STATUS_KW] = std::to_string(srcDataObjInfo->replStatus);
     regParam[DATA_SIZE_KW] = std::to_string(srcDataObjInfo->dataSize);
     regParam[DATA_MODIFY_KW] = std::to_string((int)time(nullptr));
@@ -518,7 +524,8 @@ int finalize_destination_data_object_for_put_or_copy(
         regParam[DATA_MODIFY_KW] = std::to_string((int)time(nullptr));
     }
     else {
-        regParam[REPL_STATUS_KW] = std::to_string(GOOD_REPLICA);
+        L1desc[l1descInx].dataObjInfo->replStatus = GOOD_REPLICA;
+        regParam[REPL_STATUS_KW] = std::to_string(L1desc[l1descInx].dataObjInfo->replStatus);
     }
 
     modDataObjMeta_t modDataObjMetaInp{};
@@ -576,9 +583,12 @@ int finalize_replica_after_failed_operation(
         return vault_size;
     }
 
+
     //if ( L1desc[l1descInx].dataObjInfo->dataSize != vault_size ) {
+        L1desc[l1descInx].dataObjInfo->replStatus = STALE_REPLICA;
+
         auto p = ix::make_key_value_proxy(l1desc.dataObjInp->condInput);
-        p[REPL_STATUS_KW] = std::to_string(STALE_REPLICA);
+        p[REPL_STATUS_KW] = std::to_string(L1desc[l1descInx].dataObjInfo->replStatus);
         p[STALE_ALL_INTERMEDIATE_REPLICAS_KW] = "";
         l1desc.dataObjInfo->dataSize = vault_size;
         const int status = _modDataObjSize( rsComm, l1descInx, l1desc.dataObjInfo );
@@ -911,6 +921,10 @@ int rsDataObjClose(
         if (l1desc.lockFd > 0) {
             unlock_file_descriptor(rsComm, l1descInx);
         }
+
+        // TODO: Need to extract original replica states, somehow, and restore them here
+        boost::shared_ptr<irods::file_object> obj(new irods::file_object(rsComm, L1desc[l1descInx].dataObjInfo));
+        irods::experimental::sync_replica_states_with_catalog(*rsComm, obj);
 
         if (ec < 0 || l1desc.oprStatus < 0) {
             freeL1desc(l1descInx);

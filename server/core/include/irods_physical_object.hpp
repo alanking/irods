@@ -4,6 +4,7 @@
 // =-=-=-=-=-=-=-
 // stl includes
 #include <string>
+#include "objInfo.h"
 #include "rodsType.h"
 #include "json.hpp"
 namespace irods {
@@ -14,6 +15,7 @@ namespace irods {
             // constructors
             physical_object();
             physical_object( const physical_object& );
+            physical_object(const dataObjInfo_t& _info);
 
             // =-=-=-=-=-=-=-
             // destructor

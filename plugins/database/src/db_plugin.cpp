@@ -2653,6 +2653,7 @@ irods::error db_reg_data_obj_op(
         return ERROR( iVal, "" );
     }
     snprintf( collIdNum, MAX_NAME_LEN, "%lld", iVal );
+    _data_obj_info->collId = iVal; /* store as output parameter */
 
     /* Make sure no collection already exists by this name */
     if ( logSQL != 0 ) {

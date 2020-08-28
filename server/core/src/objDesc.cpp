@@ -244,6 +244,9 @@ initDataObjInfoWithInp( dataObjInfo_t *dataObjInfo, dataObjInp_t *dataObjInp ) {
     if (kvp.contains(DATA_ID_KW)) {
         dataObjInfo->dataId = std::atoll(kvp.at(DATA_ID_KW).value().data());
     }
+    if (kvp.contains(COLL_ID_KW)) {
+        dataObjInfo->collId = std::atoll(kvp.at(COLL_ID_KW).value().data());
+    }
 
     if (kvp.contains(RESC_NAME_KW)) {
         const auto resc_name = kvp.at(RESC_NAME_KW).value();

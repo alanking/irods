@@ -70,10 +70,12 @@ repl_input_tuple construct_input_tuple(
     rsComm_t& _comm,
     dataObjInp_t& _inp,
     const char* kw_hier,
-    const std::string& _operation) {
+    const std::string& _operation)
+{
+    log::api::info("[{}:{}] - input hier:[{}]", __FUNCTION__, __LINE__, kw_hier);
+    auto cond_input = ix::make_key_value_proxy(_inp.condInput);
     if (kw_hier) {
-        std::string hier = kw_hier;
-        addKeyVal( &_inp.condInput, RESC_HIER_STR_KW, hier.c_str() );
+        cond_input[RESC_HIER_STR_KW] = kw_hier;
         irods::file_object_ptr obj{new irods::file_object()};
         irods::error err = irods::file_object_factory(&_comm, &_inp, obj);
         if (!err.ok()) {
@@ -83,8 +85,7 @@ repl_input_tuple construct_input_tuple(
     }
 
     auto obj = irods::resolve_resource_hierarchy(_operation, _comm, _inp);
-    const std::string& hier = std::get<std::string>(obj->winner());
-    addKeyVal(&_inp.condInput, RESC_HIER_STR_KW, hier.c_str());
+    cond_input[RESC_HIER_STR_KW] = std::get<std::string>(obj->winner());
     return {_inp, obj};
 } // construct_input_tuple
 
