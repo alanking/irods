@@ -1322,6 +1322,22 @@ irods::error repl_file_sync_to_arch(
     return result;
 } // repl_file_sync_to_arch
 
+/// @brief Adds the current resource to the specified resource hierarchy
+irods::error add_self_to_hierarchy(
+    irods::plugin_context& _ctx,
+    irods::hierarchy_parser& _parser ) {
+    std::string name;
+    auto ret{_ctx.prop_map().get<std::string>(irods::RESOURCE_NAME, name)};
+    if (!ret.ok()) {
+        return PASS(ret);
+    }
+    ret = _parser.add_child(name);
+    if (!ret.ok()) {
+        return PASS(ret);
+    }
+    return SUCCESS();
+} // add_self_to_hierarchy
+
 /// @brief Loop through the children and call resolve hierarchy on each one to populate the hierarchy vector
 std::pair<redirect_map_t, irods::error> resolve_children(
     irods::plugin_context& ctx,
@@ -1329,12 +1345,6 @@ std::pair<redirect_map_t, irods::error> resolve_children(
     const std::string& local_hostname)
 {
     redirect_map_t map;
-    std::string name;
-    auto ret = ctx.prop_map().get<std::string>(irods::RESOURCE_NAME, name);
-    if (!ret.ok()) {
-        return {map, PASS(ret)};
-    }
-
     irods::resource_child_map* cmap_ref;
     ctx.prop_map().get<irods::resource_child_map*>(irods::RESC_CHILD_MAP_PROP, cmap_ref);
     if (cmap_ref->empty()) {
@@ -1344,7 +1354,7 @@ std::pair<redirect_map_t, irods::error> resolve_children(
     irods::error last_err = SUCCESS();
     float out_vote{};
     for (auto& entry : *cmap_ref) {
-        irods::hierarchy_parser parser{};
+        irods::hierarchy_parser parser{out_parser};
         const auto ret = entry.second.second->call<
             const std::string&, const std::string&, irods::hierarchy_parser&, float&>(
             ctx.comm(), irods::RESOURCE_OP_RESOLVE_RESC_HIER, ctx.fco(), operation, local_hostname, parser, out_vote);
@@ -1428,18 +1438,31 @@ irods::error repl_file_resolve_hierarchy(
     irods::hierarchy_parser& _inout_parser,
     float&                   _out_vote)
 {
-    // Resolve each one of our children and put into redirect_map
-    auto [redirect_map, last_err] = resolve_children(_ctx, _operation, _curr_host);
-    if (!last_err.ok()) {
-        log::resource::info(last_err.result());
+    // If child list property exists, use previously selected parser for the vote
+    irods::file_object_ptr file_obj = boost::dynamic_pointer_cast<irods::file_object >( ( _ctx.fco() ) );
+    const auto hier_str{getValByKey(&file_obj->cond_input(), RESC_HIER_STR_KW)};
+    if (hier_str) {
+        irods::hierarchy_parser selected_parser{};
+        selected_parser.set_string(hier_str);
+        _out_vote = 1.0;
+        _inout_parser = selected_parser;
+        return SUCCESS();
     }
 
+    // add ourselves to the hierarchy parser
+    auto ret = add_self_to_hierarchy(_ctx, *_inout_parser);
+    if (!ret.ok()) {
+        return PASS(ret);
+    }
+
+    // Resolve each one of our children and put into redirect_map
+    auto [redirect_map, last_err] = resolve_children(_ctx, *_operation, *_curr_host, *_inout_parser);
     if (redirect_map.empty()) {
         return last_err;
     }
 
     // Select a resolved hierarchy from redirect_map for the operation
-    auto ret = select_child(_ctx, _operation, redirect_map, _inout_parser, _out_vote);
+    ret = select_child(_ctx, _operation, redirect_map, _inout_parser, _out_vote);
     if (!ret.ok()) {
         return PASS(ret);
     }
