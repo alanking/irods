@@ -1325,7 +1325,8 @@ irods::error repl_file_sync_to_arch(
 /// @brief Adds the current resource to the specified resource hierarchy
 irods::error add_self_to_hierarchy(
     irods::plugin_context& _ctx,
-    irods::hierarchy_parser& _parser ) {
+    irods::hierarchy_parser& _parser)
+{
     std::string name;
     auto ret{_ctx.prop_map().get<std::string>(irods::RESOURCE_NAME, name)};
     if (!ret.ok()) {
@@ -1342,7 +1343,8 @@ irods::error add_self_to_hierarchy(
 std::pair<redirect_map_t, irods::error> resolve_children(
     irods::plugin_context& ctx,
     const std::string& operation,
-    const std::string& local_hostname)
+    const std::string& local_hostname,
+    const irods::hierarchy_parser& out_parser)
 {
     redirect_map_t map;
     irods::resource_child_map* cmap_ref;
@@ -1450,13 +1452,13 @@ irods::error repl_file_resolve_hierarchy(
     }
 
     // add ourselves to the hierarchy parser
-    auto ret = add_self_to_hierarchy(_ctx, *_inout_parser);
+    auto ret = add_self_to_hierarchy(_ctx, _inout_parser);
     if (!ret.ok()) {
         return PASS(ret);
     }
 
     // Resolve each one of our children and put into redirect_map
-    auto [redirect_map, last_err] = resolve_children(_ctx, *_operation, *_curr_host, *_inout_parser);
+    auto [redirect_map, last_err] = resolve_children(_ctx, _operation, _curr_host, _inout_parser);
     if (redirect_map.empty()) {
         return last_err;
     }
