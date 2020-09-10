@@ -164,8 +164,6 @@ namespace irods {
             // occurring from within a pdmo
             // call made from within the hierarchy
             std::vector< physical_object > replicas_;        // structures holding replica info initialized
-            long                           data_id_;
-            long                           coll_id_;
             // by factory fcn from
             // dataObjInfoHead
             long                           data_id_;
