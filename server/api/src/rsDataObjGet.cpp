@@ -31,7 +31,7 @@
 
 namespace {
 
-    using dop   = irods::experimental::data_object_proxy<dataObjInfo_t>;
+    using dop   = irods::experimental::data_object::data_object_proxy<dataObjInfo_t>;
     using log   = irods::experimental::log;
     using json  = nlohmann::json;
 
@@ -216,8 +216,8 @@ rsDataObjGet( rsComm_t *rsComm, dataObjInp_t *dataObjInp,
         }
     }
 
-    log::database::debug("[{}:{}] - JSON:[{}]",
-        __FUNCTION__, __LINE__, dop{*info}.to_json().dump());
+    //log::database::debug("[{}:{}] - JSON:[{}]",
+        //__FUNCTION__, __LINE__, dop{*info}.to_json().dump());
 
     return _rsDataObjGet(rsComm, dataObjInp, portalOprOut, dataObjOutBBuf);
 } // rsDataObjGet

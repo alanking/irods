@@ -1,39 +1,37 @@
-/*** Copyright (c), The Regents of the University of California            ***
- *** For more information please refer to files in the COPYRIGHT directory ***/
-/* This is script-generated code (for the most part).  */
-/* See dataObjCopy.h for a description of this API call.*/
-
-#include "dataObjCopy.h"
-#include "rodsLog.h"
-#include "objMetaOpr.hpp"
 #include "collection.hpp"
-#include "specColl.hpp"
-#include "dataObjOpen.h"
 #include "dataObjClose.h"
+#include "dataObjCopy.h"
 #include "dataObjCreate.h"
+#include "dataObjOpen.h"
 #include "dataObjRepl.h"
-#include "regDataObj.h"
-#include "rsGlobalExtern.hpp"
-#include "rcGlobalExtern.h"
 #include "getRemoteZoneResc.h"
-#include "rsDataObjCopy.hpp"
-#include "rsDataObjOpen.hpp"
-#include "rsDataObjCreate.hpp"
-#include "rsDataObjRepl.hpp"
-#include "rsRegDataObj.hpp"
-#include "rsDataObjClose.hpp"
-#include "server_utilities.hpp"
 #include "irods_logger.hpp"
+#include "objMetaOpr.hpp"
+#include "rcGlobalExtern.h"
+#include "regDataObj.h"
+#include "rodsLog.h"
+#include "rsDataObjClose.hpp"
+#include "rsDataObjCopy.hpp"
+#include "rsDataObjCreate.hpp"
+#include "rsDataObjOpen.hpp"
+#include "rsDataObjRepl.hpp"
+#include "rsGlobalExtern.hpp"
+#include "rsRegDataObj.hpp"
+#include "server_utilities.hpp"
+#include "specColl.hpp"
 
 #define IRODS_FILESYSTEM_ENABLE_SERVER_SIDE_API
 #include "filesystem.hpp"
 
-// =-=-=-=-=-=-=-
+#include "irods_logger.hpp"
 #include "irods_resource_redirect.hpp"
+#include "key_value_proxy.hpp"
 
 #include "boost/format.hpp"
 
 namespace {
+
+using log = irods::experimental::log;
 
 int connect_to_remote_zone(
     rsComm_t& rsComm,
@@ -86,7 +84,8 @@ int connect_to_remote_zone(
 
 int open_source_data_obj(
     rsComm_t& rsComm,
-    dataObjInp_t& inp) {
+    dataObjInp_t& inp)
+{
     inp.oprType = COPY_SRC;
     inp.openFlags = O_RDONLY;
     const int srcL1descInx = rsDataObjOpen(&rsComm, &inp);
@@ -122,28 +121,31 @@ void close_source_data_obj(
 
 int open_destination_data_obj(
     rsComm_t& rsComm,
-    dataObjInp_t& inp)
+    dataObjInp_t& inp,
+    const int source_l1_desc_inx)
 {
     inp.oprType = COPY_DEST;
     inp.openFlags = O_CREAT | O_RDWR;
 
+    auto kvp = irods::experimental::make_key_value_proxy(inp.condInput);
+
     irods::file_object_ptr file_obj(new irods::file_object());
-    std::string hier{};
-    const char* h{getValByKey(&inp.condInput, RESC_HIER_STR_KW)};
-    if (!h) {
-        auto file_obj = irods::resolve_resource_hierarchy(irods::CREATE_OPERATION, rsComm, inp);
-        const auto& hier = std::get<std::string>(file_obj->winner());
-        addKeyVal(&inp.condInput, RESC_HIER_STR_KW, hier.c_str());
-    }
-    else {
-        hier = h;
-        irods::file_object_ptr obj(new irods::file_object());
-        dataObjInfo_t* dataObjInfoHead{};
-        irods::error fac_err = irods::file_object_factory(&rsComm, &inp, obj, &dataObjInfoHead);
+    std::string hier;
+    if (kvp.contains(RESC_HIER_STR_KW)) {
+        hier = kvp.at(RESC_HIER_STR_KW).value().data();
+        log::api::info("hier provided:[{}]", hier);
+        irods::error fac_err = irods::file_object_factory(&rsComm, &inp, file_obj);
         if (!fac_err.ok()) {
             irods::log(fac_err);
         }
+    }
+    else {
+        auto obj = irods::resolve_resource_hierarchy(irods::CREATE_OPERATION, rsComm, inp);
         file_obj.swap(obj);
+        hier = std::get<std::string>(file_obj->winner());
+        kvp[RESC_HIER_STR_KW] = hier;
+
+        log::api::info("hier found:[{}]", hier);
     }
 
     const auto hier_has_replica{[&hier, &replicas = file_obj->replicas()]() {
@@ -156,6 +158,8 @@ int open_destination_data_obj(
     if (hier_has_replica && !getValByKey(&inp.condInput, FORCE_FLAG_KW)) {
         THROW(OVERWRITE_WITHOUT_FORCE_FLAG, "force flag required to overwrite data object for copy");
     }
+
+    //kvp[SOURCE_L1_DESC_KW] = std::to_string(source_l1_desc_inx);
 
     int destL1descInx = rsDataObjOpen(&rsComm, &inp);
     if ( destL1descInx == CAT_UNKNOWN_COLLECTION ) {
@@ -171,7 +175,7 @@ int open_destination_data_obj(
         char* sys_error = NULL;
         const char* rods_error = rodsErrorName( destL1descInx, &sys_error );
         const std::string error_msg = (boost::format(
-            "%s -  - Failed to create destination object: \"%s\" - %s %s") %
+            "%s - Failed to create destination object: \"%s\" - %s %s") %
             __FUNCTION__ % inp.objPath % rods_error % sys_error).str();
         free(sys_error);
         THROW(destL1descInx, error_msg);
@@ -274,7 +278,7 @@ int rsDataObjCopy(
         if (createMode >= 0100) {
             destDataObjInp->createMode = createMode;
         }
-        destL1descInx = open_destination_data_obj(*rsComm, *destDataObjInp);
+        destL1descInx = open_destination_data_obj(*rsComm, *destDataObjInp, srcL1descInx);
 
         L1desc[destL1descInx].srcL1descInx = srcL1descInx;
         L1desc[destL1descInx].dataSize = L1desc[srcL1descInx].dataObjInfo->dataSize;

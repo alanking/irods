@@ -76,7 +76,11 @@ namespace irods::experimental {
     {
         std::vector<repl_status_t> states;
 
-        std::fill(states.begin(), states.end(), _lock_type);
+        //states.reserve(_obj->replicas().size());
+        //std::fill(states.begin(), states.end(), _lock_type);
+        for (std::size_t i = 0; i < _obj->replicas().size(); ++i) {
+            states.push_back(_lock_type);
+        }
 
         return set_data_object_states(_comm, _obj, states);
     } // lock_data_object

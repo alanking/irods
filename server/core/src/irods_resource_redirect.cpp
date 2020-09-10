@@ -233,6 +233,8 @@ namespace {
                 //_file_obj->resc_hier(hier.str());
                 //_file_obj->winner({hier.str(), vote});
                 _file_obj->resc_hier(voted_hier);
+                log::server::info("[{}:{}] - winner:[{}],vote:[{}]",
+                    __FUNCTION__, __LINE__, voted_hier, vote);
                 _file_obj->winner({voted_hier, vote});
             }
         }
@@ -245,6 +247,8 @@ namespace {
         // set the max vote as the winner if a keyword was not being considered
         if (!kw_match_found) {
             _file_obj->resc_hier(max_hier);
+            log::server::info("[{}:{}] - winner:[{}],vote:[{}]",
+                __FUNCTION__, __LINE__, max_hier, max_vote);
             _file_obj->winner({max_hier, max_vote});
         }
 
@@ -275,6 +279,8 @@ namespace {
         }
 
         //_file_obj->winner({resc_mgr.get_hier_to_root_for_resc(hier).str(), vote});
+        log::server::info("[{}:{}] - winner:[{}],vote:[{}]",
+            __FUNCTION__, __LINE__, hier, vote);
         _file_obj->winner({hier, vote});
         return _file_obj;
     } // resolve_hier_for_create

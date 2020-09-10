@@ -87,7 +87,8 @@
 
 namespace {
 
-namespace ix = irods::experimental;
+namespace replica = irods::experimental::replica;
+using replica_access_table = irods::experimental::replica_access_table;
 using log = irods::experimental::log;
 
 // Instructs how "update_replica_access_table" should update the
@@ -104,10 +105,10 @@ void update_replica_access_table(rsComm_t& _conn,
                                  const dataObjInp_t& _input)
 {
     const irods::experimental::filesystem::path p = _input.objPath;
-    const ix::key_value_proxy kvp{_input.condInput};
+    const auto kvp = irods::experimental::make_key_value_proxy(_input.condInput);
 
-    ix::replica_access_table::data_id_type data_id;
-    ix::replica_access_table::replica_number_type replica_number;
+    replica_access_table::data_id_type data_id;
+    replica_access_table::replica_number_type replica_number;
 
     try {
         const auto gql = fmt::format("select DATA_ID, DATA_REPL_NUM "
@@ -141,7 +142,7 @@ void update_replica_access_table(rsComm_t& _conn,
             l1desc.replica_token = token;
         }
     }
-    catch (const ix::replica_access_table_error& e) {
+    catch (const irods::experimental::replica_access_table_error& e) {
         logger::api::error(e.what());
         THROW(SYS_INTERNAL_ERR, e.what());
     }
@@ -152,14 +153,14 @@ void enable_creation_of_additional_replicas(rsComm_t& _comm)
     // rxDataObjOpen has the freedom to create replicas on demand. To enable this,
     // it must always set the following flag. This special flag instructs rsPhyPathReg
     // to register a new replica if an existing replica already exists.
-    ix::key_value_proxy{_comm.session_props}[REG_REPL_KW] = "";
+    irods::experimental::key_value_proxy{_comm.session_props}[REG_REPL_KW] = "";
 } // enable_creation_of_additional_replicas
 
 auto register_intermediate_replica_for_new_data_object(
     rsComm_t& _comm,
     const int _dest_l1_desc_inx) -> std::tuple<int, dataObjInfo_t*>
 {
-    auto dest_replica = ix::make_replica_proxy(*L1desc[_dest_l1_desc_inx].dataObjInfo);
+    auto dest_replica = replica::make_replica_proxy(*L1desc[_dest_l1_desc_inx].dataObjInfo);
 
     dest_replica.replica_status(INTERMEDIATE_REPLICA);
 
@@ -173,7 +174,7 @@ auto register_intermediate_replica_for_new_data_object(
 auto register_intermediate_replica_for_existing_data_object(
     rsComm_t& _comm,
     const int _dest_l1_desc_inx,
-    const ix::key_value_proxy<keyValPair_t>& _cond_input) -> int
+    const irods::experimental::key_value_proxy<keyValPair_t>& _cond_input) -> int
 {
     // get and validate source replica information
     if (!_cond_input.contains(SOURCE_L1_DESC_KW)) {
@@ -192,8 +193,8 @@ auto register_intermediate_replica_for_existing_data_object(
         return SYS_INTERNAL_NULL_INPUT_ERR;
     }
 
-    auto source_replica = ix::make_replica_proxy(*L1desc[source_l1_desc_inx].dataObjInfo);
-    auto dest_replica   = ix::make_replica_proxy(*L1desc[_dest_l1_desc_inx].dataObjInfo);
+    auto source_replica = replica::make_replica_proxy(*L1desc[source_l1_desc_inx].dataObjInfo);
+    auto dest_replica   = replica::make_replica_proxy(*L1desc[_dest_l1_desc_inx].dataObjInfo);
 
     dest_replica.replica_status(INTERMEDIATE_REPLICA);
     resc_mgr.hier_to_leaf_id(dest_replica.hierarchy().data(), dest_replica.get()->rescId);
@@ -202,7 +203,7 @@ auto register_intermediate_replica_for_existing_data_object(
 
     // prepare input for replica registration
     regReplica_t in{};
-    ix::key_value_proxy in_kvp{in.condInput};
+    irods::experimental::key_value_proxy in_kvp{in.condInput};
 
     in_kvp[REGISTER_AS_INTERMEDIATE_KW] = "";
     if (_cond_input.contains(SU_CLIENT_USER_KW)) {
@@ -355,7 +356,7 @@ auto create_new_replica(
         }
     };
 
-    auto cond_input = ix::make_key_value_proxy(_inp.condInput);
+    auto cond_input = irods::experimental::make_key_value_proxy(_inp.condInput);
 
     cond_input[SEL_OBJ_TYPE_KW] = "dataObj";
     int status = rsObjStat(&_comm, &_inp, &rodsObjStatOut );
@@ -755,7 +756,7 @@ int rsDataObjOpen(
         return l1descInx;
     }
 
-    ix::key_value_proxy kvp{dataObjInp->condInput};
+    irods::experimental::key_value_proxy kvp{dataObjInp->condInput};
 
     // If the client specified a leaf resource, then discover the hierarchy and
     // store it in the keyValPair_t. This instructs the iRODS server to create
@@ -877,14 +878,14 @@ int rsDataObjOpen(
                                        dataObjInp->objPath, e.code(), e.what());
 
                     if (const auto ec = close_replica(*rsComm, l1descInx); ec < 0) {
-                        auto hier = ix::key_value_proxy{dataObjInp->condInput}[RESC_HIER_STR_KW].value();
+                        auto hier = irods::experimental::key_value_proxy{dataObjInp->condInput}[RESC_HIER_STR_KW].value();
                         logger::api::error("Failed to close replica [error_code={}, path={}, hierarchy={}]",
                                            ec, dataObjInp->objPath, hier);
                         return ec;
                     }
 
                     if (const auto ec = change_replica_status(*rsComm, *dataObjInp, STALE_REPLICA); ec < 0) {
-                        auto hier = ix::key_value_proxy{dataObjInp->condInput}[RESC_HIER_STR_KW].value();
+                        auto hier = irods::experimental::key_value_proxy{dataObjInp->condInput}[RESC_HIER_STR_KW].value();
                         logger::api::error("Failed to set the replica's replica status to stale "
                                            "[error_code={}, path={}, hierarchy={}]",
                                            ec, dataObjInp->objPath, hier);
@@ -1007,14 +1008,14 @@ int rsDataObjOpen(
                                    dataObjInp->objPath, e.code(), e.what());
 
                 if (const auto ec = close_replica(*rsComm, l1descInx); ec < 0) {
-                    auto hier = ix::key_value_proxy{dataObjInp->condInput}[RESC_HIER_STR_KW].value();
+                    auto hier = irods::experimental::key_value_proxy{dataObjInp->condInput}[RESC_HIER_STR_KW].value();
                     logger::api::error("Failed to close replica [error_code={}, path={}, hierarchy={}]",
                                        ec, dataObjInp->objPath, hier);
                     return ec;
                 }
 
                 if (const auto ec = change_replica_status(*rsComm, *dataObjInp, old_replica_status); ec < 0) {
-                    auto hier = ix::key_value_proxy{dataObjInp->condInput}[RESC_HIER_STR_KW].value();
+                    auto hier = irods::experimental::key_value_proxy{dataObjInp->condInput}[RESC_HIER_STR_KW].value();
                     logger::api::error("Failed to restore the replica's replica status "
                                        "[error_code={}, path={}, hierarchy={}, original_replica_status={}]",
                                        ec, dataObjInp->objPath, hier, old_replica_status);

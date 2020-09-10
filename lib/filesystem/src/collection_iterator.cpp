@@ -21,6 +21,8 @@
 #include <string>
 #include <cassert>
 
+#include <iostream>
+
 namespace irods::experimental::filesystem::NAMESPACE_IMPL
 {
 #ifdef IRODS_FILESYSTEM_ENABLE_SERVER_SIDE_API
@@ -102,8 +104,12 @@ namespace irods::experimental::filesystem::NAMESPACE_IMPL
 
         // clang-format off
         if (e->dataId)      { entry.data_id_ = e->dataId; }
-        if (e->createTime)  { entry.ctime_ = object_time_type{std::chrono::seconds{std::stoll(e->createTime)}}; }
-        if (e->modifyTime)  { entry.mtime_ = object_time_type{std::chrono::seconds{std::stoll(e->modifyTime)}}; }
+        if (e->createTime)  {
+        std::cout << "create time:" << e->createTime << "\n";
+ entry.ctime_ = object_time_type{std::chrono::seconds{std::stoll(e->createTime)}}; }
+        if (e->modifyTime)  {
+        std::cout << "modify time:" << e->createTime << "\n";
+ entry.mtime_ = object_time_type{std::chrono::seconds{std::stoll(e->modifyTime)}}; }
         if (e->chksum)      { entry.checksum_ = e->chksum; }
         if (e->ownerName)   { entry.owner_ = e->ownerName; }
         if (e->dataType)    { entry.data_type_ = e->dataType; }
