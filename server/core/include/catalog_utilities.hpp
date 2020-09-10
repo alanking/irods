@@ -75,6 +75,11 @@ namespace irods::experimental::catalog {
                                                 nanodbc::connection& _db_conn,
                                                 int _object_id,
                                                 const entity_type _entity) -> bool;
+
+    auto redirect_to_catalog_provider_required(rsComm_t& _comm) -> bool;
+
+    auto throw_if_service_role_is_invalid() -> void;
+
 }
 
 #endif // #ifndef IRODS_CATALOG_UTILITIES_HPP
