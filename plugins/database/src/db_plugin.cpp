@@ -2684,6 +2684,15 @@ irods::error db_reg_data_obj_op(
     snprintf( dataSizeNum, MAX_NAME_LEN, "%lld", _data_obj_info->dataSize );
     getNowStr( myTime );
 
+    if (0 == strcmp(_data_obj_info->dataOwnerName, "")) {
+        strcpy(_data_obj_info->dataOwnerName, _ctx.comm()->clientUser.userName);
+    }
+    if (0 == strcmp(_data_obj_info->dataOwnerZone, "")) {
+        strcpy(_data_obj_info->dataOwnerZone, _ctx.comm()->clientUser.rodsZone);
+    }
+    if (0 == strcmp(_data_obj_info->dataCreate, "")) {
+        strcpy(_data_obj_info->dataCreate, myTime);
+    }
     if (0 == strcmp(_data_obj_info->dataModify, "")) {
         strcpy(_data_obj_info->dataModify, myTime);
     }
@@ -2698,12 +2707,12 @@ irods::error db_reg_data_obj_op(
     cllBindVars[6] = dataSizeNum;
     cllBindVars[7] = resc_id_str.c_str();
     cllBindVars[8] = _data_obj_info->filePath;
-    cllBindVars[9] = _ctx.comm()->clientUser.userName;
-    cllBindVars[10] = _ctx.comm()->clientUser.rodsZone;
+    cllBindVars[9] = _data_obj_info->dataOwnerName;
+    cllBindVars[10] = _data_obj_info->dataOwnerZone;
     cllBindVars[11] = dataStatusNum;
     cllBindVars[12] = _data_obj_info->chksum;
     cllBindVars[13] = _data_obj_info->dataMode;
-    cllBindVars[14] = myTime;
+    cllBindVars[14] = _data_obj_info->dataCreate;
     cllBindVars[15] = _data_obj_info->dataModify;
     cllBindVars[16] = data_expiry_ts;
     cllBindVars[17] = "EMPTY_RESC_NAME";
