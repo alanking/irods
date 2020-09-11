@@ -82,7 +82,6 @@ namespace irods::experimental::filesystem::NAMESPACE_IMPL
                 ctx_ = nullptr;
                 return *this;
             }
-            
             throw filesystem_error{"could not read collection entry [error code => " + std::to_string(ec) + ']',
                                    detail::make_error_code(ec)};
         }
@@ -104,12 +103,8 @@ namespace irods::experimental::filesystem::NAMESPACE_IMPL
 
         // clang-format off
         if (e->dataId)      { entry.data_id_ = e->dataId; }
-        if (e->createTime)  {
-        std::cout << "create time:" << e->createTime << "\n";
- entry.ctime_ = object_time_type{std::chrono::seconds{std::stoll(e->createTime)}}; }
-        if (e->modifyTime)  {
-        std::cout << "modify time:" << e->createTime << "\n";
- entry.mtime_ = object_time_type{std::chrono::seconds{std::stoll(e->modifyTime)}}; }
+        if (e->createTime)  { entry.ctime_ = object_time_type{std::chrono::seconds{std::stoll(e->createTime)}}; }
+        if (e->modifyTime)  { entry.mtime_ = object_time_type{std::chrono::seconds{std::stoll(e->modifyTime)}}; }
         if (e->chksum)      { entry.checksum_ = e->chksum; }
         if (e->ownerName)   { entry.owner_ = e->ownerName; }
         if (e->dataType)    { entry.data_type_ = e->dataType; }

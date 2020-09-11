@@ -198,9 +198,7 @@ namespace irods::experimental::filesystem::NAMESPACE_IMPL
 
                 try {
                     s.id = std::stoll(output->dataId);
-                    std::cout << "create time:" << output->createTime << "\n";
                     s.ctime = std::stoll(output->createTime);
-                    std::cout << "modify time:" << output->createTime << "\n";
                     s.mtime = std::stoll(output->modifyTime);
                 }
                 catch (...) {
