@@ -895,8 +895,6 @@ int rsDataObjOpen(
                     return e.code();
                 }
 
-                log::api::info("[{}:{}] - collId:[{}]", __FUNCTION__, __LINE__, L1desc[l1descInx].dataObjInfo->collId);
-
                 return l1descInx;
             }
 
