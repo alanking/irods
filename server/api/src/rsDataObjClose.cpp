@@ -36,8 +36,10 @@
 #include "rsRegDataObj.hpp"
 #include "rsSubStructFileStat.hpp"
 #include "rsFileStat.hpp"
+#include "rs_finalize_data_object.hpp"
 
 // =-=-=-=-=-=-=-
+#include "data_object_proxy.hpp"
 #include "irods_resource_backport.hpp"
 #include "irods_stacktrace.hpp"
 #include "irods_hierarchy_parser.hpp"
@@ -780,6 +782,21 @@ void unlock_file_descriptor(
     L1desc[l1descInx].lockFd = -1;
 } // unlock_file_descriptor
 
+auto sync_status_with_catalog(rsComm_t& _comm, const l1desc_t& _l1desc) -> void
+{
+    namespace data_object = irods::experimental::data_object;
+
+    const auto input = data_object::to_json(*_l1desc.dataObjInfo);
+
+    ix::log::api::info("[{}:{}] - input:[{}]", __FUNCTION__, __LINE__, input.dump());
+
+    char* output{};
+    if (const auto ec = rs_finalize_data_object(&_comm, input.dump().c_str(), &output); ec) {
+        ix::log::api::error("[{}] - updating data object failed with [{}]", __FUNCTION__, ec);
+        THROW(ec, "failed to update data object");
+    }
+} // sync_status_with_catalog
+
 } // anonymous namespace
 
 int l3Close(
@@ -885,6 +902,8 @@ int rsDataObjClose(
     }
 
     try {
+        namespace data_object = irods::experimental::data_object;
+
         const int l1descInx = dataObjCloseInp->l1descInx;
 
         // TODO: is this being closed?
@@ -897,8 +916,7 @@ int rsDataObjClose(
         }
 
         // TODO: Need to extract original replica states, somehow, and restore them here
-        boost::shared_ptr<irods::file_object> obj(new irods::file_object(rsComm, L1desc[l1descInx].dataObjInfo));
-        irods::experimental::sync_replica_states_with_catalog(*rsComm, obj);
+        sync_status_with_catalog(*rsComm, L1desc[l1descInx]);
 
         if (ec < 0 || l1desc.oprStatus < 0) {
             freeL1desc(l1descInx);

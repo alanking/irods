@@ -905,8 +905,6 @@ int rsDataObjOpen(
             kvp[OPEN_TYPE_KW] = std::to_string(OPEN_FOR_WRITE_TYPE);
         }
 
-        irods::experimental::lock_data_object(*rsComm, file_obj, writeFlag ? WRITE_LOCK : READ_LOCK);
-
         // sort replica list based on some set of criteria
         int status = sortObjInfoForOpen(&dataObjInfoHead, kvp.get(), writeFlag);
         if (status < 0) {
@@ -919,6 +917,8 @@ int rsDataObjOpen(
             }
             return status;
         }
+
+        irods::experimental::lock_data_object(*rsComm, *dataObjInfoHead, writeFlag ? WRITE_LOCK : READ_LOCK);
 
         // acPreProcForOpen
         status = applyPreprocRuleForOpen( rsComm, dataObjInp, &dataObjInfoHead );

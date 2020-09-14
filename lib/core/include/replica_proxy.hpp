@@ -394,6 +394,38 @@ namespace irods::experimental::replica
         return {replica_proxy{*doi}, lifetime_manager{*doi}};
     } // make_replica_proxy
 
+    static auto to_json(const replica_proxy<const dataObjInfo_t> _replica) -> nlohmann::json
+    {
+        namespace fs = irods::experimental::filesystem;
+        const auto* doi = _replica.get();
+        return nlohmann::json{
+            {"data_id",         std::to_string(_replica.data_id())},
+            {"coll_id",         std::to_string(_replica.collection_id())},
+            {"data_name",       fs::path{_replica.logical_path().data()}.object_name()},
+            {"data_repl_num",   std::to_string(_replica.replica_number())},
+            {"data_version",    _replica.version()},
+            {"data_type_name",  _replica.type()},
+            {"data_size",       std::to_string(_replica.size())},
+            {"data_path",       _replica.physical_path()},
+            {"data_owner_name", _replica.owner_user_name()},
+            {"data_owner_zone", _replica.owner_zone_name()},
+            {"data_is_dirty",   std::to_string(_replica.replica_status())},
+            {"data_status",     _replica.status()},
+            {"data_checksum",   _replica.checksum()},
+            {"data_expiry_ts",  doi->dataExpiry},
+            {"data_map_id",     std::to_string(doi->dataMapId)},
+            {"data_mode",       _replica.mode()},
+            {"r_comment",       _replica.comments()},
+            {"create_ts",       _replica.ctime()},
+            {"modify_ts",       _replica.mtime()},
+            {"resc_id",         std::to_string(_replica.resource_id())}
+        };
+    } // to_json
+
+    static auto to_json(const dataObjInfo_t& _doi) -> nlohmann::json
+    {
+        return to_json(replica_proxy{_doi});
+    } // to_json
 } // namespace irods::experimental::replica
 
 #endif // #ifndef IRODS_REPLICA_PROXY_HPP
