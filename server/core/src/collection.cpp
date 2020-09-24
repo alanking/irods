@@ -268,7 +268,7 @@ isCollEmpty( rsComm_t *rsComm, char *collection ) {
 /* collStat - query metaData of a collection. */
 
 int
-collStat( rsComm_t *rsComm, dataObjInp_t *dataObjInp,
+collStat( rsComm_t *rsComm, const dataObjInp_t *dataObjInp,
           rodsObjStat_t **rodsObjStatOut ) {
     genQueryInp_t genQueryInp;
     genQueryOut_t *genQueryOut = NULL;
