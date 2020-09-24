@@ -117,6 +117,9 @@ namespace irods {
             /// @brief construct a vector of all resource hierarchies in the system
             std::vector<std::string> get_all_resc_hierarchies( void );
 
+            /// \brief get the resc id of the leaf resource in the hierarchy
+            rodsLong_t hier_to_leaf_id(std::string_view _hierarchy);
+
             // =-=-=-=-=-=-=-
             /// @brief get the resc id of the leaf resource in the hierarchy
             error hier_to_leaf_id( const std::string&, rodsLong_t& );

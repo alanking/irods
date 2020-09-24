@@ -17,6 +17,12 @@
 
 namespace irods::experimental::replica
 {
+    /// \brief Tag which indicates that this as a proxy for a replica which does not yet exist in the catalog
+    ///
+    /// \since 4.2.9
+    static struct new_replica {
+    } new_replica;
+
     /// \brief Presents a replica-level interface to a dataObjInfo_t legacy iRODS struct.
     ///
     /// Holds a pointer to a dataObjInfo_t whose lifetime is managed outside of the proxy object.
@@ -41,9 +47,25 @@ namespace irods::experimental::replica
         using doi_pointer_type = doi_type*;
 
         /// \brief Constructs proxy using an existing doi_type
+        ///
+        /// \param[in] _doi dataObjInfo_t used to construct the replica
+        ///
         /// \since 4.2.9
         explicit replica_proxy(doi_type& _doi)
             : doi_{&_doi}
+            , exists_{true}
+        {
+        }
+
+        /// \brief Constructs proxy using an existing doi_type
+        ///
+        /// \param[in] new_replica Indicates that this replica does not exist in the catalog
+        /// \param[in] _doi dataObjInfo_t used to construct the replica
+        ///
+        /// \since 4.2.9
+        explicit replica_proxy(struct new_replica, doi_type& _doi)
+            : doi_{&_doi}
+            , exists_{false}
         {
         }
 
@@ -71,6 +93,8 @@ namespace irods::experimental::replica
         auto mode()             const noexcept -> std::string_view { return doi_->dataMode; }
         auto data_expiry()      const noexcept -> std::string_view { return doi_->dataExpiry; }
         auto map_id()           const noexcept -> int              { return doi_->dataMapId; }
+
+        auto exists()           const noexcept -> bool             { return exists_; }
         // clang-format on
 
         /// \returns key_value_proxy
@@ -265,6 +289,11 @@ namespace irods::experimental::replica
             typename = std::enable_if_t<!std::is_const_v<P>>>
         auto map_id(const int _m) -> void { doi_->dataMapId = _m; }
 
+        template<
+            typename P = doi_type,
+            typename = std::enable_if_t<!std::is_const_v<P>>>
+        auto exists(const bool _e) -> void { exists_ = _e; }
+
         /// \returns key_value_proxy
         ///
         /// \retval condInput for the dataObjInfo_t node as a key_value_proxy
@@ -303,6 +332,10 @@ namespace irods::experimental::replica
         /// \brief Pointer to underlying doi_type
         /// \since 4.2.9
         doi_pointer_type doi_;
+
+        /// \brief Indicates whether this replica exists in the catalog
+        /// \since 4.2.9
+        bool exists_;
 
         /// \brief Sets a fixed-sized string property in the underlying struct
         /// \param[out] _dst - Destination buffer

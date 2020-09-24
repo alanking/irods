@@ -371,14 +371,12 @@ collStat( rsComm_t *rsComm, const dataObjInp_t *dataObjInp,
             if ( strlen( collType->value ) > 0 ) {
                 specCollCache_t *specCollCache = 0;
 
-                if ( ( specCollCache =
-                            matchSpecCollCache( dataObjInp->objPath ) ) != NULL ) {
+                if ( ( specCollCache = matchSpecCollCache( dataObjInp->objPath ) ) != NULL ) {
                     replSpecColl( &specCollCache->specColl,
                                   &( *rodsObjStatOut )->specColl );
                 }
                 else {
-                    status = queueSpecCollCache( rsComm, genQueryOut, // JMC - backport 4680?
-                                                 dataObjInp->objPath );
+                    status = queueSpecCollCache( rsComm, genQueryOut, dataObjInp->objPath );
                     if ( status < 0 ) {
                         return status;
                     }

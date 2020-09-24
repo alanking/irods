@@ -79,6 +79,11 @@ namespace irods {
 
     } // get_parent
 
+    auto resource::has_parent() -> bool
+    {
+        return parent_.get();
+    } // get_parent
+
     void resource::children(
         std::vector<std::string>& _out ) {
         for( auto c_itr : children_ ) {

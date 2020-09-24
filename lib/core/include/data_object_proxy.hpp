@@ -2,17 +2,24 @@
 #define IRODS_DATA_OBJECT_PROXY_HPP
 
 #include "dataObjInpOut.h"
+#include "irods_hierarchy_parser.hpp"
 #include "rcConnect.h"
 #include "replica_proxy.hpp"
+
+#include "json.hpp"
 
 #include <algorithm>
 #include <string_view>
 #include <vector>
 
-#include "json.hpp"
-
 namespace irods::experimental::data_object
 {
+    /// \brief Tag which indicates that this as a proxy for a data object which does not yet exist in the catalog
+    ///
+    /// \since 4.2.9
+    static struct new_data_object {
+    } new_data_object;
+
     /// \brief Presents a data object-level interface to a dataObjInfo_t legacy iRODS struct.
     ///
     /// Holds a pointer to a dataObjInfo_t whose lifetime is managed outside of the proxy object.
@@ -41,6 +48,20 @@ namespace irods::experimental::data_object
         /// \since 4.2.9
         explicit data_object_proxy(doi_type& _doi)
             : data_obj_info_{&_doi}
+            , exists_{true}
+            , replica_list_{fill_replica_list(_doi)}
+        {
+        }
+
+        /// \brief Constructs proxy using an existing doi_type
+        ///
+        /// \param[in] new_data_object Indicates that the data object does not exist in the catalog
+        /// \param[in] _doi dataObjInfo_t containing information for this data object
+        ///
+        /// \since 4.2.9
+        explicit data_object_proxy(struct new_data_object, doi_type& _doi)
+            : data_obj_info_{&_doi}
+            , exists_{}
             , replica_list_{fill_replica_list(_doi)}
         {
         }
@@ -86,6 +107,10 @@ namespace irods::experimental::data_object
         /// \retval Pointer to the underlying struct
         /// \since 4.2.9
         auto get() const noexcept -> const doi_pointer_type { return data_obj_info_; }
+
+        auto exists() const noexcept -> bool { return exists_; }
+
+        auto winner() const -> const std::pair<std::string, float>& { return winner_; }
 
         // mutators
 
@@ -166,14 +191,26 @@ namespace irods::experimental::data_object
             typename = std::enable_if_t<!std::is_const_v<P>>>
         auto get() noexcept -> doi_pointer_type { return data_obj_info_; }
 
+        auto exists(const bool _e) -> void { exists_ = _e; }
+
+        auto winner(const std::pair<std::string, float>& _winner) -> void { winner_ = _winner; }
+
     private:
         /// \brief Pointer to underlying doi_type
         /// \since 4.2.9
         doi_pointer_type data_obj_info_;
 
+        /// \brief Indicates whether this data object exists in the catalog
+        /// \since 4.2.9
+        bool exists_;
+
         /// \brief List of objects representing physical replicas
         /// \since 4.2.9
         replica_list replica_list_;
+
+        /// \brief The result of a resolved hierarchy
+        /// \since 4.2.9
+        std::pair<std::string, float> winner_;
 
         /// \brief Generates replica proxy objects from doi_type's linked list and stores them in a list
         /// \since 4.2.9
@@ -181,7 +218,12 @@ namespace irods::experimental::data_object
         {
             replica_list r;
             for (doi_type* d = &_doi; d; d = d->next) {
-                r.push_back(replica::replica_proxy{*d});
+                if (exists_) {
+                    r.push_back(replica::replica_proxy{*d});
+                }
+                else {
+                    r.push_back(replica::replica_proxy{replica::new_replica, *d});
+                }
             }
             return r;
         } // fill_replica_list
@@ -225,6 +267,13 @@ namespace irods::experimental::data_object
             }
         }
 
+        // data object does not exist - allocate the structure
+        if (!head) {
+            head = (dataObjInfo_t*)std::malloc(sizeof(dataObjInfo_t));
+            std::memset(head, 0, sizeof(dataObjInfo_t));
+            return {data_object_proxy{new_data_object, *head}, lifetime_manager{*head}};
+        }
+
         return {data_object_proxy{*head}, lifetime_manager{*head}};
     } // make_data_object_proxy
 
@@ -248,6 +297,16 @@ namespace irods::experimental::data_object
     {
         return to_json(data_object_proxy{_doi});
     } // to_json
+
+    inline auto hierarchy_has_replica(std::string_view _root_resource_name, const dataObjInfo_t& _info) -> bool
+    {
+        const auto obj = make_data_object_proxy(_info);
+        return std::any_of(std::begin(obj.replicas()), std::end(obj.replicas()),
+            [&_root_resource_name](const auto& replica) {
+                const irods::hierarchy_parser hier{replica.hierarchy().data()};
+                return hier.first_resc() == _root_resource_name;
+            });
+    } // hierarchy_has_replica
 } // namespace irods::experimental::data_object
 
 #endif // #ifndef IRODS_DATA_OBJECT_PROXY_HPP

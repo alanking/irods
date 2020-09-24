@@ -1,59 +1,53 @@
-/*** Copyright (c), The Regents of the University of California            ***
- *** For more information please refer to files in the COPYRIGHT directory ***/
-/* This is script-generated code (for the most part).  */
-/* See dataObjPut.h for a description of this API call.*/
-
+#include "dataObjClose.h"
+#include "dataObjCreate.h"
+#include "dataObjOpen.h"
 #include "dataObjPut.h"
-#include "rodsLog.h"
+#include "dataObjRepl.h"
+#include "dataObjUnlink.h"
 #include "dataPut.h"
 #include "filePut.h"
-#include "objMetaOpr.hpp"
-#include "physPath.hpp"
-#include "specColl.hpp"
-#include "dataObjOpen.h"
-#include "dataObjCreate.h"
-#include "dataObjClose.h"
-#include "regDataObj.h"
-#include "dataObjUnlink.h"
-#include "rsGlobalExtern.hpp"
-#include "rcGlobalExtern.h"
-#include "rsApiHandler.hpp"
-#include "subStructFilePut.h"
-#include "dataObjRepl.h"
 #include "getRemoteZoneResc.h"
 #include "icatHighLevelRoutines.hpp"
 #include "modDataObjMeta.h"
+#include "objMetaOpr.hpp"
+#include "physPath.hpp"
+#include "rcGlobalExtern.h"
+#include "regDataObj.h"
+#include "rodsLog.h"
+#include "rsApiHandler.hpp"
+#include "rsDataObjClose.hpp"
+#include "rsDataObjCreate.hpp"
+#include "rsDataObjOpen.hpp"
 #include "rsDataObjPut.hpp"
 #include "rsDataObjRepl.hpp"
-#include "rsDataObjCreate.hpp"
-#include "rsDataObjClose.hpp"
-#include "rsDataPut.hpp"
-#include "rsRegDataObj.hpp"
 #include "rsDataObjUnlink.hpp"
-#include "rsSubStructFilePut.hpp"
-#include "rsFilePut.hpp"
-#include "rsUnregDataObj.hpp"
-#include "rsDataObjOpen.hpp"
 #include "rsDataObjWrite.hpp"
+#include "rsDataPut.hpp"
+#include "rsFilePut.hpp"
+#include "rsGlobalExtern.hpp"
+#include "rsRegDataObj.hpp"
+#include "rsSubStructFilePut.hpp"
+#include "rsUnregDataObj.hpp"
+#include "specColl.hpp"
+#include "subStructFilePut.h"
 
 #include "irods_at_scope_exit.hpp"
 #include "irods_exception.hpp"
 #include "irods_hierarchy_parser.hpp"
 #include "irods_logger.hpp"
+#include "irods_logger.hpp"
 #include "irods_resource_backport.hpp"
 #include "irods_resource_redirect.hpp"
 #include "irods_serialization.hpp"
 #include "irods_server_properties.hpp"
-#include "irods_logger.hpp"
-#include "server_utilities.hpp"
+#include "resolve_resource_hierarchy.hpp"
 #include "scoped_privileged_client.hpp"
+#include "server_utilities.hpp"
 
 #define IRODS_FILESYSTEM_ENABLE_SERVER_SIDE_API
 #include "filesystem.hpp"
 
 #include <chrono>
-
-namespace ix = irods::experimental;
 
 namespace {
 
@@ -219,30 +213,31 @@ auto single_buffer_put(
     return status;
 } // single_buffer_put
 
-void throw_if_force_put_to_new_resource(
-    dataObjInp_t& data_obj_inp,
-    irods::file_object_ptr file_obj)
+auto throw_if_force_put_to_new_resource(
+    dataObjInp_t& _inp,
+    irods::experimental::data_object::data_object_proxy<dataObjInfo_t>& _obj) -> void
 {
-    char* dst_resc_kw   = getValByKey( &data_obj_inp.condInput, DEST_RESC_NAME_KW );
-    char* force_flag_kw = getValByKey( &data_obj_inp.condInput, FORCE_FLAG_KW );
-    if (file_obj->replicas().empty()  ||
-        !dst_resc_kw   ||
-        !force_flag_kw ||
-        strlen( dst_resc_kw ) == 0) {
+    const auto cond_input = irods::experimental::make_key_value_proxy(_inp.condInput);
+    if (_obj.replicas().empty() ||
+        !cond_input.contains(DEST_RESC_NAME_KW) ||
+        !cond_input.contains(FORCE_FLAG_KW) ||
+        cond_input.at(DEST_RESC_NAME_KW).value().empty()) {
         return;
     }
 
-    const auto hier_match = [&dst_resc_kw, &replicas = file_obj->replicas()]
+    std::string_view destination_resource = cond_input.at(DEST_RESC_NAME_KW).value();
+    const auto hier_match = [&destination_resource, &replicas = _obj.replicas()]
     {
         return std::any_of(replicas.cbegin(), replicas.cend(),
-            [&dst_resc_kw](const auto& r) {
-                return irods::hierarchy_parser{r.resc_hier()}.first_resc() == dst_resc_kw;
+            [&destination_resource](const auto& r) {
+                return irods::hierarchy_parser{r.hierarchy().data()}.first_resc() == destination_resource;
             });
     }();
+
     if (!hier_match) {
         THROW(HIERARCHY_ERROR, fmt::format(
             "cannot force put [{}] to a different resource [{}]",
-            data_obj_inp.objPath, dst_resc_kw));
+            _obj.logical_path(), destination_resource));
     }
 } // throw_if_force_put_to_new_resource
 
@@ -268,23 +263,19 @@ int rsDataObjPut_impl(
     resolveLinkedPath( rsComm, dataObjInp->objPath, &specCollCache, &dataObjInp->condInput );
     int remoteFlag = getAndConnRemoteZone( rsComm, dataObjInp, &rodsServerHost, REMOTE_CREATE );
 
-    if (const char* acl_string = getValByKey( &dataObjInp->condInput, ACL_INCLUDED_KW)) {
-        try {
-            irods::deserialize_acl(acl_string);
+    auto cond_input = irods::experimental::make_key_value_proxy(dataObjInp->condInput);
+
+    try {
+        if (cond_input.contains(ACL_INCLUDED_KW)) {
+            irods::deserialize_acl(cond_input.at(ACL_INCLUDED_KW).value().data());
         }
-        catch (const irods::exception& e) {
-            rodsLog(LOG_ERROR, "%s", e.what());
-            return e.code();
+        if (cond_input.contains(METADATA_INCLUDED_KW)) {
+            irods::deserialize_metadata(cond_input.at(METADATA_INCLUDED_KW).value().data());
         }
     }
-    if (const char* metadata_string = getValByKey(&dataObjInp->condInput, METADATA_INCLUDED_KW)) {
-        try {
-            irods::deserialize_metadata( metadata_string );
-        }
-        catch (const irods::exception& e) {
-            rodsLog(LOG_ERROR, "%s", e.what());
-            return e.code();
-        }
+    catch (const irods::exception& e) {
+        rodsLog(LOG_ERROR, "%s", e.what());
+        return e.code();
     }
 
     if (remoteFlag < 0) {
@@ -292,8 +283,7 @@ int rsDataObjPut_impl(
     }
     else if (LOCAL_HOST != remoteFlag) {
         int status = _rcDataObjPut( rodsServerHost->conn, dataObjInp, dataObjInpBBuf, portalOprOut );
-        if (status < 0 ||
-            getValByKey(&dataObjInp->condInput, DATA_INCLUDED_KW)) {
+        if (status < 0 || cond_input.contains(DATA_INCLUDED_KW)) {
             return status;
         }
 
@@ -311,55 +301,44 @@ int rsDataObjPut_impl(
     }
 
     try {
-        dataObjInfo_t* dataObjInfoHead{};
-        irods::file_object_ptr file_obj(new irods::file_object());
-        file_obj->logical_path(dataObjInp->objPath);
-        irods::error fac_err = irods::file_object_factory(rsComm, dataObjInp, file_obj, &dataObjInfoHead);
+        auto [obj, lm] = irods::experimental::data_object::make_data_object_proxy(*rsComm, dataObjInp->objPath);
 
-        throw_if_force_put_to_new_resource(*dataObjInp, file_obj);
+        throw_if_force_put_to_new_resource(*dataObjInp, obj);
 
         std::string hier{};
-        if (const char* h = getValByKey(&dataObjInp->condInput, RESC_HIER_STR_KW); !h) {
-            file_obj = irods::resolve_resource_hierarchy(
-                *rsComm, irods::CREATE_OPERATION, *dataObjInp, file_obj, fac_err);
-            hier = std::get<std::string>(file_obj->winner());
-            addKeyVal(&dataObjInp->condInput, RESC_HIER_STR_KW, hier.c_str());
+        if (!cond_input.contains(RESC_HIER_STR_KW)) {
+            obj = irods::experimental::resource::resolve_resource_hierarchy(*rsComm, irods::CREATE_OPERATION, *dataObjInp, obj);
+
+            hier = std::get<std::string>(obj.winner());
+
+            cond_input[RESC_HIER_STR_KW] = hier;
         }
         else {
-            if (!fac_err.ok() && CAT_NO_ROWS_FOUND != fac_err.code()) {
-                irods::log(fac_err);
-            }
-            hier = h;
+            hier = cond_input.at(RESC_HIER_STR_KW).value();
         }
 
-        const auto hier_has_replica = [&hier, &replicas = file_obj->replicas()]()
+        const auto hier_has_replica = [&hier, &replicas = obj.replicas()]()
         {
             return std::any_of(replicas.begin(), replicas.end(),
-                [&hier](const irods::physical_object& replica) {
-                    return replica.resc_hier() == hier;
+                [&hier](const auto& replica) {
+                    return replica.hierarchy() == hier;
                 });
         }();
 
-        if (hier_has_replica && !getValByKey(&dataObjInp->condInput, FORCE_FLAG_KW)) {
+        if (hier_has_replica && !cond_input.contains(FORCE_FLAG_KW)) {
             return OVERWRITE_WITHOUT_FORCE_FLAG;
         }
+
+        if (cond_input.contains(DATA_INCLUDED_KW)) {
+            return single_buffer_put(*rsComm, *dataObjInp, *dataObjInpBBuf);
+        }
+
+        return parallel_transfer_put( rsComm, dataObjInp, portalOprOut );
     }
     catch (const irods::exception& e) {
         irods::log(LOG_ERROR, e.what());
         return e.code();
     }
-
-    // TODO: ???
-    if (const int status = applyRuleForPostProcForWrite(rsComm, dataObjInpBBuf, dataObjInp->objPath);
-        status < 0) {
-        return status;
-    }
-
-    if (getValByKey(&dataObjInp->condInput, DATA_INCLUDED_KW)) {
-        return single_buffer_put(*rsComm, *dataObjInp, *dataObjInpBBuf);
-    }
-
-    return parallel_transfer_put( rsComm, dataObjInp, portalOprOut );
 } // rsDataObjPut
 
 } // anonymous namespace
@@ -399,7 +378,7 @@ int rsDataObjPut(rsComm_t* rsComm,
                  bytesBuf_t* dataObjInpBBuf,
                  portalOprOut_t** portalOprOut)
 {
-    namespace fs = ix::filesystem;
+    namespace fs = irods::experimental::filesystem;
 
     const auto ec = rsDataObjPut_impl(rsComm, dataObjInp, dataObjInpBBuf, portalOprOut);
     const auto parent_path = fs::path{dataObjInp->objPath}.parent_path();
@@ -412,11 +391,11 @@ int rsDataObjPut(rsComm_t* rsComm,
         const auto mtime = time_point_cast<fs::object_time_type::duration>(system_clock::now());
 
         try {
-            ix::scoped_privileged_client spc{*rsComm};
+            irods::experimental::scoped_privileged_client spc{*rsComm};
             fs::server::last_write_time(*rsComm, parent_path, mtime);
         }
         catch (const fs::filesystem_error& e) {
-            ix::log::api::error(e.what());
+            irods::experimental::log::api::error(e.what());
             return e.code().value();
         }
     }

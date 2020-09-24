@@ -1117,6 +1117,30 @@ namespace irods {
         return hier_list;
     } // get_all_resc_hierarchies
 
+    rodsLong_t resource_manager::hier_to_leaf_id(std::string_view _hierarchy)
+    {
+        if(_hierarchy.empty()) {
+            THROW(HIERARCHY_ERROR, "empty hierarchy string");
+        }
+
+        hierarchy_parser p{_hierarchy.data()};
+
+        std::string_view leaf = p.last_resc();
+
+        if(!resource_name_map_.has_entry(leaf.data())) {
+            THROW(SYS_RESC_DOES_NOT_EXIST, leaf.data());
+        }
+
+        resource_ptr resc = resource_name_map_[leaf.data()];
+
+        rodsLong_t id = 0;
+        if (const auto ret = resc->get_property<rodsLong_t>(RESOURCE_ID, id); !ret.ok()) {
+            THROW(ret.code(), ret.result());
+        }
+
+        return id;
+    } // hier_to_leaf_id
+
     error resource_manager::hier_to_leaf_id(
         const std::string& _hier,
         rodsLong_t&        _id ) {

@@ -84,6 +84,8 @@ namespace irods {
             virtual error set_parent( const resource_ptr& );
             virtual error get_parent( resource_ptr& );
 
+            virtual bool has_parent();
+
         protected:
             // =-=-=-=-=-=-=-
             /// @brief Pointers to Child and Parent Resources

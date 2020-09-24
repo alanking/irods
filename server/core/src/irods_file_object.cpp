@@ -14,6 +14,9 @@
 #include "dataObjOpr.hpp"
 #include "objDesc.hpp"
 
+#define IRODS_REPLICA_ENABLE_SERVER_SIDE_API
+#include "data_object_proxy.hpp"
+
 // =-=-=-=-=-=-=-
 // boost includes
 #include <boost/asio/ip/host_name.hpp>
@@ -377,35 +380,19 @@ namespace irods {
 
     } // file_object_factory
 
-    irods::file_object_ptr make_file_object(
-        rsComm_t&       _comm,
-        dataObjInp_t&   _data_obj_inp,
-        dataObjInfo_t** _data_obj_info)
+    auto to_file_object(const dataObjInfo_t& _info) -> irods::file_object_ptr
     {
-        irods::file_object_ptr obj(new irods::file_object());
+        auto proxy = irods::experimental::data_object::make_data_object_proxy(_info);
 
-        irods::error err = irods::file_object_factory(&_comm, &_data_obj_inp, obj, _data_obj_info);
-        if (!err.ok()) {
-            irods::log(err);
-            THROW(err.code(), err.result());
+        irods::file_object_ptr obj{new irods::file_object()};
+
+        std::vector<irods::physical_object> objects;
+        for (auto&& replica : proxy.replicas()) {
+            objects.push_back({*replica.get()});
         }
+
+        obj->replicas(objects);
 
         return obj;
-    } // make_file_object
-
-    auto irods::file_object::to_json() -> nlohmann::json
-    {
-        using log = irods::experimental::log;
-
-        nlohmann::json out;
-
-        for (auto&& r : replicas()) {
-            out["replicas"].push_back(r.to_json());
-            log::server::debug("[{}:{}] - pushing back [{}]",
-                __FUNCTION__, __LINE__, out["replicas"].back().dump());
-        }
-
-        return out;
-    } // to_json
-
+    } // to_file_object
 } // namespace irods
