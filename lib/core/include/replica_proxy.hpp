@@ -53,7 +53,7 @@ namespace irods::experimental::replica
         /// \since 4.2.9
         explicit replica_proxy(doi_type& _doi)
             : doi_{&_doi}
-            , exists_{true}
+            , in_catalog_{true}
             , vote_{0.0f}
         {
         }
@@ -66,7 +66,7 @@ namespace irods::experimental::replica
         /// \since 4.2.9
         explicit replica_proxy(struct new_replica, doi_type& _doi)
             : doi_{&_doi}
-            , exists_{false}
+            , in_catalog_{false}
             , vote_{0.0f}
         {
         }
@@ -95,8 +95,7 @@ namespace irods::experimental::replica
         auto mode()             const noexcept -> std::string_view { return doi_->dataMode; }
         auto data_expiry()      const noexcept -> std::string_view { return doi_->dataExpiry; }
         auto map_id()           const noexcept -> int              { return doi_->dataMapId; }
-
-        auto exists()           const noexcept -> bool             { return exists_; }
+        auto in_catalog()       const noexcept -> bool             { return in_catalog_; }
         auto vote()             const noexcept -> float            { return vote_; }
         // clang-format on
 
@@ -295,7 +294,7 @@ namespace irods::experimental::replica
         template<
             typename P = doi_type,
             typename = std::enable_if_t<!std::is_const_v<P>>>
-        auto exists(const bool _e) -> void { exists_ = _e; }
+        auto in_catalog(const bool _ic) -> void { in_catalog_ = _ic; }
 
         template<
             typename P = doi_type,
@@ -343,7 +342,7 @@ namespace irods::experimental::replica
 
         /// \brief Indicates whether this replica exists in the catalog
         /// \since 4.2.9
-        bool exists_;
+        bool in_catalog_;
 
         /// \brief Vote value for this replica
         /// \since 4.2.9

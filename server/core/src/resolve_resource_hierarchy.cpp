@@ -125,7 +125,7 @@ namespace
         RsComm&           _comm,
         std::string_view  _operation,
         std::string_view  _resource_name,
-        data_object_proxy _obj) -> std::pair<std::string, float>
+        data_object_proxy _obj) -> data_object::vote_type
     {
         namespace irv = irods::experimental::resource::voting;
 
@@ -140,6 +140,7 @@ namespace
         irods::hierarchy_parser parser;
         float vote{};
 
+        // TODO: remove use of file_object_ptr in voting interface
         irods::file_object_ptr file_obj = irods::to_file_object(_comm, *_obj.get(), _obj.requested_replica());
 
         auto fco = boost::dynamic_pointer_cast<irods::first_class_object>(file_obj);
@@ -166,7 +167,7 @@ namespace
         RsComm&            _comm,
         data_object_proxy& _obj,
         std::string_view   _key_word,
-        std::string_view   _operation) -> data_object_proxy
+        std::string_view   _operation) -> data_object::vote_type
     {
         namespace irv = irods::experimental::resource::voting;
 
@@ -230,15 +231,14 @@ namespace
             _obj.winner({max_hier, max_vote});
         }
 
-        irods::log(LOG_NOTICE, "returning _obj");
-        return _obj;
+        return _obj.winner();
     } // resolve_hierarchy_for_existing_replica
 
     // function to handle resolving the hier given the fco and resource keyword
     auto resolve_hierarchy_for_create(
         RsComm&            _comm,
         data_object_proxy& _obj,
-        std::string_view   _key_word) -> data_object_proxy
+        std::string_view   _key_word) -> data_object::vote_type
     {
         namespace irv = irods::experimental::resource::voting;
 
@@ -253,7 +253,7 @@ namespace
 
         _obj.winner({hier, vote});
 
-        return _obj;
+        return _obj.winner();
     } // resolve_hierarchy_for_create
 } // anonymous namespace
 
@@ -262,19 +262,18 @@ namespace irods::experimental::resource
     auto resolve_resource_hierarchy(
         RsComm&             _comm,
         std::string_view    _operation,
-        dataObjInp_t& _inp) -> data_object_proxy
+        dataObjInp_t& _inp) -> data_object::vote_type
     {
         auto [obj, lm] = data_object::make_data_object_proxy(_comm, _inp.objPath);
         lm.release(); // intentionally wresting control of the underlying memory
         return resolve_resource_hierarchy(_comm, _operation, _inp, obj);
     } // resolve_resource_hierarchy
 
-    // TODO: wouldn't it make more sense to return a reference to the winner here for ease of access? Already manipulating hte data_object_proxy
     auto resolve_resource_hierarchy(
         RsComm&             _comm,
         std::string_view    _operation,
         dataObjInp_t&       _inp,
-        data_object_proxy&  _obj) -> data_object_proxy
+        data_object_proxy&  _obj) -> data_object::vote_type
     {
         throw_if_operation_is_not_supported(_operation);
 
@@ -289,7 +288,7 @@ namespace irods::experimental::resource
 
             _obj.winner({hier, 1.0f});
 
-            return _obj;
+            return _obj.winner();
         }
         freeRodsObjStat(rodsObjStatOut);
 
@@ -316,7 +315,8 @@ namespace irods::experimental::resource
 
             create_resc_name = apply_policy_for_create_operation(_comm, _inp);
 
-            if (_obj.exists() && data_object::hierarchy_has_replica(create_resc_name, *_obj.get())) {
+            // TODO: Can we do a vote for a create first?
+            if (_obj.in_catalog() && data_object::hierarchy_has_replica(create_resc_name, *_obj.get())) {
                 actual_op = irods::WRITE_OPERATION;
             }
             else {
@@ -324,7 +324,7 @@ namespace irods::experimental::resource
             }
         }
 
-        if (!_obj.exists()) {
+        if (!_obj.in_catalog()) {
             THROW(HIERARCHY_ERROR, "data object does not exist");
         }
 

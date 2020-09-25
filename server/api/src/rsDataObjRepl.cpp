@@ -169,10 +169,7 @@ int open_destination_replica(
     return rsDataObjOpen(&_comm, &destination_data_obj_inp);
 } // open_destination_replica
 
-int replicate_data(
-    rsComm_t& _comm,
-    dataObjInp_t& source_inp,
-    dataObjInp_t& destination_inp)
+int replicate_data(rsComm_t& _comm, dataObjInp_t& source_inp, dataObjInp_t& destination_inp)
 {
     // Open source replica
     int source_l1descInx = open_source_replica(_comm, source_inp);
@@ -214,11 +211,12 @@ int replicate_data(
 
 int repl_data_obj(RsComm& _comm, const dataObjInp_t& _inp)
 {
+    namespace ir  = irods::experimental::resource;
     namespace irv = irods::experimental::resource::voting;
 
     // Get the data object information
     auto [obj, obj_lm] = irods::experimental::data_object::make_data_object_proxy(_comm, _inp);
-    if (!obj.exists()) {
+    if (!obj.in_catalog()) {
         THROW(SYS_INVALID_INPUT_PARAM, fmt::format("data object [{}] does not exist", _inp.objPath));
     }
     irods::log(LOG_NOTICE, fmt::format("[{}:{}] - data object exists:[{}]", __FUNCTION__, __LINE__, obj.logical_path()));
@@ -238,21 +236,29 @@ int repl_data_obj(RsComm& _comm, const dataObjInp_t& _inp)
     };
 
     if (!source_cond_input.contains(RESC_HIER_STR_KW)) {
-        irods::log(LOG_NOTICE, fmt::format("[{}:{}] - resolving hierarchy for [{}] as source", __FUNCTION__, __LINE__, obj.logical_path()));
-        obj = irods::experimental::resource::resolve_resource_hierarchy(_comm, irods::OPEN_OPERATION, source_inp, obj);
+        irods::log(LOG_NOTICE, fmt::format("[{}:{}] - resolving hierarchy for [{}] as source",
+            __FUNCTION__, __LINE__, obj.logical_path()));
 
-        source_cond_input[RESC_HIER_STR_KW] = std::get<std::string>(obj.winner());
+        const auto winner = ir::resolve_resource_hierarchy(_comm, irods::OPEN_OPERATION, source_inp, obj);
+
+        source_cond_input[RESC_HIER_STR_KW] = std::get<std::string>(winner);
     }
-    irods::log(LOG_NOTICE, fmt::format("[{}:{}] - resolved source [{}]", __FUNCTION__, __LINE__, source_cond_input.at(RESC_HIER_STR_KW).value()));
+
+    irods::log(LOG_NOTICE, fmt::format("[{}:{}] - resolved source [{}]",
+        __FUNCTION__, __LINE__, source_cond_input.at(RESC_HIER_STR_KW).value()));
 
     if (!destination_cond_input.contains(DEST_RESC_HIER_STR_KW)) {
-        irods::log(LOG_NOTICE, fmt::format("[{}:{}] - resolving hierarchy for [{}] as destination", __FUNCTION__, __LINE__, obj.logical_path()));
-        obj = irods::experimental::resource::resolve_resource_hierarchy(_comm, irods::CREATE_OPERATION, destination_inp, obj);
+        irods::log(LOG_NOTICE, fmt::format("[{}:{}] - resolving hierarchy for [{}] as destination",
+            __FUNCTION__, __LINE__, obj.logical_path()));
 
-        destination_cond_input[DEST_RESC_HIER_STR_KW] = std::get<std::string>(obj.winner());
-        destination_cond_input[RESC_HIER_STR_KW] = std::get<std::string>(obj.winner());
+        const auto winner = ir::resolve_resource_hierarchy(_comm, irods::CREATE_OPERATION, destination_inp, obj);
+
+        destination_cond_input[DEST_RESC_HIER_STR_KW] = std::get<std::string>(winner);
+        destination_cond_input[RESC_HIER_STR_KW] = std::get<std::string>(winner);
     }
-    irods::log(LOG_NOTICE, fmt::format("[{}:{}] - resolved destination [{}]", __FUNCTION__, __LINE__, destination_cond_input.at(RESC_HIER_STR_KW).value()));
+
+    irods::log(LOG_NOTICE, fmt::format("[{}:{}] - resolved destination [{}]",
+        __FUNCTION__, __LINE__, destination_cond_input.at(RESC_HIER_STR_KW).value()));
 
     if (source_cond_input.contains(ALL_KW)) {
         int last_ec = 0;
@@ -266,10 +272,10 @@ int repl_data_obj(RsComm& _comm, const dataObjInp_t& _inp)
             }
 
             // TODO: need to get the vote back up here...
-            //if (r.vote() > irv::vote::zero) {
+            if (r.vote() > irv::vote::zero) {
                 destination_cond_input[RESC_HIER_STR_KW] = r.hierarchy();
                 last_ec = replicate_data(_comm, source_inp, destination_inp);
-            //}
+            }
         }
         return last_ec;
     }
@@ -282,10 +288,11 @@ int repl_data_obj(RsComm& _comm, const dataObjInp_t& _inp)
 
     // TODO: #4010 - This short-circuits resource logic for handling good replicas
     for (const auto& r : obj.replicas()) {
-        if (r.hierarchy() == destination_cond_input.at(RESC_HIER_STR_KW) && (r.replica_status() & 0x0F) == GOOD_REPLICA) {
+        if (r.hierarchy() == destination_cond_input.at(RESC_HIER_STR_KW) && r.replica_status() == GOOD_REPLICA) {
             return 0;
         }
     }
+
     return replicate_data(_comm, source_inp, destination_inp);
 } // repl_data_obj
 

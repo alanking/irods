@@ -25,7 +25,7 @@ namespace irods::experimental::resource
     auto resolve_resource_hierarchy(
         RsComm&             _comm,
         std::string_view    _operation,
-        dataObjInp_t& _inp) -> data_object::data_object_proxy<dataObjInfo_t>;
+        dataObjInp_t& _inp) -> data_object::vote_type;
 
     /// \brief Determine the best resource for an operation
     ///
@@ -41,7 +41,7 @@ namespace irods::experimental::resource
         std::string_view    _operation,
         dataObjInp_t& _inp,
         data_object::data_object_proxy<dataObjInfo_t>& _obj)
-        -> data_object::data_object_proxy<dataObjInfo_t>;
+        -> data_object::vote_type;
 } // namespace irods::experimental::resource
 
 #endif // IRODS_RESOLVE_RESOURCE_HIERARCHY_HPP

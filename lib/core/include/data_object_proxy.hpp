@@ -10,10 +10,13 @@
 
 #include <algorithm>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 namespace irods::experimental::data_object
 {
+    using vote_type = std::tuple<std::string, float>;
+
     /// \brief Tag which indicates that this as a proxy for a data object which does not yet exist in the catalog
     ///
     /// \since 4.2.9
@@ -48,7 +51,7 @@ namespace irods::experimental::data_object
         /// \since 4.2.9
         explicit data_object_proxy(doi_type& _doi)
             : data_obj_info_{&_doi}
-            , exists_{true}
+            , in_catalog_{true}
             , requested_replica_{-1}
             , replica_list_{fill_replica_list(_doi)}
         {
@@ -62,7 +65,7 @@ namespace irods::experimental::data_object
         /// \since 4.2.9
         explicit data_object_proxy(struct new_data_object, doi_type& _doi)
             : data_obj_info_{&_doi}
-            , exists_{}
+            , in_catalog_{false}
             , requested_replica_{-1}
             , replica_list_{fill_replica_list(_doi)}
         {
@@ -110,11 +113,11 @@ namespace irods::experimental::data_object
         /// \since 4.2.9
         auto get() const noexcept -> const doi_pointer_type { return data_obj_info_; }
 
-        auto exists() const noexcept -> bool { return exists_; }
+        auto in_catalog() const noexcept -> bool { return in_catalog_; }
 
         auto requested_replica() const noexcept -> int { return requested_replica_; }
 
-        auto winner() const -> const std::pair<std::string, float>& { return winner_; }
+        auto winner() const -> const vote_type& { return winner_; }
 
         // mutators
 
@@ -195,11 +198,11 @@ namespace irods::experimental::data_object
             typename = std::enable_if_t<!std::is_const_v<P>>>
         auto get() noexcept -> doi_pointer_type { return data_obj_info_; }
 
-        auto exists(const bool _e) -> void { exists_ = _e; }
+        auto in_catalog(const bool _ic) -> void { in_catalog_ = _ic; }
 
         auto requested_replica(const int _repl) -> void { requested_replica_ = _repl; }
 
-        auto winner(const std::pair<std::string, float>& _winner) -> void { winner_ = _winner; }
+        auto winner(const vote_type& _winner) -> void { winner_ = _winner; }
 
     private:
         /// \brief Pointer to underlying doi_type
@@ -208,7 +211,7 @@ namespace irods::experimental::data_object
 
         /// \brief Indicates whether this data object exists in the catalog
         /// \since 4.2.9
-        bool exists_;
+        bool in_catalog_;
 
         /// \brief The name of the
         /// \since 4.2.9
@@ -220,7 +223,7 @@ namespace irods::experimental::data_object
 
         /// \brief The result of a resolved hierarchy
         /// \since 4.2.9
-        std::pair<std::string, float> winner_;
+        vote_type winner_;
 
         /// \brief Generates replica proxy objects from doi_type's linked list and stores them in a list
         /// \since 4.2.9
@@ -228,7 +231,7 @@ namespace irods::experimental::data_object
         {
             replica_list r;
             for (doi_type* d = &_doi; d; d = d->next) {
-                if (exists_) {
+                if (in_catalog_) {
                     r.push_back(replica::replica_proxy{*d});
                 }
                 else {

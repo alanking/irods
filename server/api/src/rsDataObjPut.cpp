@@ -308,9 +308,9 @@ int rsDataObjPut_impl(
 
         std::string hier{};
         if (!cond_input.contains(RESC_HIER_STR_KW)) {
-            obj = irods::experimental::resource::resolve_resource_hierarchy(*rsComm, irods::CREATE_OPERATION, *dataObjInp, obj);
+            auto winner = irods::experimental::resource::resolve_resource_hierarchy(*rsComm, irods::CREATE_OPERATION, *dataObjInp, obj);
 
-            hier = std::get<std::string>(obj.winner());
+            hier = std::get<std::string>(winner);
 
             cond_input[RESC_HIER_STR_KW] = hier;
         }
