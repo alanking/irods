@@ -230,6 +230,7 @@ namespace
             _obj.winner({max_hier, max_vote});
         }
 
+        irods::log(LOG_NOTICE, "returning _obj");
         return _obj;
     } // resolve_hierarchy_for_existing_replica
 
@@ -268,6 +269,7 @@ namespace irods::experimental::resource
         return resolve_resource_hierarchy(_comm, _operation, _inp, obj);
     } // resolve_resource_hierarchy
 
+    // TODO: wouldn't it make more sense to return a reference to the winner here for ease of access? Already manipulating hte data_object_proxy
     auto resolve_resource_hierarchy(
         RsComm&             _comm,
         std::string_view    _operation,

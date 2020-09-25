@@ -845,7 +845,7 @@ int rsDataObjOpen_impl(
             return status;
         }
 
-        irods::experimental::lock_data_object(*rsComm, *dataObjInfoHead, writeFlag ? WRITE_LOCK : READ_LOCK);
+        //irods::experimental::lock_data_object(*rsComm, *dataObjInfoHead, writeFlag ? WRITE_LOCK : READ_LOCK);
 
         // acPreProcForOpen
         status = applyPreprocRuleForOpen( rsComm, dataObjInp, &dataObjInfoHead );

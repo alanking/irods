@@ -915,7 +915,7 @@ int rsDataObjClose(
         }
 
         // TODO: Need to extract original replica states, somehow, and restore them here
-        sync_status_with_catalog(*rsComm, L1desc[l1descInx]);
+        //sync_status_with_catalog(*rsComm, L1desc[l1descInx]);
 
         if (ec < 0 || l1desc.oprStatus < 0) {
             freeL1desc(l1descInx);

@@ -26,14 +26,14 @@ namespace {
 
     auto find_local_replica(context& ctx)
     {
-        const auto& resc_name = irods::get_resource_name(ctx.plugin_ctx);
+        const auto resc_id = irods::get_resource_id(ctx.plugin_ctx);
         auto& replicas = ctx.file_obj->replicas();
         auto itr = std::find_if(
             std::begin(replicas),
             std::end(replicas),
-            [&resc_name](const auto& r) {
+            [&resc_id](const auto& r) {
                 if (!r.resc_hier().empty()) {
-                    return resc_name == irods::hierarchy_parser{r.resc_hier()}.last_resc();
+                    return resc_id == resc_mgr.hier_to_leaf_id(r.resc_hier());
                 }
                 return false;
             }

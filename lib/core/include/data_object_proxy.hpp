@@ -312,7 +312,6 @@ namespace irods::experimental::data_object
     {
         namespace replica = irods::experimental::replica;
 
-        // If data object exists, populate it here...
         try {
             return make_data_object_proxy(_comm, _inp.objPath);
         }

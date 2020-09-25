@@ -54,6 +54,7 @@ namespace irods::experimental::replica
         explicit replica_proxy(doi_type& _doi)
             : doi_{&_doi}
             , exists_{true}
+            , vote_{0.0f}
         {
         }
 
@@ -66,6 +67,7 @@ namespace irods::experimental::replica
         explicit replica_proxy(struct new_replica, doi_type& _doi)
             : doi_{&_doi}
             , exists_{false}
+            , vote_{0.0f}
         {
         }
 
@@ -95,6 +97,7 @@ namespace irods::experimental::replica
         auto map_id()           const noexcept -> int              { return doi_->dataMapId; }
 
         auto exists()           const noexcept -> bool             { return exists_; }
+        auto vote()             const noexcept -> float            { return vote_; }
         // clang-format on
 
         /// \returns key_value_proxy
@@ -294,6 +297,11 @@ namespace irods::experimental::replica
             typename = std::enable_if_t<!std::is_const_v<P>>>
         auto exists(const bool _e) -> void { exists_ = _e; }
 
+        template<
+            typename P = doi_type,
+            typename = std::enable_if_t<!std::is_const_v<P>>>
+        auto vote(const float _v) -> void { vote_ = _v; }
+
         /// \returns key_value_proxy
         ///
         /// \retval condInput for the dataObjInfo_t node as a key_value_proxy
@@ -337,6 +345,11 @@ namespace irods::experimental::replica
         /// \since 4.2.9
         bool exists_;
 
+        /// \brief Vote value for this replica
+        /// \since 4.2.9
+        float vote_;
+
+        /// \brief Sets a fixed-sized string property in the underlying struct
         /// \brief Sets a fixed-sized string property in the underlying struct
         /// \param[out] _dst - Destination buffer
         /// \param[in] _src - Source string
