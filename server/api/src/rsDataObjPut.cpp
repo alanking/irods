@@ -301,7 +301,8 @@ int rsDataObjPut_impl(
     }
 
     try {
-        auto [obj, lm] = irods::experimental::data_object::make_data_object_proxy(*rsComm, dataObjInp->objPath);
+        //auto [obj, lm] = irods::experimental::data_object::make_data_object_proxy(*rsComm, dataObjInp->objPath);
+        auto [obj, lm] = irods::experimental::data_object::make_data_object_proxy(*rsComm, *dataObjInp);
 
         throw_if_force_put_to_new_resource(*dataObjInp, obj);
 
@@ -317,7 +318,7 @@ int rsDataObjPut_impl(
             hier = cond_input.at(RESC_HIER_STR_KW).value();
         }
 
-        const auto hier_has_replica = [&hier, &replicas = obj.replicas()]()
+        const auto hier_has_replica = [&hier, &replicas = obj.replicas()]
         {
             return std::any_of(replicas.begin(), replicas.end(),
                 [&hier](const auto& replica) {

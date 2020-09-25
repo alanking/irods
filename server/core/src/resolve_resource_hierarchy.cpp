@@ -140,7 +140,7 @@ namespace
         irods::hierarchy_parser parser;
         float vote{};
 
-        irods::file_object_ptr file_obj = irods::to_file_object(*_obj.get());
+        irods::file_object_ptr file_obj = irods::to_file_object(_comm, *_obj.get(), _obj.requested_replica());
 
         auto fco = boost::dynamic_pointer_cast<irods::first_class_object>(file_obj);
 

@@ -32,7 +32,10 @@ namespace {
             std::begin(replicas),
             std::end(replicas),
             [&resc_name](const auto& r) {
-                return resc_name == irods::hierarchy_parser{r.resc_hier()}.last_resc();
+                if (!r.resc_hier().empty()) {
+                    return resc_name == irods::hierarchy_parser{r.resc_hier()}.last_resc();
+                }
+                return false;
             }
         );
         return std::cend(replicas) == itr ? std::nullopt : std::make_optional(std::ref(*itr));

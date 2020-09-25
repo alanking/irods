@@ -49,6 +49,7 @@ namespace irods::experimental::data_object
         explicit data_object_proxy(doi_type& _doi)
             : data_obj_info_{&_doi}
             , exists_{true}
+            , requested_replica_{-1}
             , replica_list_{fill_replica_list(_doi)}
         {
         }
@@ -62,6 +63,7 @@ namespace irods::experimental::data_object
         explicit data_object_proxy(struct new_data_object, doi_type& _doi)
             : data_obj_info_{&_doi}
             , exists_{}
+            , requested_replica_{-1}
             , replica_list_{fill_replica_list(_doi)}
         {
         }
@@ -109,6 +111,8 @@ namespace irods::experimental::data_object
         auto get() const noexcept -> const doi_pointer_type { return data_obj_info_; }
 
         auto exists() const noexcept -> bool { return exists_; }
+
+        auto requested_replica() const noexcept -> int { return requested_replica_; }
 
         auto winner() const -> const std::pair<std::string, float>& { return winner_; }
 
@@ -193,6 +197,8 @@ namespace irods::experimental::data_object
 
         auto exists(const bool _e) -> void { exists_ = _e; }
 
+        auto requested_replica(const int _repl) -> void { requested_replica_ = _repl; }
+
         auto winner(const std::pair<std::string, float>& _winner) -> void { winner_ = _winner; }
 
     private:
@@ -203,6 +209,10 @@ namespace irods::experimental::data_object
         /// \brief Indicates whether this data object exists in the catalog
         /// \since 4.2.9
         bool exists_;
+
+        /// \brief The name of the
+        /// \since 4.2.9
+        int requested_replica_;
 
         /// \brief List of objects representing physical replicas
         /// \since 4.2.9
@@ -229,55 +239,8 @@ namespace irods::experimental::data_object
         } // fill_replica_list
     }; // data_object_proxy
 
-    /// \brief Wraps an existing doi_type with a proxy object.
-    /// \param[in] _doi - Pre-existing doi_type which will be wrapped by the returned proxy.
-    /// \return data_object_proxy
-    /// \since 4.2.9
     template<typename doi_type>
-    static auto make_data_object_proxy(doi_type& _doi) -> data_object_proxy<doi_type>
-    {
-        return data_object_proxy{_doi};
-    } // make_data_object_proxy
-
-    template<typename rxComm>
-    static auto make_data_object_proxy(rxComm& _comm, const irods::experimental::filesystem::path& _p)
-        -> std::pair<data_object_proxy<dataObjInfo_t>, lifetime_manager<dataObjInfo_t>>
-    {
-        namespace replica = irods::experimental::replica;
-
-        const auto data_obj_info = replica::get_data_object_info(_comm, _p);
-
-        dataObjInfo_t* head{};
-
-        for (auto&& row : data_obj_info) {
-            // Create a new dataObjInfo_t to represent this replica
-            dataObjInfo_t* next = (dataObjInfo_t*)std::malloc(sizeof(dataObjInfo_t));
-            std::memset(next, 0, sizeof(dataObjInfo_t));
-
-            // Populate the new struct
-            replica::detail::populate_struct_from_results(*next, row);
-
-            // Make sure the structure used for the head is populated
-            if (!head) {
-                head = next;
-            }
-            else {
-                // TODO: Add interface for replicas() which allows for this
-                head->next = next;
-            }
-        }
-
-        // data object does not exist - allocate the structure
-        if (!head) {
-            head = (dataObjInfo_t*)std::malloc(sizeof(dataObjInfo_t));
-            std::memset(head, 0, sizeof(dataObjInfo_t));
-            return {data_object_proxy{new_data_object, *head}, lifetime_manager{*head}};
-        }
-
-        return {data_object_proxy{*head}, lifetime_manager{*head}};
-    } // make_data_object_proxy
-
-    static auto to_json(const data_object_proxy<const dataObjInfo_t> _obj) -> nlohmann::json
+    static auto to_json(const data_object_proxy<doi_type> _obj) -> nlohmann::json
     {
         nlohmann::json output;
 
@@ -297,6 +260,96 @@ namespace irods::experimental::data_object
     {
         return to_json(data_object_proxy{_doi});
     } // to_json
+
+    /// \brief Wraps an existing doi_type with a proxy object.
+    /// \param[in] _doi - Pre-existing doi_type which will be wrapped by the returned proxy.
+    /// \return data_object_proxy
+    /// \since 4.2.9
+    template<typename doi_type>
+    static auto make_data_object_proxy(doi_type& _doi) -> data_object_proxy<doi_type>
+    {
+        return data_object_proxy{_doi};
+    } // make_data_object_proxy
+
+    template<typename rxComm>
+    static auto make_data_object_proxy(rxComm& _comm, const irods::experimental::filesystem::path& _logical_path)
+        -> std::pair<data_object_proxy<dataObjInfo_t>, lifetime_manager<dataObjInfo_t>>
+    {
+        namespace replica = irods::experimental::replica;
+
+        dataObjInfo_t* head{};
+
+        const auto data_obj_info = replica::get_data_object_info(_comm, _logical_path);
+
+        for (auto&& row : data_obj_info) {
+            // Create a new dataObjInfo_t to represent this replica
+            dataObjInfo_t* next = (dataObjInfo_t*)std::malloc(sizeof(dataObjInfo_t));
+            std::memset(next, 0, sizeof(dataObjInfo_t));
+
+            // Populate the new struct
+            replica::detail::populate_struct_from_results(*next, row);
+
+            // Make sure the structure used for the head is populated
+            if (!head) {
+                head = next;
+            }
+            else {
+                // TODO: Add interface for replicas() which allows for this
+                head->next = next;
+            }
+        }
+
+        if (!head) {
+            THROW(SYS_INTERNAL_ERR, "no data object found - need more information");
+        }
+
+        return {data_object_proxy{*head}, lifetime_manager{*head}};
+    } // make_data_object_proxy
+
+    template<typename rxComm>
+    static auto make_data_object_proxy(rxComm& _comm, const dataObjInp_t& _inp)
+        -> std::pair<data_object_proxy<dataObjInfo_t>, lifetime_manager<dataObjInfo_t>>
+    {
+        namespace replica = irods::experimental::replica;
+
+        // If data object exists, populate it here...
+        try {
+            return make_data_object_proxy(_comm, _inp.objPath);
+        }
+        catch (const irods::exception& e) {
+            if (CAT_NO_ROWS_FOUND != e.code()) throw;
+        }
+
+        dataObjInfo_t* head{};
+
+        head = (dataObjInfo_t*)std::malloc(sizeof(dataObjInfo_t));
+        std::memset(head, 0, sizeof(dataObjInfo_t));
+
+        const auto cond_input = key_value_proxy{_inp.condInput};
+
+        auto obj = data_object_proxy{new_data_object, *head};
+        try {
+            if (cond_input.contains(REPL_NUM_KW)) {
+                obj.requested_replica(std::stoi(cond_input.at(REPL_NUM_KW).value().data()));
+            }
+        }
+        catch (const std::exception& e) {
+            THROW(SYS_INVALID_INPUT_PARAM, fmt::format("failed to cast replica number [{}] to int", cond_input.at(REPL_NUM_KW).value()));
+        }
+
+        auto front = obj.replicas().front();
+        front.logical_path(_inp.objPath);
+        front.size(_inp.dataSize);
+        replKeyVal(&_inp.condInput, &front.get()->condInput);
+
+        if (cond_input.contains(IN_PDMO_KW)) {
+            front.in_pdmo(cond_input.at(IN_PDMO_KW).value());
+        }
+
+        irods::log(LOG_NOTICE, fmt::format("[{}:{}] - object:[{}]", __FUNCTION__, __LINE__, to_json(obj).dump()));
+
+        return {obj, lifetime_manager{*head}};
+    } // make_data_object_proxy
 
     inline auto hierarchy_has_replica(std::string_view _root_resource_name, const dataObjInfo_t& _info) -> bool
     {

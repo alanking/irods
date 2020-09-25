@@ -1295,7 +1295,6 @@ irods::error unix_file_resolve_hierarchy(
     catch (const irods::exception& e) {
         return irods::error(e);
     }
-    return ERROR(SYS_UNKNOWN_ERROR, "An unknown error occurred while resolving hierarchy.");
 } // unix_file_resolve_hierarchy
 
 // =-=-=-=-=-=-=-

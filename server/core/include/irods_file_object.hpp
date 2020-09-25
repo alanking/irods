@@ -183,7 +183,8 @@ namespace irods {
                               file_object_ptr  _file_obj,
                               dataObjInfo_t**  _data_obj_info = nullptr);
 
-    auto to_file_object(const dataObjInfo_t& _info) -> irods::file_object_ptr;
+    //auto to_file_object(RsComm& _comm, const irods::experimental::data_object::data_object_proxy<dataObjInfo_t>& _info) -> irods::file_object_ptr;
+    auto to_file_object(RsComm& _comm, const dataObjInfo_t& _info, const int _requested_replica = -1) -> irods::file_object_ptr;
 }; // namespace irods
 
 #endif // __IRODS_FILE_OBJECT_HPP__

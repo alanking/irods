@@ -8,14 +8,14 @@
 #include "irods_hierarchy_parser.hpp"
 #include "irods_resource_backport.hpp"
 
+#define IRODS_REPLICA_ENABLE_SERVER_SIDE_API
+#include "data_object_proxy.hpp"
+
 // =-=-=-=-=-=-=-
 // irods includes
 #include "miscServerFunct.hpp"
 #include "dataObjOpr.hpp"
 #include "objDesc.hpp"
-
-#define IRODS_REPLICA_ENABLE_SERVER_SIDE_API
-#include "data_object_proxy.hpp"
 
 // =-=-=-=-=-=-=-
 // boost includes
@@ -380,19 +380,16 @@ namespace irods {
 
     } // file_object_factory
 
-    auto to_file_object(const dataObjInfo_t& _info) -> irods::file_object_ptr
+    auto to_file_object(RsComm& _comm, const dataObjInfo_t& _obj, const int _requested_replica) -> irods::file_object_ptr
     {
-        auto proxy = irods::experimental::data_object::make_data_object_proxy(_info);
+        irods::log(LOG_NOTICE, fmt::format("[{}:{}] - creating file object out of [{}]", __FUNCTION__, __LINE__, _obj.objPath));
 
-        irods::file_object_ptr obj{new irods::file_object()};
+        irods::file_object_ptr file_obj{new irods::file_object(&_comm, &_obj)};
 
-        std::vector<irods::physical_object> objects;
-        for (auto&& replica : proxy.replicas()) {
-            objects.push_back({*replica.get()});
+        if (_requested_replica >= 0) {
+            file_obj->repl_requested(_requested_replica);
         }
 
-        obj->replicas(objects);
-
-        return obj;
+        return file_obj;
     } // to_file_object
 } // namespace irods
