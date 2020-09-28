@@ -5,5 +5,7 @@
 #include "rcConnect.h"
 
 int rsL3FileGetSingleBuf( rsComm_t *rsComm, int *l1descInx, bytesBuf_t *dataObjOutBBuf );
+int l3DataGetSingleBuf( rsComm_t *rsComm, int l1descInx, bytesBuf_t *dataObjOutBBuf, portalOprOut_t **portalOprOut );
+int l3FileGetSingleBuf( rsComm_t *rsComm, int l1descInx, bytesBuf_t *dataObjOutBBuf );
 
 #endif

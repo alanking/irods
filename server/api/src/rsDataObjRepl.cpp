@@ -84,22 +84,6 @@ namespace
         cond_input.erase(RESC_NAME_KW);
         cond_input.erase(RESC_HIER_STR_KW);
 
-        std::string replica_number;
-        if (cond_input.contains(REPL_NUM_KW)) {
-            replica_number = cond_input.at(REPL_NUM_KW).value();
-
-            // This keyword must be removed temporarily so that the voting mechanism does
-            // not misinterpret it and change the operation from a CREATE to a WRITE.
-            // See server/core/src/irods_resource_redirect.cpp for details.
-            cond_input.erase(REPL_NUM_KW);
-        }
-
-        irods::at_scope_exit restore_replica_number_keyword{[&replica_number, &cond_input] {
-            if (!replica_number.empty()) {
-                cond_input[REPL_NUM_KW] = replica_number;
-            }
-        }};
-
         if (cond_input.contains(DEST_RESC_HIER_STR_KW)) {
             // Other operations only look for RESC_HIER_STR_KW, so set the value here
             cond_input[RESC_HIER_STR_KW] = cond_input.at(DEST_RESC_HIER_STR_KW);
@@ -248,6 +232,22 @@ int repl_data_obj(RsComm& _comm, const dataObjInp_t& _inp)
         __FUNCTION__, __LINE__, source_cond_input.at(RESC_HIER_STR_KW).value()));
 
     if (!destination_cond_input.contains(DEST_RESC_HIER_STR_KW)) {
+        std::string replica_number;
+        if (destination_cond_input.contains(REPL_NUM_KW)) {
+            replica_number = destination_cond_input.at(REPL_NUM_KW).value();
+
+            // This keyword must be removed temporarily so that the voting mechanism does
+            // not misinterpret it and change the operation from a CREATE to a WRITE.
+            // See server/core/src/irods_resource_redirect.cpp for details.
+            destination_cond_input.erase(REPL_NUM_KW);
+        }
+
+        irods::at_scope_exit restore_replica_number_keyword{[&replica_number, &destination_cond_input] {
+            if (!replica_number.empty()) {
+                destination_cond_input[REPL_NUM_KW] = replica_number;
+            }
+        }};
+
         irods::log(LOG_NOTICE, fmt::format("[{}:{}] - resolving hierarchy for [{}] as destination",
             __FUNCTION__, __LINE__, obj.logical_path()));
 

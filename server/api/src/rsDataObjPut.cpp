@@ -126,20 +126,15 @@ int parallel_transfer_put(
     return SYS_NO_HANDLER_REPLY_MSG;
 } // parallel_transfer_put
 
-auto single_buffer_put(
-    rsComm_t&       _comm,
-    dataObjInp_t&   _inp,
-    bytesBuf_t&     _input_buf) -> int
+auto single_buffer_put(RsComm& _comm, dataObjInp_t& _inp, bytesBuf_t& _input_buf) -> int
 {
     _inp.openFlags |= (O_CREAT | O_RDWR | O_TRUNC);
     int l1descInx = rsDataObjOpen(&_comm, &_inp);
     if (l1descInx <= 2) {
         if ( l1descInx >= 0 ) {
-            rodsLog( LOG_ERROR,
-                    "%s: rsDataObjOpen of %s error, status = %d",
-                    __FUNCTION__,
-                    _inp.objPath,
-                    l1descInx );
+            irods::log(LOG_ERROR, fmt::format(
+                    "{}: rsDataObjOpen of {} error, status = {}",
+                    __FUNCTION__, _inp.objPath, l1descInx));
             return SYS_FILE_DESC_OUT_OF_RANGE;
         }
         return l1descInx;
@@ -158,6 +153,8 @@ auto single_buffer_put(
         rodsLog(LOG_NOTICE,
                 "%s: rsDataObjWrite for %s failed with %d",
                 __FUNCTION__, L1desc[l1descInx].dataObjInfo->filePath, bytesWritten );
+
+        // TODO: find issue which says not to do this
         dataObjInfo_t* data_obj_info = L1desc[l1descInx].dataObjInfo;
         const int unlink_status = dataObjUnlinkS(&_comm, L1desc[l1descInx].dataObjInp, data_obj_info);
         if (unlink_status < 0) {

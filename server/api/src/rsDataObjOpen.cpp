@@ -493,23 +493,6 @@ int open_with_obj_info(
         return l1descInx;
     }
 
-    if (getValByKey(&dataObjInp.condInput, PHYOPEN_BY_SIZE_KW)) {
-        int single_buff_sz;
-        try {
-            single_buff_sz = irods::get_advanced_setting<const int>(irods::CFG_MAX_SIZE_FOR_SINGLE_BUFFER) * 1024 * 1024;
-        } catch (const irods::exception& e) {
-            irods::log(e);
-            return e.code();
-        }
-
-        /* open for put or get. May do "dataInclude" */
-        if (dataObjInfo->dataSize <= single_buff_sz &&
-            (getValByKey(&dataObjInp.condInput, DATA_INCLUDED_KW) ||
-             dataObjInfo->dataSize != UNKNOWN_FILE_SZ)) {
-            return l1descInx;
-        }
-    }
-
     int status = l3Open(rsComm, l1descInx);
     if (status <= 0) {
         rodsLog(LOG_NOTICE, "%s: l3Open of %s failed, status = %d",

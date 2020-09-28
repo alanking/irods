@@ -75,9 +75,16 @@ namespace {
         }
 
         const int requested_repl_num = ctx.file_obj->repl_requested();
+        irods::log(LOG_NOTICE, fmt::format(
+            "[{}:{}] - requested repl num:[{}], repl num:[{}]",
+            __FUNCTION__, __LINE__, requested_repl_num, r.repl_num()));
         if (requested_repl_num > -1) {
             return r.repl_num() == requested_repl_num ? vote::high : vote::low;
         }
+
+        irods::log(LOG_NOTICE, fmt::format(
+            "[{}:{}] - preferred status:[{}], repl status:[{}]",
+            __FUNCTION__, __LINE__, preferred_repl_status, r.replica_status()));
 
         if (preferred_repl_status != r.replica_status()) {
             return vote::low;

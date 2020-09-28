@@ -173,6 +173,9 @@ namespace
 
         std::vector<std::string> root_resources;
         for (const auto& repl : _obj.replicas()) {
+            irods::log(LOG_NOTICE, fmt::format(
+                "[{}:{}] - replica for [{}], hier:[{}], num:[{}], status:[{}]",
+                __FUNCTION__, __LINE__, repl.logical_path(), repl.hierarchy(), repl.replica_number(), repl.replica_status()));
             root_resources.push_back(irods::hierarchy_parser{repl.hierarchy().data()}.first_resc());
         }
 

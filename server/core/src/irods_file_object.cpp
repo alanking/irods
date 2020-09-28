@@ -387,6 +387,7 @@ namespace irods {
         irods::file_object_ptr file_obj{new irods::file_object(&_comm, &_obj)};
 
         if (_requested_replica >= 0) {
+            irods::log(LOG_NOTICE, fmt::format("[{}:{}] - adding requested replica [{}]", __FUNCTION__, __LINE__, _requested_replica));
             file_obj->repl_requested(_requested_replica);
         }
 
