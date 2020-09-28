@@ -220,8 +220,8 @@ int repl_data_obj(RsComm& _comm, const dataObjInp_t& _inp)
     };
 
     if (!source_cond_input.contains(RESC_HIER_STR_KW)) {
-        irods::log(LOG_NOTICE, fmt::format("[{}:{}] - resolving hierarchy for [{}] as source",
-            __FUNCTION__, __LINE__, obj.logical_path()));
+        irods::log(LOG_NOTICE, fmt::format("[{}:{}] - resolving hierarchy for [{}] as source, repl num:[{}]",
+            __FUNCTION__, __LINE__, obj.logical_path(), obj.requested_replica()));
 
         const auto winner = ir::resolve_resource_hierarchy(_comm, irods::OPEN_OPERATION, source_inp, obj);
 
@@ -271,7 +271,6 @@ int repl_data_obj(RsComm& _comm, const dataObjInp_t& _inp)
                 continue;
             }
 
-            // TODO: need to get the vote back up here...
             if (r.vote() > irv::vote::zero) {
                 destination_cond_input[RESC_HIER_STR_KW] = r.hierarchy();
                 last_ec = replicate_data(_comm, source_inp, destination_inp);
@@ -281,7 +280,8 @@ int repl_data_obj(RsComm& _comm, const dataObjInp_t& _inp)
     }
 
     if (source_cond_input.at(RESC_HIER_STR_KW) == destination_cond_input.at(RESC_HIER_STR_KW)) {
-        irods::log(LOG_NOTICE, fmt::format("[{}:{}] - cannot overpave a replica with itself, path:[{}],source:[{}],dest:[{}]",
+        irods::log(LOG_NOTICE, fmt::format(
+            "[{}:{}] - cannot overpave a replica with itself, path:[{}],source:[{}],dest:[{}]",
             __FUNCTION__, __LINE__, obj.logical_path(), source_cond_input.at(RESC_HIER_STR_KW).value(), destination_cond_input.at(RESC_HIER_STR_KW).value()));
         return 0;
     }

@@ -316,7 +316,28 @@ namespace irods::experimental::data_object
         namespace replica = irods::experimental::replica;
 
         try {
-            return make_data_object_proxy(_comm, _inp.objPath);
+            const auto cond_input = key_value_proxy{_inp.condInput};
+
+            auto p = make_data_object_proxy(_comm, _inp.objPath);
+            auto obj = std::get<data_object_proxy<dataObjInfo_t>>(p);
+            try {
+                if (cond_input.contains(REPL_NUM_KW)) {
+                    obj.requested_replica(std::stoi(cond_input.at(REPL_NUM_KW).value().data()));
+                }
+            }
+            catch (const std::exception& e) {
+                THROW(SYS_INVALID_INPUT_PARAM, fmt::format("failed to cast replica number [{}] to int", cond_input.at(REPL_NUM_KW).value()));
+            }
+
+            irods::log(LOG_NOTICE, fmt::format("[{}:{}] - path:[{}],requested:[{}]",
+                __FUNCTION__, __LINE__, obj.logical_path(), obj.requested_replica()));
+
+            if (cond_input.contains(IN_PDMO_KW)) {
+                auto front = obj.replicas().front();
+                front.in_pdmo(cond_input.at(IN_PDMO_KW).value());
+            }
+
+            return p;
         }
         catch (const irods::exception& e) {
             if (CAT_NO_ROWS_FOUND != e.code()) throw;
