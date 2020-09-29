@@ -561,14 +561,11 @@ int dataObjCopy(
     return status;
 } // dataObjCopy
 
-int unbunAndStageBunfileObj(
-    rsComm_t* rsComm,
-    char* bunfileObjPath,
-    char** outCacheRescName) {
-
+int unbunAndStageBunfileObj(rsComm_t* rsComm, const char* _logical_path, char** outCacheRescName)
+{
     /* query the bundle dataObj */
     dataObjInp_t dataObjInp{};
-    rstrcpy( dataObjInp.objPath, bunfileObjPath, MAX_NAME_LEN );
+    rstrcpy( dataObjInp.objPath, _logical_path, MAX_NAME_LEN );
 
     dataObjInfo_t *bunfileObjInfoHead{};
     int status = getDataObjInfo( rsComm, &dataObjInp, &bunfileObjInfoHead, NULL, 1 );
