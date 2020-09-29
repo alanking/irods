@@ -298,7 +298,6 @@ int rsDataObjPut_impl(
     }
 
     try {
-        //auto [obj, lm] = irods::experimental::data_object::make_data_object_proxy(*rsComm, dataObjInp->objPath);
         auto [obj, lm] = irods::experimental::data_object::make_data_object_proxy(*rsComm, *dataObjInp);
 
         throw_if_force_put_to_new_resource(*dataObjInp, obj);
@@ -337,7 +336,7 @@ int rsDataObjPut_impl(
         irods::log(LOG_ERROR, e.what());
         return e.code();
     }
-} // rsDataObjPut
+} // rsDataObjPut_impl
 
 } // anonymous namespace
 

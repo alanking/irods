@@ -633,7 +633,7 @@ requeDataObjInfoByResc( dataObjInfo_t **dataObjInfoHead,
     dataObjInfo_t* prevDataObjInfo = NULL;
     while (tmpDataObjInfo) {
         if (irods::hierarchy_parser{tmpDataObjInfo->rescHier}.resc_in_hier(preferredResc) &&
-            (writeFlag > 0 || tmpDataObjInfo->replStatus > 0)) {
+            (writeFlag > 0 || STALE_REPLICA != tmpDataObjInfo->replStatus)) {
             if (prevDataObjInfo) {
                 prevDataObjInfo->next = tmpDataObjInfo->next;
                 queDataObjInfo(dataObjInfoHead, tmpDataObjInfo, 1, topFlag);

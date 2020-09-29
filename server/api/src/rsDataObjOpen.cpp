@@ -988,7 +988,7 @@ int rsDataObjOpen(rsComm_t *rsComm, dataObjInp_t *dataObjInp)
                 fs::server::last_write_time(*rsComm, parent_path, mtime);
             }
             catch (const fs::filesystem_error& e) {
-                log::api::error(e.what());
+                irods::log(LOG_ERROR, e.what());
                 return e.code().value();
             }
         }
