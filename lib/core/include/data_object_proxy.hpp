@@ -17,6 +17,22 @@ namespace irods::experimental::data_object
 {
     using vote_type = std::tuple<std::string, float>;
 
+    /// A wrapper type used to represent a leaf resource name.
+    ///
+    /// \since 4.2.9
+    struct root_resource_name
+    {
+        std::string value;
+    };
+
+    /// A wrapper type used to represent a leaf resource name.
+    ///
+    /// \since 4.2.9
+    struct leaf_resource_name
+    {
+        std::string value;
+    };
+
     /// \brief Tag which indicates that this as a proxy for a data object which does not yet exist in the catalog
     ///
     /// \since 4.2.9
@@ -374,13 +390,13 @@ namespace irods::experimental::data_object
         return {obj, lifetime_manager{*head}};
     } // make_data_object_proxy
 
-    inline auto hierarchy_has_replica(std::string_view _root_resource_name, const dataObjInfo_t& _info) -> bool
+    inline auto hierarchy_has_replica(const root_resource_name& _root_resource_name, const dataObjInfo_t& _info) -> bool
     {
         const auto obj = make_data_object_proxy(_info);
-        return std::any_of(std::begin(obj.replicas()), std::end(obj.replicas()),
-            [&_root_resource_name](const auto& replica) {
-                const irods::hierarchy_parser hier{replica.hierarchy().data()};
-                return hier.first_resc() == _root_resource_name;
+        return std::any_of(std::cbegin(obj.replicas()), std::cend(obj.replicas()),
+            [&_root_resource_name](const auto& _replica) {
+                const irods::hierarchy_parser hier{_replica.hierarchy().data()};
+                return hier.first_resc() == _root_resource_name.value;
             });
     } // hierarchy_has_replica
 } // namespace irods::experimental::data_object

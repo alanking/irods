@@ -319,7 +319,7 @@ namespace irods::experimental::resource
             create_resc_name = apply_policy_for_create_operation(_comm, _inp);
 
             // TODO: Can we do a vote for a create first?
-            if (_obj.in_catalog() && data_object::hierarchy_has_replica(create_resc_name, *_obj.get())) {
+            if (_obj.in_catalog() && data_object::hierarchy_has_replica(data_object::root_resource_name{create_resc_name}, *_obj.get())) {
                 actual_op = irods::WRITE_OPERATION;
             }
             else {
