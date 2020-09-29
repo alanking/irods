@@ -160,7 +160,8 @@ namespace irods::experimental::replica
             const irods::experimental::filesystem::path& _logical_path,
             std::string_view _query_condition_string = "") -> query_value_type
         {
-            detail::throw_if_replica_logical_path_is_invalid(_comm, _logical_path);
+            irods::experimental::filesystem::detail::throw_if_path_is_empty(_logical_path);
+            irods::experimental::filesystem::detail::throw_if_path_length_exceeds_limit(_logical_path);
 
             query_builder qb;
 
