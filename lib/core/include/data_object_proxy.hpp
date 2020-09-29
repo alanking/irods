@@ -334,8 +334,8 @@ namespace irods::experimental::data_object
         try {
             const auto cond_input = key_value_proxy{_inp.condInput};
 
-            auto p = make_data_object_proxy(_comm, _inp.objPath);
-            auto obj = std::get<data_object_proxy<dataObjInfo_t>>(p);
+            auto obj_lm_pair = make_data_object_proxy(_comm, _inp.objPath);
+            auto obj = std::get<data_object_proxy<dataObjInfo_t>>(obj_lm_pair);
             try {
                 if (cond_input.contains(REPL_NUM_KW)) {
                     obj.requested_replica(std::stoi(cond_input.at(REPL_NUM_KW).value().data()));
@@ -353,7 +353,9 @@ namespace irods::experimental::data_object
                 front.in_pdmo(cond_input.at(IN_PDMO_KW).value());
             }
 
-            return p;
+            obj.in_catalog(true);
+
+            return obj_lm_pair;
         }
         catch (const irods::exception& e) {
             if (CAT_NO_ROWS_FOUND != e.code()) throw;
@@ -397,6 +399,15 @@ namespace irods::experimental::data_object
             [&_root_resource_name](const auto& _replica) {
                 const irods::hierarchy_parser hier{_replica.hierarchy().data()};
                 return hier.first_resc() == _root_resource_name.value;
+            });
+    } // hierarchy_has_replica
+
+    inline auto hierarchy_has_replica(const irods::hierarchy_parser& _hierarchy, const dataObjInfo_t& _info) -> bool
+    {
+        const auto obj = make_data_object_proxy(_info);
+        return std::any_of(std::cbegin(obj.replicas()), std::cend(obj.replicas()),
+            [&_hierarchy](const auto& _replica) {
+                return _replica.resource() == _hierarchy.last_resc();
             });
     } // hierarchy_has_replica
 } // namespace irods::experimental::data_object

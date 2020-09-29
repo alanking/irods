@@ -445,12 +445,7 @@ int sortObjInfoForOpen(
         // according to the below read only semantics
         // any copy in the head is a good copy.
         if (writeFlag) {
-            std::stringstream msg;
-            msg << __FUNCTION__;
-            msg << " - No data object found matching resource hierarchy: \"";
-            msg << resc_hier;
-            msg << "\"";
-            irods::log( ERROR( HIERARCHY_ERROR, msg.str() ) );
+            irods::log(LOG_ERROR, fmt::format("{} - No data object found matching resource hierarchy [{}]", __FUNCTION__, resc_hier));
             return HIERARCHY_ERROR;
         }
         return 0;

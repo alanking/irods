@@ -90,6 +90,8 @@ namespace
             cond_input[DEST_RESC_NAME_KW] = cond_input.at(DEF_RESC_NAME_KW);
         }
 
+        cond_input[REG_REPL_KW] = "";
+
         return destination_data_obj_inp;
     } // init_destination_replica_input
 

@@ -153,8 +153,7 @@ namespace
     auto register_intermediate_replica(
         rsComm_t& _comm,
         dataObjInp_t& _inp,
-        std::string_view _physical_path,
-        const int _dest_l1_desc_inx) -> int
+        std::string_view _physical_path) -> int
     {
         auto cond_input = irods::experimental::make_key_value_proxy(_inp.condInput);
 

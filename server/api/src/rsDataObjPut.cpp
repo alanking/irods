@@ -215,7 +215,7 @@ auto throw_if_force_put_to_new_resource(
     irods::experimental::data_object::data_object_proxy<dataObjInfo_t>& _obj) -> void
 {
     const auto cond_input = irods::experimental::make_key_value_proxy(_inp.condInput);
-    if (_obj.replicas().empty() ||
+    if (!_obj.in_catalog() ||
         !cond_input.contains(DEST_RESC_NAME_KW) ||
         !cond_input.contains(FORCE_FLAG_KW) ||
         cond_input.at(DEST_RESC_NAME_KW).value().empty()) {
