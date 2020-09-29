@@ -11,28 +11,37 @@ namespace
     namespace data_object   = irods::experimental::data_object;
     using log               = irods::experimental::log;
     using json              = nlohmann::json;
-    using data_object_proxy = data_object::data_object_proxy<const dataObjInfo_t>;
-    using replica_proxy     = replica::replica_proxy<const dataObjInfo_t>;
+    using data_object_proxy = data_object::data_object_proxy<dataObjInfo_t>;
+    using replica_proxy     = replica::replica_proxy<dataObjInfo_t>;
 } // anonymous namespace
 
 namespace irods::experimental
 {
-    auto lock_data_object(
-        RsComm& _comm,
-        const dataObjInfo_t& _info,
-        const repl_status_t _lock_type) -> json
+    auto lock_data_object(RsComm& _comm, data_object_proxy& _obj, replica_proxy& _opened_replica, const repl_status_t _lock_type) -> json
     {
-        const auto _obj = data_object_proxy{_info};
-
-        auto input = data_object::to_json(_obj);
-
         // Set each replica status to the new lock state
-        for (auto&& replica : input["replicas"]) {
-            auto& after = replica["after"];
-            after["data_is_dirty"] = std::to_string(_lock_type);
+        json input;
+        input["data_id"] = std::to_string(_obj.data_id());
+
+        for (auto& repl : _obj.replicas()) {
+            const json before = replica::to_json(repl);
+
+            if (WRITE_LOCK == _lock_type && _opened_replica.replica_number() == repl.replica_number()) {
+                repl.replica_status(INTERMEDIATE_REPLICA);
+            }
+            else {
+                repl.replica_status(_lock_type);
+            }
+
+            const json after = replica::to_json(repl);
+
+            input["replicas"].push_back(json{
+                {"before", before},
+                {"after", after}
+            });
         }
 
-        // TODO: update the actual structure?
+        irods::log(LOG_NOTICE, fmt::format("[{}:{}] - input:[{}]", __FUNCTION__, __LINE__, input.dump()));
 
         // Set catalog information with json structured replica information
         char* output{};
