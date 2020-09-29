@@ -220,6 +220,18 @@ namespace irods::experimental::data_object
 
         auto winner(const vote_type& _winner) -> void { winner_ = _winner; }
 
+        template<
+            typename P = doi_type,
+            typename = std::enable_if_t<!std::is_const_v<P>>>
+        auto add_replica(dataObjInfo_t& _repl) -> void
+        {
+            if (replica_count > 0) {
+                auto& replica = replica_list_.back();
+                replica.get()->next = &_repl;
+            }
+            replica_list_.push_back(replica::replica_proxy{_repl});
+        }
+
     private:
         /// \brief Pointer to underlying doi_type
         /// \since 4.2.9

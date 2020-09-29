@@ -49,24 +49,50 @@
 
 #include <chrono>
 
-namespace {
+namespace
+{
+    namespace data_object = irods::experimental::data_object;
+    namespace replica     = irods::experimental::replica;
+
+    auto open_replica(
+        RsComm& _comm,
+        dataObjInp_t& _inp,
+        data_object::data_object_proxy<dataObjInfo_t>& _obj) -> int
+    {
+        _inp.openFlags = O_CREAT | O_WRONLY | O_TRUNC;
+        int l1descInx = rsDataObjOpen(&_comm, &_inp);
+        if (l1descInx <= 2) {
+            if ( l1descInx >= 0 ) {
+                irods::log(LOG_ERROR, fmt::format(
+                        "{}: rsDataObjOpen of {} error, status = {}",
+                        __FUNCTION__, _inp.objPath, l1descInx));
+                return SYS_FILE_DESC_OUT_OF_RANGE;
+            }
+            return l1descInx;
+        }
+        _obj.in_catalog(true);
+    } // open_replica
+
+    auto update_all_replicas(RsComm& _comm, dataObjInp_t& _inp) -> void
+    {
+        transferStat_t* transStat = nullptr;
+
+        const int status = rsDataObjRepl(&_comm, &_inp, &transStat);
+
+        free(transStat);
+
+        if (status < 0) {
+            irods::log(LOG_NOTICE, fmt::format("rsDataObjRepl failed during put of [{}]", _inp.objPath));
+        }
+        return status;
+    } // update_all_replicas
 
 int parallel_transfer_put(
     rsComm_t *rsComm,
     dataObjInp_t *dataObjInp,
     portalOprOut_t **portalOprOut)
 {
-
     // Parallel transfer
-    dataObjInp->openFlags |= O_CREAT | O_RDWR;
-    int l1descInx = rsDataObjOpen(rsComm, dataObjInp);
-    if ( l1descInx < 0 ) {
-        return l1descInx;
-    }
-
-    L1desc[l1descInx].oprType = PUT_OPR;
-    L1desc[l1descInx].dataSize = dataObjInp->dataSize;
-
     if ( getStructFileType( L1desc[l1descInx].dataObjInfo->specColl ) >= 0 ) { // JMC - backport 4682
         *portalOprOut = ( portalOprOut_t * ) malloc( sizeof( portalOprOut_t ) );
         bzero( *portalOprOut,  sizeof( portalOprOut_t ) );
@@ -75,7 +101,6 @@ int parallel_transfer_put(
     }
 
     int status = preProcParaPut( rsComm, l1descInx, portalOprOut );
-
     if ( status < 0 ) {
         openedDataObjInp_t dataObjCloseInp{};
         dataObjCloseInp.l1descInx = l1descInx;
@@ -84,18 +109,6 @@ int parallel_transfer_put(
         return status;
     }
 
-    int allFlag = 0;
-    if ( getValByKey( &dataObjInp->condInput, ALL_KW ) != NULL ) {
-        allFlag = 1;
-    }
-
-    dataObjInp_t replDataObjInp{};
-    if ( allFlag == 1 ) {
-        /* need to save dataObjInp. get freed in sendAndRecvBranchMsg */
-        rstrcpy( replDataObjInp.objPath, dataObjInp->objPath, MAX_NAME_LEN );
-        addKeyVal( &replDataObjInp.condInput, UPDATE_REPL_KW, "" );
-        addKeyVal( &replDataObjInp.condInput, ALL_KW, "" );
-    }
     /* return portalOprOut to the client and wait for the rcOprComplete
      * call. That is when the parallel I/O is done */
     int retval = sendAndRecvBranchMsg( rsComm, rsComm->apiInx, status,
@@ -106,57 +119,33 @@ int parallel_transfer_put(
         dataObjCloseInp.l1descInx = l1descInx;
         L1desc[l1descInx].oprStatus = retval;
         rsDataObjClose( rsComm, &dataObjCloseInp );
-        if ( allFlag == 1 ) {
-            clearKeyVal( &replDataObjInp.condInput );
-        }
-    }
-    else if (1 == allFlag) {
-        transferStat_t *transStat = NULL;
-        status = rsDataObjRepl(rsComm, &replDataObjInp, &transStat);
-        free(transStat);
-        clearKeyVal(&replDataObjInp.condInput);
-        if (status < 0) {
-            const auto err{ERROR(status, "rsDataObjRepl failed")};
-            irods::log(err);
-            return err.code();
-        }
+        return SYS_NO_HANDLER_REPLY_MSG;
     }
 
     /* already send the client the status */
     return SYS_NO_HANDLER_REPLY_MSG;
 } // parallel_transfer_put
 
-auto single_buffer_put(RsComm& _comm, dataObjInp_t& _inp, bytesBuf_t& _input_buf) -> int
+auto single_buffer_put(RsComm& _comm, const int _fd bytesBuf_t& _input_buf) -> int
 {
-    _inp.openFlags |= (O_CREAT | O_RDWR | O_TRUNC);
-    int l1descInx = rsDataObjOpen(&_comm, &_inp);
-    if (l1descInx <= 2) {
-        if ( l1descInx >= 0 ) {
-            irods::log(LOG_ERROR, fmt::format(
-                    "{}: rsDataObjOpen of {} error, status = {}",
-                    __FUNCTION__, _inp.objPath, l1descInx));
-            return SYS_FILE_DESC_OUT_OF_RANGE;
-        }
-        return l1descInx;
-    }
+    auto& l1desc = L1desc[_fd];
 
-    dataObjInfo_t *myDataObjInfo = L1desc[l1descInx].dataObjInfo;
-    openedDataObjInp_t dataObjWriteInp{};
-    dataObjWriteInp.len = _input_buf.len;
-    dataObjWriteInp.l1descInx = l1descInx;
-
-    bytesBuf_t dataObjWriteInpBBuf{};
-    dataObjWriteInpBBuf.buf = _input_buf.buf;
-    dataObjWriteInpBBuf.len = _input_buf.len;
-    int bytesWritten = rsDataObjWrite(&_comm, &dataObjWriteInp, &dataObjWriteInpBBuf);
+    openedDataObjInp_t write_inp{};
+    bytesBuf_t write_buf{};
+    write_inp.len = _input_buf.len;
+    write_inp.l1descInx = _fd;
+    write_buf.buf = _input_buf.buf;
+    write_buf.len = _input_buf.len;
+    int bytesWritten = rsDataObjWrite(&_comm, &write_inp, &write_buf);
     if ( bytesWritten < 0 ) {
+        dataObjInfo_t* data_obj_info = l1desc.dataObjInfo;
+
         rodsLog(LOG_NOTICE,
                 "%s: rsDataObjWrite for %s failed with %d",
-                __FUNCTION__, L1desc[l1descInx].dataObjInfo->filePath, bytesWritten );
+                __FUNCTION__, data_obj_info->filePath, bytesWritten );
 
         // TODO: find issue which says not to do this
-        dataObjInfo_t* data_obj_info = L1desc[l1descInx].dataObjInfo;
-        const int unlink_status = dataObjUnlinkS(&_comm, L1desc[l1descInx].dataObjInp, data_obj_info);
+        const int unlink_status = dataObjUnlinkS(&_comm, l1desc.dataObjInp, data_obj_info);
         if (unlink_status < 0) {
             irods::log(ERROR(unlink_status,
                 (boost::format("dataObjUnlinkS failed for [%s] with [%d]") %
@@ -164,49 +153,28 @@ auto single_buffer_put(RsComm& _comm, dataObjInp_t& _inp, bytesBuf_t& _input_buf
         }
     }
 
-    if ( bytesWritten == 0 && myDataObjInfo->dataSize > 0 ) {
+    if ( bytesWritten == 0 && l1desc.dataObjInfo->dataSize > 0 ) {
         /* overwrite with 0 len file */
-        L1desc[l1descInx].bytesWritten = 1;
+        l1desc.bytesWritten = 1;
     }
     else {
-        L1desc[l1descInx].bytesWritten = bytesWritten;
+        l1desc.bytesWritten = bytesWritten;
     }
 
-    L1desc[l1descInx].dataSize = _inp.dataSize;
-
-    openedDataObjInp_t dataObjCloseInp{};
-    dataObjCloseInp.l1descInx = l1descInx;
-    L1desc[l1descInx].oprStatus = bytesWritten;
-    L1desc[l1descInx].oprType = PUT_OPR;
-    int status = rsDataObjClose(&_comm, &dataObjCloseInp);
-    if ( status < 0 ) {
-        rodsLog( LOG_DEBUG,
-                "%s: rsDataObjClose of %d error, status = %d",
-                __FUNCTION__, l1descInx, status );
+    openedDataObjInp_t close_inp{};
+    close_inp.l1descInx = _fd;
+    l1desc.oprStatus = bytesWritten;
+    l1desc.oprType = PUT_OPR;
+    if (const int ec = rsDataObjClose(&_comm, &close_inp); ec < 0) {
+        irods::log(LOG_ERROR, fmt::format(
+            "{}: rsDataObjClose of {} error, status = {}",
+            __FUNCTION__, _fd, ec));
     }
 
     if ( bytesWritten < 0 ) {
         return bytesWritten;
     }
 
-    if (status < 0) {
-        return status;
-    }
-
-    if (getValByKey(&_inp.condInput, ALL_KW)) {
-        /* update the rest of copies */
-        transferStat_t *transStat{};
-        status = rsDataObjRepl(&_comm, &_inp, &transStat );
-        if (transStat) {
-            free(transStat);
-        }
-    }
-    if (status >= 0) {
-        status = applyRuleForPostProcForWrite(&_comm, &_input_buf, _inp.objPath);
-        if (status >= 0) {
-            status = 0;
-        }
-    }
     return status;
 } // single_buffer_put
 
@@ -314,23 +282,35 @@ int rsDataObjPut_impl(
             hier = cond_input.at(RESC_HIER_STR_KW).value();
         }
 
-        const auto hier_has_replica = [&hier, &replicas = obj.replicas()]
-        {
-            return std::any_of(replicas.begin(), replicas.end(),
-                [&hier](const auto& replica) {
-                    return replica.hierarchy() == hier;
-                });
-        }();
-
-        if (hier_has_replica && !cond_input.contains(FORCE_FLAG_KW)) {
+        if (data_object::hierarchy_has_replica(irods::hierarchy_parser{hier}, *obj.get()) &&
+            !cond_input.contains(FORCE_FLAG_KW)) {
             return OVERWRITE_WITHOUT_FORCE_FLAG;
         }
 
-        if (cond_input.contains(DATA_INCLUDED_KW)) {
-            return single_buffer_put(*rsComm, *dataObjInp, *dataObjInpBBuf);
+        // capture "before" state here
+        nlohmann::json before;
+        for (auto&& repl : obj.replicas()) {
+            before.push_back(replica::to_json(repl))
         }
 
-        return parallel_transfer_put( rsComm, dataObjInp, portalOprOut );
+        const int opened_fd = open_replica(*rsComm, *dataObjInp);
+        L1desc[opened_fd].dataSize = dataObjInp->dataSize;
+        L1desc[opened_fd].oprType = PUT_OPR;
+
+        if (cond_input.contains(DATA_INCLUDED_KW)) {
+            single_buffer_put(*rsComm, *dataObjInp, *dataObjInpBBuf, obj);
+        }
+        else {
+            parallel_transfer_put( rsComm, dataObjInp, portalOprOut );
+        }
+
+        // finalize here
+
+        if (cond_input.contains(ALL_KW)) {
+            return update_all_replicas(*rsComm, *dataObjInp);
+        }
+
+        return 0;
     }
     catch (const irods::exception& e) {
         irods::log(LOG_ERROR, e.what());
