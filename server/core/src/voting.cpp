@@ -41,6 +41,12 @@ namespace {
         return std::cend(replicas) == itr ? std::nullopt : std::make_optional(std::ref(*itr));
     } // find_local_replica
 
+    auto replica_is_locked(const irods::physical_object& _replica)
+    {
+        return READ_LOCK  == _replica.replica_status() ||
+               WRITE_LOCK == _replica.replica_status();
+    } // replica_is_locked
+
     auto calculate_with_repl_status(
         context& ctx,
         const repl_status_t preferred_repl_status)
@@ -53,6 +59,10 @@ namespace {
         }
 
         const auto& r = repl->get();
+        if (replica_is_locked(r)) {
+            return vote::zero;
+        }
+
         if (INTERMEDIATE_REPLICA == r.replica_status()) {
             // Because the replica is in an intermediate state, we must check if the client
             // provided a replica token. The replica token represents a piece of information that
