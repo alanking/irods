@@ -1,6 +1,12 @@
 // =-=-=-=-=-=-=-
 #include "irods_physical_object.hpp"
 
+#define IRODS_FILESYSTEM_ENABLE_SERVER_SIDE_API
+#include "filesystem.hpp"
+
+namespace {
+    namespace fs = irods::experimental::filesystem;
+} // anonymous namesapce
 
 namespace irods {
 
@@ -45,6 +51,33 @@ namespace irods {
     {
     } // cctor
 
+    physical_object::physical_object(const dataObjInfo_t& _rhs)
+        : replica_status_{_rhs.replStatus}
+        , repl_num_{_rhs.replNum}
+        , map_id_{_rhs.dataMapId}
+        , size_{_rhs.dataSize}
+        , id_{_rhs.dataId}
+        , coll_id_{_rhs.collId}
+        , name_{fs::path{_rhs.objPath}.object_name()}
+        , version_{_rhs.version}
+        , type_name_{_rhs.dataType}
+        , resc_name_{_rhs.rescName}
+        , path_{_rhs.filePath}
+        , owner_name_{_rhs.dataOwnerName}
+        , owner_zone_{_rhs.dataOwnerZone}
+        , status_{_rhs.statusString}
+        , checksum_{_rhs.chksum}
+        , expiry_ts_{_rhs.dataExpiry}
+        , mode_{_rhs.dataMode}
+        , r_comment_{_rhs.dataComments}
+        , create_ts_{_rhs.dataCreate}
+        , modify_ts_{_rhs.dataModify}
+        , resc_hier_{_rhs.rescHier}
+        , resc_id_{_rhs.rescId}
+        , vote_{}
+    {
+    }
+
 // =-=-=-=-=-=-=-
 // public - destructor
     physical_object::~physical_object() {
@@ -83,6 +116,32 @@ namespace irods {
         return *this;
 
     } // operator=
+
+    auto irods::physical_object::to_json() -> nlohmann::json
+    {
+        return nlohmann::json{
+            {"data_id", std::to_string(id())},
+            {"coll_id", std::to_string(coll_id())},
+            {"data_name", fs::path{name()}.object_name()},
+            {"data_repl_num", std::to_string(repl_num())},
+            {"data_version", version()},
+            {"data_type_name", type_name()},
+            {"data_size", std::to_string(size())},
+            {"data_path", path()},
+            {"data_owner_name", owner_name()},
+            {"data_owner_zone", owner_zone()},
+            {"data_is_dirty", std::to_string(replica_status())},
+            {"data_status", status()},
+            {"data_checksum", checksum()},
+            {"data_expiry_ts", expiry_ts()},
+            {"data_map_id", std::to_string(map_id())},
+            {"data_mode", mode()},
+            {"r_comment", r_comment()},
+            {"create_ts", create_ts()},
+            {"modify_ts", modify_ts()},
+            {"resc_id", std::to_string(resc_id())}
+        };
+    } // to_json
 
 
 }; // namespace irods

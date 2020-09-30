@@ -79,6 +79,11 @@ namespace irods {
 
     } // get_parent
 
+    auto resource::has_parent() -> bool
+    {
+        return parent_.get();
+    } // get_parent
+
     void resource::children(
         std::vector<std::string>& _out ) {
         for( auto c_itr : children_ ) {
@@ -90,14 +95,25 @@ auto get_resource_name(plugin_context& ctx) -> std::string
 {
     std::string resc_name{};
     if (error err = ctx.prop_map().get<std::string>(RESOURCE_NAME, resc_name); !err.ok()) {
+        const irods::error ret = PASSMSG("Failed to get \"name\" property.", err);
         THROW(err.code(), err.result());
     }
     return resc_name;
 } // get_resource_name
 
+auto get_resource_id(plugin_context& ctx) -> rodsLong_t
+{
+    rodsLong_t resc_id{};
+    if (error err = ctx.prop_map().get<rodsLong_t>(RESOURCE_ID, resc_id); !err.ok()) {
+        const irods::error ret = PASSMSG("Failed to get \"id\" property.", err);
+        THROW(err.code(), err.result());
+    }
+    return resc_id;
+} // get_resource_name
+
 auto get_resource_status(plugin_context& ctx) -> int
 {
-    int resc_status{}; 
+    int resc_status{};
     if (error err = ctx.prop_map().get<int>(RESOURCE_STATUS, resc_status); !err.ok()) {
         const irods::error ret = PASSMSG("Failed to get \"status\" property.", err);
         THROW(ret.code(), ret.result());

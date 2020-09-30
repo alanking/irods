@@ -26,6 +26,7 @@ set(
   ${CMAKE_SOURCE_DIR}/lib/core/include/client_connection.hpp
   ${CMAKE_SOURCE_DIR}/lib/core/include/connection_pool.hpp
   ${CMAKE_SOURCE_DIR}/lib/core/include/cpUtil.h
+  ${CMAKE_SOURCE_DIR}/lib/core/include/data_object.hpp
   ${CMAKE_SOURCE_DIR}/lib/core/include/data_object_proxy.hpp
   ${CMAKE_SOURCE_DIR}/lib/core/include/dispatch_processor.hpp
   ${CMAKE_SOURCE_DIR}/lib/core/include/dstream.hpp

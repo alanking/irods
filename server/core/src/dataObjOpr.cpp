@@ -445,12 +445,7 @@ int sortObjInfoForOpen(
         // according to the below read only semantics
         // any copy in the head is a good copy.
         if (writeFlag) {
-            std::stringstream msg;
-            msg << __FUNCTION__;
-            msg << " - No data object found matching resource hierarchy: \"";
-            msg << resc_hier;
-            msg << "\"";
-            irods::log( ERROR( HIERARCHY_ERROR, msg.str() ) );
+            irods::log(LOG_ERROR, fmt::format("{} - No data object found matching resource hierarchy [{}]", __FUNCTION__, resc_hier));
             return HIERARCHY_ERROR;
         }
         return 0;
@@ -490,17 +485,8 @@ int create_and_sort_data_obj_info_for_open(
 	// initialize output list
 	*data_obj_info_head = NULL;
 
-// check C++11 support
-#if __cplusplus > 199711L
 	// iterate over replicas
-	for (auto& replica : file_obj->replicas()) {
-
-#else
-	// iterate over replicas
-	std::vector< irods::physical_object >::iterator itr;
-	for (itr = file_obj->replicas().begin(); itr != file_obj->replicas().end(); ++itr) {
-		irods::physical_object replica = *itr;
-#endif
+	for (auto&& replica : file_obj->replicas()) {
 
 		// look for replica with matching resource hierarchy
 		if (replica.resc_hier() == resc_hier) {
@@ -642,7 +628,7 @@ requeDataObjInfoByResc( dataObjInfo_t **dataObjInfoHead,
     dataObjInfo_t* prevDataObjInfo = NULL;
     while (tmpDataObjInfo) {
         if (irods::hierarchy_parser{tmpDataObjInfo->rescHier}.resc_in_hier(preferredResc) &&
-            (writeFlag > 0 || tmpDataObjInfo->replStatus > 0)) {
+            (writeFlag > 0 || STALE_REPLICA != tmpDataObjInfo->replStatus)) {
             if (prevDataObjInfo) {
                 prevDataObjInfo->next = tmpDataObjInfo->next;
                 queDataObjInfo(dataObjInfoHead, tmpDataObjInfo, 1, topFlag);

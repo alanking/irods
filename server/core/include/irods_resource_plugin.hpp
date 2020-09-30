@@ -84,6 +84,8 @@ namespace irods {
             virtual error set_parent( const resource_ptr& );
             virtual error get_parent( resource_ptr& );
 
+            virtual bool has_parent();
+
         protected:
             // =-=-=-=-=-=-=-
             /// @brief Pointers to Child and Parent Resources
@@ -93,15 +95,30 @@ namespace irods {
     }; // class resource
 
     /// \brief Convenience function for getting resource name from plugin context
+    ///
     /// \param[in] ctx - Plugin context from which resource name will be extracted
+    ///
     /// \throws irods::exception - thrown if the error object returned by get() is not ok()
     auto get_resource_name(plugin_context& ctx) -> std::string;
+    //
+    /// \brief Convenience function for getting resource id from plugin context
+    ///
+    /// \param[in] ctx - Plugin context from which resource id will be extracted
+    ///
+    /// \throws irods::exception - thrown if the error object returned by get() is not ok()
+    auto get_resource_id(plugin_context& ctx) -> rodsLong_t;
+
     /// \brief Convenience function for getting resource status from plugin context
+    ///
     /// \param[in] ctx - Plugin context from which resource status will be extracted
+    ///
     /// \throws irods::exception - thrown if the error object returned by get() is not ok()
     auto get_resource_status(plugin_context& ctx) -> int;
+
     /// \brief Convenience function for getting resource location from plugin context
+    ///
     /// \param[in] ctx - Plugin context from which resource location will be extracted
+    ///
     /// \throws irods::exception - thrown if the error object returned by get() is not ok()
     auto get_resource_location(plugin_context& ctx) -> std::string;
 

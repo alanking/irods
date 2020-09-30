@@ -2653,6 +2653,7 @@ irods::error db_reg_data_obj_op(
         return ERROR( iVal, "" );
     }
     snprintf( collIdNum, MAX_NAME_LEN, "%lld", iVal );
+    _data_obj_info->collId = iVal; /* store as output parameter */
 
     /* Make sure no collection already exists by this name */
     if ( logSQL != 0 ) {
@@ -2683,6 +2684,15 @@ irods::error db_reg_data_obj_op(
     snprintf( dataSizeNum, MAX_NAME_LEN, "%lld", _data_obj_info->dataSize );
     getNowStr( myTime );
 
+    if (0 == strcmp(_data_obj_info->dataOwnerName, "")) {
+        strcpy(_data_obj_info->dataOwnerName, _ctx.comm()->clientUser.userName);
+    }
+    if (0 == strcmp(_data_obj_info->dataOwnerZone, "")) {
+        strcpy(_data_obj_info->dataOwnerZone, _ctx.comm()->clientUser.rodsZone);
+    }
+    if (0 == strcmp(_data_obj_info->dataCreate, "")) {
+        strcpy(_data_obj_info->dataCreate, myTime);
+    }
     if (0 == strcmp(_data_obj_info->dataModify, "")) {
         strcpy(_data_obj_info->dataModify, myTime);
     }
@@ -2697,12 +2707,12 @@ irods::error db_reg_data_obj_op(
     cllBindVars[6] = dataSizeNum;
     cllBindVars[7] = resc_id_str.c_str();
     cllBindVars[8] = _data_obj_info->filePath;
-    cllBindVars[9] = _ctx.comm()->clientUser.userName;
-    cllBindVars[10] = _ctx.comm()->clientUser.rodsZone;
+    cllBindVars[9] = _data_obj_info->dataOwnerName;
+    cllBindVars[10] = _data_obj_info->dataOwnerZone;
     cllBindVars[11] = dataStatusNum;
     cllBindVars[12] = _data_obj_info->chksum;
     cllBindVars[13] = _data_obj_info->dataMode;
-    cllBindVars[14] = myTime;
+    cllBindVars[14] = _data_obj_info->dataCreate;
     cllBindVars[15] = _data_obj_info->dataModify;
     cllBindVars[16] = data_expiry_ts;
     cllBindVars[17] = "EMPTY_RESC_NAME";
@@ -2973,6 +2983,7 @@ irods::error db_reg_replica_op(
     }
     statementNumber = status;
 
+    _dst_data_obj_info->collId = _src_data_obj_info->collId; /* store as output parameter */
     std::string resc_id_str = boost::lexical_cast<std::string>(_dst_data_obj_info->rescId);
 
     cVal[IX_DATA_REPL_NUM]   = nextRepl;
@@ -2984,6 +2995,12 @@ irods::error db_reg_replica_op(
     getNowStr( myTime );
     cVal[IX_MODIFY_TS] = myTime;
     cVal[IX_CREATE_TS] = myTime;
+    if (0 == strcmp(_dst_data_obj_info->dataModify, "")) {
+        strcpy(_dst_data_obj_info->dataModify, myTime);
+    }
+    if (0 == strcmp(_dst_data_obj_info->dataCreate, "")) {
+        strcpy(_dst_data_obj_info->dataCreate, myTime);
+    }
 
     cVal[IX_RESC_NAME2] = (char*)resc_id_str.c_str();//_dst_data_obj_info->rescName; // JMC - backport 4669
     cVal[IX_DATA_PATH2] = _dst_data_obj_info->filePath; // JMC - backport 4669

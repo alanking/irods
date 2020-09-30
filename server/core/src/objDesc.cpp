@@ -1,34 +1,31 @@
-/*** Copyright (c), The Regents of the University of California            ***
- *** For more information please refer to files in the COPYRIGHT directory ***/
-
-/* objDesc.c - L1 type operation. Will call low level l1desc drivers
- */
-
-#include "rcMisc.h"
-#include "rodsDef.h"
-#include "objDesc.hpp"
-#include "dataObjOpr.hpp"
-#include "rodsDef.h"
-#include "rsGlobalExtern.hpp"
-#include "fileChksum.h"
-#include "modDataObjMeta.h"
-#include "objMetaOpr.hpp"
 #include "collection.hpp"
-#include "resource.hpp"
 #include "dataObjClose.h"
-#include "rcGlobalExtern.h"
+#include "dataObjOpr.hpp"
+#include "fileChksum.h"
 #include "genQuery.h"
+#include "modDataObjMeta.h"
+#include "objDesc.hpp"
+#include "objMetaOpr.hpp"
+#include "rcGlobalExtern.h"
+#include "rcMisc.h"
+#include "resource.hpp"
+#include "rodsDef.h"
+#include "rodsDef.h"
+#include "rsDataObjClose.hpp"
 #include "rsGenQuery.hpp"
 #include "rsGetHierFromLeafId.hpp"
+#include "rsGlobalExtern.hpp"
 #include "rsQuerySpecColl.hpp"
-#include "rsDataObjClose.hpp"
 
-#include "irods_resource_backport.hpp"
-#include "irods_hierarchy_parser.hpp"
-#include "irods_stacktrace.hpp"
-#include "irods_re_structs.hpp"
 #include "get_hier_from_leaf_id.h"
+#include "irods_hierarchy_parser.hpp"
+#include "irods_re_structs.hpp"
+#include "irods_resource_backport.hpp"
+#include "irods_stacktrace.hpp"
 #include "key_value_proxy.hpp"
+
+#define IRODS_REPLICA_ENABLE_SERVER_SIDE_API
+#include "replica_proxy.hpp"
 
 int
 initL1desc() {
@@ -156,73 +153,57 @@ freeL1desc( int l1descInx ) {
 int
 fillL1desc( int l1descInx, dataObjInp_t *dataObjInp,
             dataObjInfo_t *dataObjInfo, int replStatus, rodsLong_t dataSize ) {
-    keyValPair_t *condInput;
-    char *tmpPtr;
+    auto& fd = L1desc[l1descInx];
 
     // Initialize the bytesWritten to -1 rather than 0.  If this is negative then we
     // know no bytes have been written.  This is so that zero length files can be handled
     // similarly to non-zero length files.
-    L1desc[l1descInx].bytesWritten = -1;
+    fd.bytesWritten = -1;
 
-    char* resc_hier = getValByKey( &dataObjInp->condInput, RESC_HIER_STR_KW );
-    if ( dataObjInfo->rescHier[0] == '\0' && resc_hier ) {
-        rstrcpy( dataObjInfo->rescHier, resc_hier, MAX_NAME_LEN );
-        if (dataObjInfo->rescName[0] == '\0') {
-            const std::string root = irods::hierarchy_parser{resc_hier}.first_resc();
-            rstrcpy( dataObjInfo->rescName, root.c_str(), NAME_LEN );
+    auto cond_input = irods::experimental::make_key_value_proxy(dataObjInp->condInput);
+    auto replica = irods::experimental::replica::make_replica_proxy(*dataObjInfo);
+
+    if (replica.hierarchy().empty() && cond_input.contains(RESC_HIER_STR_KW)) {
+        replica.hierarchy(cond_input.at(RESC_HIER_STR_KW).value());
+        if (replica.resource().empty()) {
+            replica.resource(irods::hierarchy_parser{replica.hierarchy().data()}.first_resc());
         }
     }
 
-    condInput = &dataObjInp->condInput;
-    char* in_pdmo = getValByKey( condInput, IN_PDMO_KW );
-    if ( in_pdmo != NULL ) {
-        rstrcpy( L1desc[l1descInx].in_pdmo, in_pdmo, MAX_NAME_LEN );
+    if (cond_input.contains(IN_PDMO_KW)) {
+        rstrcpy(fd.in_pdmo, cond_input.at(IN_PDMO_KW).value().data(), MAX_NAME_LEN);
     }
     else {
-        rstrcpy( L1desc[l1descInx].in_pdmo, "", MAX_NAME_LEN );
+        rstrcpy(fd.in_pdmo, "", MAX_NAME_LEN);
     }
 
-    const auto open_type{getValByKey(condInput, OPEN_TYPE_KW)};
-    if (open_type) {
-        L1desc[l1descInx].openType = std::atoi(open_type);
+    if (cond_input.contains(OPEN_TYPE_KW)) {
+        fd.openType = std::atoi(cond_input.at(OPEN_TYPE_KW).value().data());
     }
 
-    if ( dataObjInp != NULL ) {
-        /* always repl the .dataObjInp */
-        L1desc[l1descInx].dataObjInp = ( dataObjInp_t* )malloc( sizeof( dataObjInp_t ) );
-        replDataObjInp( dataObjInp, L1desc[l1descInx].dataObjInp );
-        L1desc[l1descInx].dataObjInpReplFlag = 1;
+    fd.dataObjInp = (dataObjInp_t*)malloc(sizeof(dataObjInp_t));
+    std::memset(fd.dataObjInp, 0, sizeof(dataObjInp_t));
+    replDataObjInp(dataObjInp, fd.dataObjInp);
+    fd.dataObjInpReplFlag = 1;
+
+    fd.dataObjInfo = dataObjInfo;
+    fd.oprType = dataObjInp->oprType;
+    fd.replStatus = replStatus;
+    fd.dataSize = dataSize;
+
+    if (cond_input.contains(REG_CHKSUM_KW)) {
+        fd.chksumFlag = REG_CHKSUM;
+        rstrcpy(fd.chksum, cond_input.at(REG_CHKSUM_KW).value().data(), NAME_LEN);
     }
-    else {
-        /* XXXX this can be a problem in rsDataObjClose */
-        L1desc[l1descInx].dataObjInp = NULL;
+    else if (cond_input.contains(VERIFY_CHKSUM_KW)) {
+        fd.chksumFlag = VERIFY_CHKSUM;
+        rstrcpy(fd.chksum, cond_input.at(VERIFY_CHKSUM_KW).value().data(), NAME_LEN);
     }
 
-    L1desc[l1descInx].dataObjInfo = dataObjInfo;
-    if ( dataObjInp != NULL ) {
-        L1desc[l1descInx].oprType = dataObjInp->oprType;
-    }
-    L1desc[l1descInx].replStatus = replStatus;
-    L1desc[l1descInx].dataSize = dataSize;
-    if ( condInput != NULL && condInput->len > 0 ) {
-        if ( ( tmpPtr = getValByKey( condInput, REG_CHKSUM_KW ) ) != NULL ) {
-            L1desc[l1descInx].chksumFlag = REG_CHKSUM;
-            rstrcpy( L1desc[l1descInx].chksum, tmpPtr, NAME_LEN );
-        }
-        else if ( ( tmpPtr = getValByKey( condInput, VERIFY_CHKSUM_KW ) ) !=
-                  NULL ) {
-            L1desc[l1descInx].chksumFlag = VERIFY_CHKSUM;
-            rstrcpy( L1desc[l1descInx].chksum, tmpPtr, NAME_LEN );
-        }
-    }
+    fd.purgeCacheFlag = cond_input.contains(PURGE_CACHE_KW) ? 1 : 0;
 
-    if (getValByKey(&dataObjInp->condInput, PURGE_CACHE_KW)) {
-        L1desc[l1descInx].purgeCacheFlag = 1;
-    }
-
-    const char* kvp_str = getValByKey(&dataObjInp->condInput, KEY_VALUE_PASSTHROUGH_KW);
-    if (kvp_str) {
-        addKeyVal(&dataObjInfo->condInput, KEY_VALUE_PASSTHROUGH_KW, kvp_str);
+    if (cond_input.contains(KEY_VALUE_PASSTHROUGH_KW)) {
+        addKeyVal(&dataObjInfo->condInput, KEY_VALUE_PASSTHROUGH_KW, cond_input.at(KEY_VALUE_PASSTHROUGH_KW).value().data());
     }
 
     return 0;
@@ -243,6 +224,9 @@ initDataObjInfoWithInp( dataObjInfo_t *dataObjInfo, dataObjInp_t *dataObjInp ) {
 
     if (kvp.contains(DATA_ID_KW)) {
         dataObjInfo->dataId = std::atoll(kvp.at(DATA_ID_KW).value().data());
+    }
+    if (kvp.contains(COLL_ID_KW)) {
+        dataObjInfo->collId = std::atoll(kvp.at(COLL_ID_KW).value().data());
     }
 
     if (kvp.contains(RESC_NAME_KW)) {

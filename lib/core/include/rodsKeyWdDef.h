@@ -120,7 +120,6 @@
 
 #define REGISTER_AS_INTERMEDIATE_KW         "registerAsIntermediate"
 #define STALE_ALL_INTERMEDIATE_REPLICAS_KW  "staleAllIntermediateReplicas"
-#define SOURCE_L1_DESC_KW                   "sourceL1Desc"
 
 // =-=-=-=-=-=-=-
 // JMC - backport 4599

@@ -16,7 +16,10 @@
 #include <vector>
 #include <tuple>
 
+#include "json.hpp"
+
 namespace irods {
+    using vote_type = std::tuple<std::string, float>;
 
     class file_object : public data_object {
         public:
@@ -102,6 +105,11 @@ namespace irods {
             virtual long                           coll_id()         const {
                 return coll_id_;
             }
+            const vote_type&                       winner()          const {
+                return winner_;
+            }
+
+            auto to_json() -> nlohmann::json;
 
             // =-=-=-=-=-=-=-
             // Mutators
@@ -135,6 +143,9 @@ namespace irods {
             virtual void coll_id(const long _coll_id) {
                 coll_id_ = _coll_id;
             }
+            void winner(const vote_type& _w) {
+                winner_ = _w;
+            }
 
         protected:
             // =-=-=-=-=-=-=-
@@ -153,10 +164,11 @@ namespace irods {
             // occurring from within a pdmo
             // call made from within the hierarchy
             std::vector< physical_object > replicas_;        // structures holding replica info initialized
-            long                           data_id_;
-            long                           coll_id_;
             // by factory fcn from
             // dataObjInfoHead
+            long                           data_id_;
+            long                           coll_id_;
+            vote_type                      winner_; // winner of the vote
 
     }; // class file_object
 
@@ -171,10 +183,8 @@ namespace irods {
                               file_object_ptr  _file_obj,
                               dataObjInfo_t**  _data_obj_info = nullptr);
 
-    irods::file_object_ptr make_file_object(
-        rsComm_t&       _comm,
-        dataObjInp_t&   _data_obj_inp,
-        dataObjInfo_t** _data_obj_info = nullptr);
+    //auto to_file_object(RsComm& _comm, const irods::experimental::data_object::data_object_proxy<dataObjInfo_t>& _info) -> irods::file_object_ptr;
+    auto to_file_object(RsComm& _comm, const dataObjInfo_t& _info, const int _requested_replica = -1) -> irods::file_object_ptr;
 }; // namespace irods
 
 #endif // __IRODS_FILE_OBJECT_HPP__

@@ -162,7 +162,6 @@ int open_destination_replica(
     auto kvp = ix::make_key_value_proxy(destination_data_obj_inp.condInput);
     kvp[REG_REPL_KW] = "";
     kvp[DATA_ID_KW] = std::to_string(L1desc[source_l1desc_inx].dataObjInfo->dataId);
-    kvp[SOURCE_L1_DESC_KW] = std::to_string(source_l1desc_inx);
     kvp.erase(PURGE_CACHE_KW);
 
     destination_data_obj_inp.oprType = PHYMV_DEST;

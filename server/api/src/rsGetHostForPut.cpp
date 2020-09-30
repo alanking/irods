@@ -44,8 +44,8 @@ int rsGetHostForPut(
         std::string hier{};
         if ( getValByKey( &dataObjInp->condInput, RESC_HIER_STR_KW ) == NULL ) {
             try {
-                auto result = irods::resolve_resource_hierarchy(irods::CREATE_OPERATION, rsComm, *dataObjInp);
-                hier = std::get<std::string>(result);
+                auto file_obj = irods::resolve_resource_hierarchy(irods::CREATE_OPERATION, *rsComm, *dataObjInp);
+                hier = std::get<std::string>(file_obj->winner());
             }
             catch (const irods::exception& e ) {
                 irods::log(e);

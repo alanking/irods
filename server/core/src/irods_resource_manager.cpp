@@ -71,6 +71,19 @@ namespace irods {
 
     } // resolve
 
+    resource_ptr resource_manager::resolve(std::string_view _key)
+    {
+        if (_key.empty()) {
+            THROW(SYS_INVALID_INPUT_PARAM, "empty key");
+        }
+
+        if (resource_name_map_.has_entry(_key.data())) {
+            return resource_name_map_[ _key.data() ];
+        }
+
+        THROW(SYS_RESC_DOES_NOT_EXIST, fmt::format("no resource found for name [{}]", _key.data()));
+    } // resolve
+
 // =-=-=-=-=-=-=-
 // public - retrieve a resource given its key
     error resource_manager::resolve(
@@ -467,6 +480,31 @@ namespace irods {
 
         return SUCCESS();
 
+    } // get_hier_to_root_for_resc
+
+    irods::hierarchy_parser resource_manager::get_hier_to_root_for_resc(std::string_view _resc_name)
+    {
+        irods::hierarchy_parser hierarchy{_resc_name.data()};
+        std::string parent_name = _resc_name.data();
+
+        while(!parent_name.empty()) {
+            auto resc = resolve(parent_name);
+
+            auto ret = get_parent_name(resc, parent_name);
+            if(!ret.ok()) {
+                if(HIERARCHY_ERROR == ret.code()) {
+                    break;
+                }
+
+                THROW(ret.code(), ret.result());
+            }
+
+            if(!parent_name.empty()) {
+                hierarchy.add_parent(parent_name);
+            }
+        } // while
+
+        return hierarchy;
     } // get_hier_to_root_for_resc
 
     error resource_manager::gather_leaf_bundle_for_child(
@@ -1078,6 +1116,30 @@ namespace irods {
         }
         return hier_list;
     } // get_all_resc_hierarchies
+
+    rodsLong_t resource_manager::hier_to_leaf_id(std::string_view _hierarchy)
+    {
+        if(_hierarchy.empty()) {
+            THROW(HIERARCHY_ERROR, "empty hierarchy string");
+        }
+
+        hierarchy_parser p{_hierarchy.data()};
+
+        std::string_view leaf = p.last_resc();
+
+        if(!resource_name_map_.has_entry(leaf.data())) {
+            THROW(SYS_RESC_DOES_NOT_EXIST, leaf.data());
+        }
+
+        resource_ptr resc = resource_name_map_[leaf.data()];
+
+        rodsLong_t id = 0;
+        if (const auto ret = resc->get_property<rodsLong_t>(RESOURCE_ID, id); !ret.ok()) {
+            THROW(ret.code(), ret.result());
+        }
+
+        return id;
+    } // hier_to_leaf_id
 
     error resource_manager::hier_to_leaf_id(
         const std::string& _hier,

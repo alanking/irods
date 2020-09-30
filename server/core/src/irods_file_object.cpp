@@ -3,9 +3,13 @@
 #include "irods_resource_manager.hpp"
 #include "irods_hierarchy_parser.hpp"
 #include "irods_log.hpp"
+#include "irods_logger.hpp"
 #include "irods_stacktrace.hpp"
 #include "irods_hierarchy_parser.hpp"
 #include "irods_resource_backport.hpp"
+
+#define IRODS_REPLICA_ENABLE_SERVER_SIDE_API
+#include "data_object_proxy.hpp"
 
 // =-=-=-=-=-=-=-
 // irods includes
@@ -16,6 +20,8 @@
 // =-=-=-=-=-=-=-
 // boost includes
 #include <boost/asio/ip/host_name.hpp>
+
+#include "json.hpp"
 
 namespace irods {
 // =-=-=-=-=-=-=-
@@ -107,8 +113,8 @@ namespace irods {
 // from dataObjInfo
     file_object::file_object(
         rsComm_t*            _rsComm,
-        const dataObjInfo_t* _dataObjInfo ) {
-
+        const dataObjInfo_t* _dataObjInfo)
+    {
         data_type_      = _dataObjInfo->dataType;
         comm_           = _rsComm;
         data_id_        = _dataObjInfo->dataId;
@@ -129,6 +135,11 @@ namespace irods {
         }
         else {
             file_descriptor_ = -1;
+        }
+        const dataObjInfo_t* tmp = _dataObjInfo;
+        while (tmp) {
+            replicas_.push_back({*tmp});
+            tmp = tmp->next;
         }
     }
 
@@ -346,38 +357,13 @@ namespace irods {
         dataObjInfo_t* info_ptr = head_ptr;
         std::vector< physical_object > objects;
         while ( info_ptr ) {
-            physical_object obj;
+            objects.push_back({*info_ptr});
 
-            obj.replica_status( info_ptr->replStatus );
-            obj.repl_num( info_ptr->replNum );
-            obj.map_id( info_ptr->dataMapId );
-            if(info_ptr->dataSize > 0) {
-                obj.size( info_ptr->dataSize );
+            if(info_ptr->dataSize <= 0) {
+                auto& obj = objects.back();
+                obj.size(_data_obj_inp->dataSize);
             }
-            else {
-                obj.size( _data_obj_inp->dataSize );
-            }
-            obj.id( info_ptr->dataId );
-            obj.coll_id( info_ptr->collId );
-            obj.name( info_ptr->objPath );
-            obj.version( info_ptr->version );
-            obj.type_name( info_ptr->dataType );
-            obj.resc_name( info_ptr->rescName );
-            obj.path( info_ptr->filePath );
-            obj.owner_name( info_ptr->dataOwnerName );
-            obj.owner_zone( info_ptr->dataOwnerZone );
-            obj.status( info_ptr->statusString );
-            obj.checksum( info_ptr->chksum );
-            obj.expiry_ts( info_ptr->dataExpiry );
-            obj.mode( info_ptr->dataMode );
-            obj.r_comment( info_ptr->dataComments );
-            obj.create_ts( info_ptr->dataCreate );
-            obj.modify_ts( info_ptr->dataModify );
 
-            obj.resc_hier( info_ptr->rescHier );
-            obj.resc_id( info_ptr->rescId );
-
-            objects.push_back( obj );
             info_ptr = info_ptr->next;
 
         } // while
@@ -394,20 +380,18 @@ namespace irods {
 
     } // file_object_factory
 
-    irods::file_object_ptr make_file_object(
-        rsComm_t&       _comm,
-        dataObjInp_t&   _data_obj_inp,
-        dataObjInfo_t** _data_obj_info)
+    auto to_file_object(RsComm& _comm, const dataObjInfo_t& _obj, const int _requested_replica) -> irods::file_object_ptr
     {
-        irods::file_object_ptr obj(new irods::file_object());
+        irods::log(LOG_NOTICE, fmt::format("[{}:{}] - creating file object out of [{}]", __FUNCTION__, __LINE__, _obj.objPath));
 
-        irods::error err = irods::file_object_factory(&_comm, &_data_obj_inp, obj, _data_obj_info);
-        if (!err.ok()) {
-            irods::log(err);
-            THROW(err.code(), err.result());
+        irods::file_object_ptr file_obj{new irods::file_object(&_comm, &_obj)};
+
+        file_obj->repl_requested(-1);
+        if (_requested_replica >= 0) {
+            irods::log(LOG_NOTICE, fmt::format("[{}:{}] - adding requested replica [{}]", __FUNCTION__, __LINE__, _requested_replica));
+            file_obj->repl_requested(_requested_replica);
         }
 
-        return obj;
-    } // make_file_object
-
+        return file_obj;
+    } // to_file_object
 } // namespace irods

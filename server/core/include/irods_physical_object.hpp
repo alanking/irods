@@ -4,7 +4,9 @@
 // =-=-=-=-=-=-=-
 // stl includes
 #include <string>
+#include "objInfo.h"
 #include "rodsType.h"
+#include "json.hpp"
 namespace irods {
 
     class physical_object {
@@ -13,6 +15,7 @@ namespace irods {
             // constructors
             physical_object();
             physical_object( const physical_object& );
+            physical_object(const dataObjInfo_t& _info);
 
             // =-=-=-=-=-=-=-
             // destructor
@@ -167,6 +170,8 @@ namespace irods {
             {
                 vote_ = vote;
             } // vote
+
+            nlohmann::json to_json();
 
         private:
             int         replica_status_;

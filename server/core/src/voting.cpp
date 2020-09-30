@@ -26,17 +26,26 @@ namespace {
 
     auto find_local_replica(context& ctx)
     {
-        const auto& resc_name = irods::get_resource_name(ctx.plugin_ctx);
+        const auto resc_id = irods::get_resource_id(ctx.plugin_ctx);
         auto& replicas = ctx.file_obj->replicas();
         auto itr = std::find_if(
             std::begin(replicas),
             std::end(replicas),
-            [&resc_name](const auto& r) {
-                return resc_name == irods::hierarchy_parser{r.resc_hier()}.last_resc();
+            [&resc_id](const auto& r) {
+                if (!r.resc_hier().empty()) {
+                    return resc_id == resc_mgr.hier_to_leaf_id(r.resc_hier());
+                }
+                return false;
             }
         );
         return std::cend(replicas) == itr ? std::nullopt : std::make_optional(std::ref(*itr));
     } // find_local_replica
+
+    auto replica_is_locked(const irods::physical_object& _replica)
+    {
+        return READ_LOCK  == _replica.replica_status() ||
+               WRITE_LOCK == _replica.replica_status();
+    } // replica_is_locked
 
     auto calculate_with_repl_status(
         context& ctx,
@@ -50,6 +59,10 @@ namespace {
         }
 
         const auto& r = repl->get();
+        if (replica_is_locked(r)) {
+            return vote::zero;
+        }
+
         if (INTERMEDIATE_REPLICA == r.replica_status()) {
             // Because the replica is in an intermediate state, we must check if the client
             // provided a replica token. The replica token represents a piece of information that
@@ -72,9 +85,16 @@ namespace {
         }
 
         const int requested_repl_num = ctx.file_obj->repl_requested();
+        irods::log(LOG_NOTICE, fmt::format(
+            "[{}:{}] - requested repl num:[{}], repl num:[{}]",
+            __FUNCTION__, __LINE__, requested_repl_num, r.repl_num()));
         if (requested_repl_num > -1) {
             return r.repl_num() == requested_repl_num ? vote::high : vote::low;
         }
+
+        irods::log(LOG_NOTICE, fmt::format(
+            "[{}:{}] - preferred status:[{}], repl status:[{}]",
+            __FUNCTION__, __LINE__, preferred_repl_status, r.replica_status()));
 
         if (preferred_repl_status != r.replica_status()) {
             return vote::low;
