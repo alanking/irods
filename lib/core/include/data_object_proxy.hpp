@@ -351,6 +351,10 @@ namespace irods::experimental::data_object
     static auto duplicate_data_object(const data_object_proxy<DataObjInfo>& _obj)
         -> std::pair<data_object_proxy<DataObjInfo>, lifetime_manager<DataObjInfo>>
     {
+        if (!_obj.get()) {
+            THROW(USER__NULL_INPUT_ERR, "object information is null");
+        }
+
         return duplicate_data_object(*_obj.get());
     } //duplicate_data_object
 
