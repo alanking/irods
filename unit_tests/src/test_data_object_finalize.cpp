@@ -23,8 +23,10 @@
 #include <iostream>
 #include <thread>
 
+namespace adm = irods::experimental::administration;
 namespace fs = irods::experimental::filesystem;
 namespace io = irods::experimental::io;
+namespace replica = irods::experimental::replica;
 
 using json = nlohmann::json;
 
@@ -32,7 +34,6 @@ TEST_CASE("finalize", "[finalize]")
 {
     using namespace std::string_literals;
     using namespace std::chrono_literals;
-    namespace adm = irods::experimental::administration;
 
     load_client_api_plugins();
 
@@ -198,3 +199,4 @@ TEST_CASE("invalid inputs", "[invalid]")
             equals_irods_error(INPUT_ARG_NOT_WELL_FORMED_ERR));
     }
 }
+

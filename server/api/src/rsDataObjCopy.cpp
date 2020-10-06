@@ -110,11 +110,11 @@ int open_source_data_obj(
     return srcL1descInx;
 } // open_source_data_obj
 
-void close_source_data_obj(
-    rsComm_t *rsComm,
-    const int _inx) {
+auto close_source_data_obj(rsComm_t *rsComm, const int _inx) -> int
+{
     openedDataObjInp_t dataObjCloseInp{};
     dataObjCloseInp.l1descInx = _inx;
+    irods::log(LOG_NOTICE, fmt::format("[{}:{}] - closing source replica for [{}]", __FUNCTION__, __LINE__, L1desc[_inx].dataObjInfo->objPath));
     const int close_status = rsDataObjClose(rsComm, &dataObjCloseInp);
     if (close_status < 0) {
         rodsLog(LOG_NOTICE, "%s - failed closing [%s] with status [%d]",
@@ -123,11 +123,10 @@ void close_source_data_obj(
                 L1desc[_inx].dataObjInp->objPath,
                 close_status);
     }
+    return close_status;
 } // close_source_data_obj
 
-int open_destination_data_obj(
-    rsComm_t *rsComm,
-    dataObjInp_t& inp)
+int open_destination_data_obj( rsComm_t *rsComm, dataObjInp_t& inp)
 {
     inp.oprType = COPY_DEST;
     inp.openFlags = O_CREAT | O_RDWR;
@@ -185,10 +184,7 @@ int open_destination_data_obj(
     return destL1descInx;
 } // open_destination_data_obj
 
-void close_destination_data_obj(
-    rsComm_t *rsComm,
-    const int _inx,
-    transferStat_t **transStat)
+auto close_destination_data_obj( rsComm_t *rsComm, const int _inx, transferStat_t **transStat) -> int
 {
     openedDataObjInp_t dataObjCloseInp{};
     dataObjCloseInp.l1descInx = _inx;
@@ -199,7 +195,7 @@ void close_destination_data_obj(
     (*transStat)->bytesWritten = L1desc[srcL1descInx].dataObjInfo->dataSize;
     (*transStat)->numThreads = L1desc[_inx].dataObjInp->numThreads;
     dataObjCloseInp.bytesWritten = L1desc[srcL1descInx].dataObjInfo->dataSize;
-    rodsLog(LOG_DEBUG, "[%s:%d] - closing [%s]", __FUNCTION__, __LINE__, L1desc[_inx].dataObjInp->objPath);
+    irods::log(LOG_NOTICE, fmt::format("[{}:{}] - closing destination replica for [{}]", __FUNCTION__, __LINE__, L1desc[_inx].dataObjInfo->objPath));
     const int close_status = rsDataObjClose(rsComm, &dataObjCloseInp);
     if (close_status < 0) {
         rodsLog(LOG_NOTICE, "%s - failed closing [%s] with status [%d]",
@@ -208,6 +204,7 @@ void close_destination_data_obj(
                 L1desc[_inx].dataObjInp->objPath,
                 close_status);
     }
+    return close_status;
 } // close_destination_data_obj
 
 int rsDataObjCopy_impl(
@@ -292,9 +289,22 @@ int rsDataObjCopy_impl(
             0);
         L1desc[srcL1descInx].dataObjInp->numThreads = thread_count;
 
-        const int status = dataObjCopy( rsComm, destL1descInx );
+        int status = dataObjCopy( rsComm, destL1descInx );
         if (status < 0) {
             L1desc[destL1descInx].oprStatus = status;
+        }
+
+        if (destL1descInx > 3) {
+            if (const int close_status = close_destination_data_obj(rsComm, destL1descInx, transStat); close_status < 0 && status >= 0) {
+                status = close_status;
+            }
+            destL1descInx = 0;
+        }
+        if (srcL1descInx > 3) {
+            if (const int close_status = close_source_data_obj(rsComm, srcL1descInx); close_status < 0 && status >= 0) {
+                status = close_status;
+            }
+            srcL1descInx = 0;
         }
         return status;
     }
@@ -302,7 +312,6 @@ int rsDataObjCopy_impl(
         irods::log(e);
         return e.code();
     }
-    return 0;
 } // rsDataObjCopy
 
 } // anonymous namespace

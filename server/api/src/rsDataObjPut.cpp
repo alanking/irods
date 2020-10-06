@@ -138,6 +138,10 @@ int single_buffer_put(
     bytesBuf_t* dataObjInpBBuf)
 {
 
+    irods::log(LOG_NOTICE, fmt::format(
+        "[{}:{}] - opening [{}]",
+        __FUNCTION__, __LINE__, dataObjInp->objPath));
+
     dataObjInp->openFlags |= (O_CREAT | O_RDWR | O_TRUNC);
     int l1descInx = rsDataObjOpen(rsComm, dataObjInp);
     if (l1descInx <= 2) {
@@ -156,6 +160,10 @@ int single_buffer_put(
     openedDataObjInp_t dataObjWriteInp{};
     dataObjWriteInp.len = dataObjInpBBuf->len;
     dataObjWriteInp.l1descInx = l1descInx;
+
+    irods::log(LOG_NOTICE, fmt::format(
+        "[{}:{}] - opened [{}] on [{}]",
+        __FUNCTION__, __LINE__, dataObjInp->objPath, myDataObjInfo->rescHier));
 
     bytesBuf_t dataObjWriteInpBBuf{};
     dataObjWriteInpBBuf.buf = dataObjInpBBuf->buf;
@@ -317,6 +325,7 @@ int rsDataObjPut_impl(
         return status;
     }
 
+    std::string hier{};
     try {
         dataObjInfo_t* dataObjInfoHead{};
         irods::file_object_ptr file_obj(new irods::file_object());
@@ -325,7 +334,6 @@ int rsDataObjPut_impl(
 
         throw_if_force_put_to_new_resource(rsComm, *dataObjInp, file_obj);
 
-        std::string hier{};
         const char* h{getValByKey(&dataObjInp->condInput, RESC_HIER_STR_KW)};
         if (!h) {
             auto fobj_tuple = std::make_tuple(file_obj, fac_err);
@@ -367,6 +375,8 @@ int rsDataObjPut_impl(
     dataObjInp->openFlags = O_RDWR;
 
     if (getValByKey(&dataObjInp->condInput, DATA_INCLUDED_KW)) {
+        irods::log(LOG_NOTICE, fmt::format("[{}:{}] - putting [{}] to [{}]",
+            __FUNCTION__, __LINE__, dataObjInp->objPath, hier));
         return single_buffer_put(rsComm, dataObjInp, dataObjInpBBuf);
     }
 

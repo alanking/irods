@@ -8,14 +8,11 @@
 #include "fileClose.h"
 #include "fileStat.h"
 #include "getRescQuota.h"
-#include "key_value_proxy.hpp"
 #include "miscServerFunct.hpp"
-#include "modAVUMetadata.h"
 #include "modAVUMetadata.h"
 #include "modAccessControl.h"
 #include "modDataObjMeta.h"
 #include "objMetaOpr.hpp"
-#include "physPath.hpp"
 #include "physPath.hpp"
 #include "rcGlobalExtern.h"
 #include "regDataObj.h"
@@ -42,23 +39,26 @@
 #include "subStructFileRead.h"
 #include "subStructFileStat.h"
 
-// =-=-=-=-=-=-=-
-#include "irods_resource_backport.hpp"
-#include "irods_stacktrace.hpp"
-#include "irods_hierarchy_parser.hpp"
-#include "irods_file_object.hpp"
+#include "irods_at_scope_exit.hpp"
 #include "irods_exception.hpp"
+#include "irods_file_object.hpp"
+#include "irods_hierarchy_parser.hpp"
+#include "irods_log.hpp"
+#include "irods_resource_backport.hpp"
 #include "irods_serialization.hpp"
 #include "irods_server_api_call.hpp"
 #include "irods_server_properties.hpp"
-#include "irods_at_scope_exit.hpp"
+#include "irods_stacktrace.hpp"
 #include "key_value_proxy.hpp"
+#include "logical_locking.hpp"
 #include "replica_access_table.hpp"
 #include "replica_proxy.hpp"
+#include "replica_state_table.hpp"
 
-#include <memory>
+#include "fmt/format.h"
+
 #include <functional>
-
+#include <memory>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -362,6 +362,20 @@ namespace
         return {checksum_string};
     } // perform_checksum_operation_for_finalize
 
+    auto publish_checksum(replica_proxy& _replica, std::string_view _checksum) -> void
+    {
+        // apply calculated checksum to the after state in the replica state table
+        auto& rst = irods::experimental::replica_state_table::instance();
+        auto obj = rst.get_data_object_state(_replica.logical_path(), irods::experimental::replica_state_table::state_type::after);
+        auto opened_replica = irods::experimental::data_object::find_replica(*obj, _replica.hierarchy());
+        if (!opened_replica) {
+            THROW(SYS_UNKNOWN_ERROR, fmt::format(
+                "[{}] - opened replica does not exist in replica state table", __FUNCTION__));
+        }
+        opened_replica->checksum(_checksum);
+        rst.set_data_object_state(obj->logical_path(), *obj);
+    } // publish_checksum
+
     auto finalize_destination_replica_for_replication(RsComm& _comm, const openedDataObjInp_t& _inp, const int _fd) -> int
     {
         auto& l1desc = L1desc[_fd];
@@ -569,6 +583,11 @@ namespace
             //const auto status = nlohmann::json::parse(replica.status());
             //replica.replica_status(status.at("original_status"));
         }
+
+        auto replica = replica_proxy{*l1desc.dataObjInfo};
+
+        // TODO: here we just update the structure and the replica_state_table -- will be put in the catalog later
+        //publish_checksum(replica, checksum);
 
         auto [reg_param, lm] = irods::experimental::make_key_value_proxy({{OPEN_TYPE_KW, std::to_string(l1desc.openType)}});
         reg_param[REPL_STATUS_KW] = std::to_string(replica.replica_status());
@@ -821,6 +840,8 @@ int rsDataObjClose(rsComm_t* rsComm, openedDataObjInp_t* dataObjCloseInp)
         return ec = SYS_INVALID_INPUT_PARAM;
     }
 
+    //irods::at_scope_exit free_l1_descriptor{[&l1descInx] { freeL1desc(l1descInx); }};
+
     if (l1desc.remoteZoneHost) {
         dataObjCloseInp->l1descInx = l1desc.remoteL1descInx;
         ec = rcDataObjClose( l1desc.remoteZoneHost->conn, dataObjCloseInp );
@@ -829,17 +850,53 @@ int rsDataObjClose(rsComm_t* rsComm, openedDataObjInp_t* dataObjCloseInp)
         return ec;
     }
 
+    const std::string logical_path = l1desc.dataObjInfo->objPath;
+    const int replica_number = l1desc.dataObjInfo->replNum;
+
+    auto& rst = irods::experimental::replica_state_table::instance();
+    //irods::at_scope_exit unlock_data_object{[&rsComm, &rst, &logical_path, replica_number]
+    const auto unlock_data_object = [&rsComm, &rst, &logical_path, replica_number]() -> int
+    {
+        try {
+            if (rst.contains(logical_path)) {
+                irods::unlock_data_object(*rsComm, logical_path);
+            }
+            return 0;
+        }
+        catch (const irods::exception& e) {
+            irods::log(LOG_ERROR, fmt::format("failed to unlock replica [{}] for [{}]:\n{}",
+                replica_number, logical_path, e.what()));
+            return static_cast<int>(e.code());
+        }
+        catch (const std::exception& e) {
+            irods::log(LOG_ERROR, fmt::format(
+                "exception occurred while unlocking replica [{}] for [{}]:\n{}",
+                replica_number, logical_path, e.what()));
+            irods::log(LOG_ERROR, irods::stacktrace().dump());
+            return SYS_INTERNAL_ERR;
+        }
+        catch (...) {
+            irods::log(LOG_ERROR, fmt::format(
+                "unknown error occurred while unlocking replica [{}] for [{}]:\n{}",
+                replica_number, logical_path));
+            return SYS_UNKNOWN_ERROR;
+        }
+    };
+
     try {
         close_physical_file(*rsComm, fd);
 
         ec = finalize_replica(*rsComm, fd, *dataObjCloseInp);
 
         if (ec < 0 || l1desc.oprStatus < 0) {
+            unlock_data_object();
             freeL1desc(fd);
             return ec;
         }
 
         apply_static_peps(*rsComm, *dataObjCloseInp, fd, ec);
+
+        ec = unlock_data_object();
     }
     catch (const irods::exception& e) {
         irods::log(e);

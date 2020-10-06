@@ -1,6 +1,12 @@
+#include "objDesc.hpp"
+#include "irods_resource_redirect.hpp"
+#include "rsGlobalExtern.hpp"
 #include "replica_state_table.hpp"
 
+#include "rs_data_object_finalize.hpp"
+
 #include "fmt/format.h"
+#include "json.hpp"
 
 #include <map>
 
@@ -14,6 +20,7 @@ namespace irods::experimental
         using state_type        = replica_state_table::state_type;
         using key_type          = replica_state_table::key_type;
         using value_type        = replica_state_table::entry;
+        using json              = nlohmann::json;
         // clang-format on
 
         // Global Variables
@@ -66,13 +73,17 @@ namespace irods::experimental
 
         auto before = duplicate_and_acquire_data_object(_obj);
 
-        entry e{before, std::nullopt};
+        for (auto&& r : before.replicas()) {
+            irods::log(LOG_NOTICE, fmt::format("[{}:{}] - inserting before: [{}] with key [{}]", __FUNCTION__, __LINE__, replica::to_json(r).dump(), logical_path));
+        }
 
-        g_state_map[logical_path] = e;
+        entry e{before, std::nullopt};
 
         if (!e.before) {
             THROW(SYS_INTERNAL_ERR, "for some reason, before state was null");
         }
+
+        g_state_map[logical_path] = e;
 
         return *(e.before);
     } // create_entry
@@ -81,7 +92,7 @@ namespace irods::experimental
     {
         auto itr = g_state_map.find(_logical_path);
         if (std::cend(g_state_map) == itr) {
-            THROW(KEY_NOT_FOUND, fmt::format("no replica info held for [{}]", _logical_path));
+            THROW(KEY_NOT_FOUND, fmt::format("[{}] - no replica info held for [{}]", __FUNCTION__, _logical_path));
         }
 
         auto& e = itr->second;
@@ -135,22 +146,23 @@ namespace irods::experimental
     auto replica_state_table::set_data_object_state(
         const key_type& _logical_path,
         const data_object_type& _obj,
-        const state_type _state) -> void
+        const state_type _state) -> data_object_type
     {
         auto itr = g_state_map.find(_logical_path);
         if (std::cend(g_state_map) == itr) {
-            THROW(KEY_NOT_FOUND, fmt::format("no replica info held for [{}]", _logical_path));
+            THROW(KEY_NOT_FOUND, fmt::format("[{}] - no replica info held for [{}]", __FUNCTION__, _logical_path));
         }
 
         auto& e = itr->second;
+        auto new_obj = duplicate_and_acquire_data_object(_obj);
         switch(_state) {
             case state_type::before:
             {
                 if (e.before) {
                     freeAllDataObjInfo(e.before->get());
                 }
-                e.before = duplicate_and_acquire_data_object(_obj);
-                break;
+                e.before = new_obj;
+                return *e.before;
             }
 
             case state_type::after:
@@ -158,8 +170,8 @@ namespace irods::experimental
                 if (e.after) {
                     freeAllDataObjInfo(e.after->get());
                 }
-                e.after = duplicate_and_acquire_data_object(_obj);
-                break;
+                e.after = new_obj;
+                return *e.after;
             }
 
             default:

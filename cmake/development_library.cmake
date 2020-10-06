@@ -479,6 +479,7 @@ set(
   ${CMAKE_SOURCE_DIR}/server/core/include/client_api_whitelist.hpp
   ${CMAKE_SOURCE_DIR}/server/core/include/collection.hpp
   ${CMAKE_SOURCE_DIR}/server/core/include/dataObjOpr.hpp
+  ${CMAKE_SOURCE_DIR}/server/core/include/logical_locking.hpp
   ${CMAKE_SOURCE_DIR}/server/core/include/replica_access_table.hpp
   ${CMAKE_SOURCE_DIR}/server/core/include/replica_state_table.hpp
   ${CMAKE_SOURCE_DIR}/server/core/include/fileOpr.hpp

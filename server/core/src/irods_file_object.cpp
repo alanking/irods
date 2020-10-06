@@ -380,6 +380,9 @@ namespace irods {
             objects.push_back( obj );
             info_ptr = info_ptr->next;
 
+            irods::log(LOG_NOTICE, fmt::format(
+                "[{}:{}] - pushing back replica [{}] for [{}]",
+                __FUNCTION__, __LINE__, obj.repl_num(), obj.name()));
         } // while
 
         _file_obj->replicas( objects );

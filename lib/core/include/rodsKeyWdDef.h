@@ -295,14 +295,18 @@
 #define SPEC_COLL_CACHE_DIRTY        "spec_coll_cache_dirty"
 #define SPEC_COLL_REPL_NUM           "spec_coll_repl_num"
 
-#define KEY_VALUE_PASSTHROUGH_KW "key_value_passthrough"
-#define DISABLE_STRICT_ACL_KW "disable_strict_acls"
+#define KEY_VALUE_PASSTHROUGH_KW     "key_value_passthrough"
+#define DISABLE_STRICT_ACL_KW        "disable_strict_acls"
 
-#define INSTANCE_NAME_KW "instance_name"
+#define INSTANCE_NAME_KW             "instance_name"
 
 // When the value of the "data_modify_ts" field is set to this keyword in the input
 // to data_object_finalize, the mtime for that replica is set to the current time.
-#define SET_TIME_TO_NOW_KW "set time to now"
+#define SET_TIME_TO_NOW_KW           "set time to now"
+
+// When a replica is opened for replication, this keyword must be provided when opening
+// the source replica after opening the destination replica.
+#define REPLICATION_CONTEXT_KW       "replication context"
 
 // clang-format on
 

@@ -8,6 +8,7 @@
 #include <string_view>
 
 struct DataObjInfo;
+struct RsComm;
 
 namespace irods::experimental
 {
@@ -55,7 +56,7 @@ namespace irods::experimental
         auto set_data_object_state(
             const key_type& _logical_path,
             const data_object_type& _obj,
-            state_type _state = state_type::after) -> void;
+            state_type _state = state_type::after) -> data_object_type;
 
         replica_state_table(const replica_state_table&) = delete;
         auto operator=(const replica_state_table&) -> replica_state_table& = delete;
