@@ -736,22 +736,6 @@ namespace
             return e.code();
         }
     } // finalize_replica
-
-void unlock_file_descriptor(
-    rsComm_t* comm,
-    const int l1descInx)
-{
-    char fd_string[NAME_LEN]{};
-    snprintf(fd_string, sizeof( fd_string ), "%-d", L1desc[l1descInx].lockFd);
-    addKeyVal(&L1desc[l1descInx].dataObjInp->condInput, LOCK_FD_KW, fd_string);
-    irods::server_api_call(
-        DATA_OBJ_UNLOCK_AN,
-        comm,
-        L1desc[l1descInx].dataObjInp,
-        nullptr, (void**)nullptr, nullptr);
-    L1desc[l1descInx].lockFd = -1;
-} // unlock_file_descriptor
-
 } // anonymous namespace
 
 auto l3Close(RsComm* _comm, const int _fd) -> int
@@ -849,10 +833,6 @@ int rsDataObjClose(rsComm_t* rsComm, openedDataObjInp_t* dataObjCloseInp)
         close_physical_file(*rsComm, fd);
 
         ec = finalize_replica(*rsComm, fd, *dataObjCloseInp);
-
-        if (l1desc.lockFd > 0) {
-            unlock_file_descriptor(rsComm, fd);
-        }
 
         if (ec < 0 || l1desc.oprStatus < 0) {
             freeL1desc(fd);

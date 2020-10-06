@@ -722,38 +722,6 @@ int rsDataObjOpen_impl(
             file_obj.swap(obj);
         }
 
-        int lockFd = -1;
-        if (kvp.contains(LOCK_TYPE_KW) && kvp.at(LOCK_TYPE_KW).value().data()) {
-            rodsLog(LOG_NOTICE, "[%s:%d] - locking file with type [%s]",
-                __FUNCTION__, __LINE__, getValByKey(&dataObjInp->condInput, LOCK_TYPE_KW));
-            lockFd = irods::server_api_call(
-                         DATA_OBJ_LOCK_AN,
-                         rsComm, dataObjInp,
-                         NULL, (void**)NULL, NULL);
-
-            if (lockFd <= 0) {
-                rodsLog(LOG_ERROR, "%s: lock error for %s. lockType = %s, lockFd: %d",
-                        __FUNCTION__, dataObjInp->objPath, kvp.at(LOCK_TYPE_KW).value().data(), lockFd );
-                return lockFd;
-            }
-
-            /* rm it so it won't be done again causing deadlock */
-            kvp.erase(LOCK_TYPE_KW);
-        }
-
-        const auto unlock_data_obj{[&]() {
-            char fd_string[NAME_LEN]{};
-            snprintf( fd_string, sizeof( fd_string ), "%-d", lockFd );
-            kvp[LOCK_FD_KW] = fd_string;
-            irods::server_api_call(
-                DATA_OBJ_UNLOCK_AN,
-                rsComm,
-                dataObjInp,
-                NULL,
-                ( void** ) NULL,
-                NULL );
-        }};
-
         // Determine if this is a replica creation and do so
         const int writeFlag = getWriteFlag(dataObjInp->openFlags);
         if (dataObjInp->openFlags & O_CREAT && writeFlag > 0) {
@@ -768,15 +736,6 @@ int rsDataObjOpen_impl(
 
             if (!hier_has_replica) {
                 const int l1descInx = create_new_replica(*rsComm, *dataObjInp, file_obj);
-                if ( lockFd >= 0 ) {
-                    if ( l1descInx > 2 ) {
-                        L1desc[l1descInx].lockFd = lockFd;
-                    }
-                    else {
-                        unlock_data_obj();
-                    }
-                }
-
                 if (l1descInx < 3) {
                     return l1descInx;
                 }
@@ -825,18 +784,12 @@ int rsDataObjOpen_impl(
             msg << __FUNCTION__;
             msg << " - Unable to select a data obj info matching the resource hierarchy from the keywords.";
             irods::log(ERROR(status, msg.str()));
-            if (lockFd > 0) {
-                unlock_data_obj();
-            }
             return status;
         }
 
         // acPreProcForOpen
         status = applyPreprocRuleForOpen( rsComm, dataObjInp, &dataObjInfoHead );
         if (status < 0) {
-            if (lockFd > 0) {
-                unlock_data_obj();
-            }
             return status;
         }
 
@@ -853,9 +806,6 @@ int rsDataObjOpen_impl(
             }
 
             if ( status < 0 ) {
-                if (lockFd > 0) {
-                    unlock_data_obj();
-                }
                 freeAllDataObjInfo( dataObjInfoHead );
                 return status;
             }
@@ -871,9 +821,6 @@ int rsDataObjOpen_impl(
                 rodsLog( LOG_ERROR,
                          "%s: stageBundledData of %s failed stat=%d",
                          __FUNCTION__, dataObjInfoHead->objPath, status );
-                if (lockFd > 0) {
-                    unlock_data_obj();
-                }
                 freeAllDataObjInfo( dataObjInfoHead );
                 return status;
             }
@@ -886,9 +833,6 @@ int rsDataObjOpen_impl(
             __FUNCTION__, __LINE__, tmpDataObjInfo->objPath, tmpDataObjInfo->replNum, tmpDataObjInfo->rescHier);
         int l1descInx = open_with_obj_info(rsComm, *dataObjInp, tmpDataObjInfo);
         if (l1descInx < 0) {
-            if (lockFd > 0) {
-                unlock_data_obj();
-            }
             return l1descInx;
         }
 
@@ -939,20 +883,12 @@ int rsDataObjOpen_impl(
             }
 
             if (status < 0) {
-                if (lockFd > 0) {
-                    unlock_data_obj();
-                }
-
                 if (const auto ec = close_replica(*rsComm, l1descInx); ec < 0) {
                     return ec;
                 }
 
                 return status;
             }
-        }
-
-        if ( lockFd >= 0 ) {
-            L1desc[l1descInx].lockFd = lockFd;
         }
 
         return l1descInx;
