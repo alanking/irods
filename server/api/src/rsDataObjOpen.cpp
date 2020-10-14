@@ -589,32 +589,6 @@ int applyPreprocRuleForOpen(
     return status;
 } // applyPreprocRuleForOpen
 
-int change_replica_status_to_intermediate(
-    rsComm_t& _comm,
-    dataObjInp_t& _inp,
-    dataObjInfo_t& _info)
-{
-    using namespace irods::experimental;
-    keyValPair_t kvp{};
-    replKeyVal(&_inp.condInput, &kvp);
-    key_value_proxy proxy{kvp};
-    proxy[REPL_STATUS_KW] = std::to_string(INTERMEDIATE_REPLICA);
-    proxy.erase(ALL_KW);
-    proxy.erase(OPEN_TYPE_KW);
-    //proxy[IN_PDMO_KW] = dataObjInfo->rescHier;
-
-    modDataObjMeta_t inp{};
-    inp.dataObjInfo = &_info;
-    inp.regParam = proxy.get();
-    const int status = rsModDataObjMeta(&_comm, &inp);
-    if (status < 0) {
-        rodsLog(LOG_ERROR,
-            "[%s] - rsModDataObjMeta failed with [%d] when modifying [%s] replica [%d]",
-            __FUNCTION__, status, _inp.objPath, _info.replNum);
-    }
-    return status;
-} // change_replica_status_to_intermediate
-
 int change_replica_status(rsComm_t& rsComm, dataObjInp_t& dataObjInp, int new_replica_status)
 {
     {
@@ -634,6 +608,9 @@ int change_replica_status(rsComm_t& rsComm, dataObjInp_t& dataObjInp, int new_re
     keyValPair_t kvp{};
     irods::experimental::key_value_proxy dst{kvp};
     dst[REPL_STATUS_KW] = std::to_string(new_replica_status);
+    //if (src.contains(ORIGINAL_REPLICA_STATUS_KW)) {
+        //dst[ORIGINAL_REPLICA_STATUS_KW] = src.at(ORIGINAL_REPLICA_STATUS_KW);
+    //}
 
     modDataObjMeta_t inp{};
     inp.dataObjInfo = &info;
@@ -641,6 +618,16 @@ int change_replica_status(rsComm_t& rsComm, dataObjInp_t& dataObjInp, int new_re
 
     return rsModDataObjMeta(&rsComm, &inp);
 } // change_replica_status
+
+int change_replica_status_to_intermediate(rsComm_t& _comm, dataObjInp_t& _inp, dataObjInfo_t& _info)
+{
+    // save original status in a keyword which will be stored in the catalog
+    //nlohmann::json data_status;
+    //data_status["original_status"] = _info.replStatus;
+    //irods::experimental::key_value_proxy cond_input{_inp.condInput};
+    //cond_input[ORIGINAL_REPLICA_STATUS_KW] = data_status.dump();
+    return change_replica_status(_comm, _inp, INTERMEDIATE_REPLICA);
+} // change_replica_status_to_intermediate
 
 int close_replica(rsComm_t& conn, int l1desc_index)
 {

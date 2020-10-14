@@ -559,20 +559,29 @@ namespace
             throw;
         }
 
-        if (PUT_OPR != l1desc.oprType || !l1desc.chksumFlag) {
-            // return success as the rest is put-specific...
-            return;
-        }
-
-        const std::string checksum = perform_checksum_operation_for_finalize(_comm, _fd);
-        if (checksum.empty()) {
-            return;
-        }
-
+        // modify replica information
         auto replica = replica_proxy{*l1desc.dataObjInfo};
+        if (CREATE_TYPE == l1desc.openType) {
+            replica.replica_status(GOOD_REPLICA);
+        }
+        else if (OPEN_FOR_WRITE_TYPE == l1desc.openType) {
+            // TODO: need to get original status from data_status column
+            //const auto status = nlohmann::json::parse(replica.status());
+            //replica.replica_status(status.at("original_status"));
+        }
 
         auto [reg_param, lm] = irods::experimental::make_key_value_proxy({{OPEN_TYPE_KW, std::to_string(l1desc.openType)}});
-        reg_param[CHKSUM_KW] = checksum;
+        reg_param[REPL_STATUS_KW] = std::to_string(replica.replica_status());
+        if (irods::experimental::key_value_proxy{l1desc.dataObjInp->condInput}.contains(ADMIN_KW)) {
+            reg_param[ADMIN_KW] = "";
+        }
+
+        if (PUT_OPR == l1desc.oprType && l1desc.chksumFlag) {
+            const std::string checksum = perform_checksum_operation_for_finalize(_comm, _fd);
+            if (!checksum.empty()) {
+                reg_param[CHKSUM_KW] = checksum;
+            }
+        }
 
         modDataObjMeta_t mod_inp{};
         mod_inp.dataObjInfo = replica.get();
