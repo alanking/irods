@@ -213,6 +213,53 @@ namespace irods::experimental::data_object
         return data_object_proxy{_doi};
     } // make_data_object_proxy
 
+    namespace detail
+    {
+        /// \brief Generates a new doi_type from the catalog and wraps with a proxy.
+        ///
+        /// \param[in] _comm
+        /// \param[in] _logical_path
+        ///
+        /// \throws irods::exception If no information is found for the logical path or list is empty at the end
+        ///
+        /// \returns data_object_proxy and lifetime_manager for underlying struct
+        ///
+        /// \since 4.2.9
+        template<typename rxComm>
+        static auto make_data_object_proxy_impl(rxComm& _comm, const irods::experimental::replica::query_value_type& _query_results)
+            -> std::pair<data_object_proxy<DataObjInfo>, lifetime_manager<DataObjInfo>>
+        {
+            namespace replica = irods::experimental::replica;
+
+            DataObjInfo* head{};
+            DataObjInfo* prev{};
+
+            for (const auto& row : _query_results) {
+                // Create a new DataObjInfo to represent this replica
+                DataObjInfo* curr = static_cast<DataObjInfo*>(std::malloc(sizeof(DataObjInfo)));
+                std::memset(curr, 0, sizeof(DataObjInfo));
+
+                // Populate the new struct
+                replica::detail::populate_struct_from_results(*curr, row);
+
+                // Make sure the structure used for the head is populated
+                if (!head) {
+                    head = curr;
+                }
+                else {
+                    prev->next = curr;
+                }
+                prev = curr;
+            }
+
+            if (!head) {
+                THROW(SYS_INTERNAL_ERR, "list remains unpopulated");
+            }
+
+            return {data_object_proxy{*head}, lifetime_manager{*head}};
+        } // make_data_object_proxy
+    };
+
     /// \brief Generates a new doi_type from the catalog and wraps with a proxy.
     ///
     /// \param[in] _comm
@@ -231,18 +278,53 @@ namespace irods::experimental::data_object
 
         const auto data_obj_info = replica::get_data_object_info(_comm, _logical_path);
 
+        return detail::make_data_object_proxy_impl(_comm, data_obj_info);
+    } // make_data_object_proxy
+
+    template<typename rxComm>
+    static auto make_data_object_proxy(rxComm& _comm, const rodsLong_t _data_id)
+        -> std::pair<data_object_proxy<DataObjInfo>, lifetime_manager<DataObjInfo>>
+    {
+        namespace replica = irods::experimental::replica;
+
+        const auto data_obj_info = replica::get_data_object_info(_comm, _data_id);
+
+        return detail::make_data_object_proxy_impl(_comm, data_obj_info);
+    } // make_data_object_proxy
+
+    /// \brief Takes an existing data_object_proxy and duplicates the underlying struct.
+    ///
+    /// \param[in] _obj data object to duplicate
+    ///
+    /// \returns data_object_proxy and lifetime_manager for underlying struct
+    ///
+    /// \since 4.2.9
+    static auto duplicate_data_object(const DataObjInfo& _obj)
+        -> std::pair<data_object_proxy<DataObjInfo>, lifetime_manager<DataObjInfo>>
+    {
         DataObjInfo* head{};
         DataObjInfo* prev{};
 
-        for (auto&& row : data_obj_info) {
-            // Create a new DataObjInfo to represent this replica
+        for (const DataObjInfo* tmp = &_obj; tmp; tmp = tmp->next) {
             DataObjInfo* curr = static_cast<DataObjInfo*>(std::malloc(sizeof(DataObjInfo)));
             std::memset(curr, 0, sizeof(DataObjInfo));
+            std::memcpy(curr, tmp, sizeof(DataObjInfo));
 
-            // Populate the new struct
-            replica::detail::populate_struct_from_results(*curr, row);
+            // Do not maintain the linked list - muy peligroso
+            curr->next = nullptr;
 
-            // Make sure the structure used for the head is populated
+            replKeyVal(&tmp->condInput, &curr->condInput);
+
+            if (tmp->specColl) {
+                SpecColl* tmp_sc = static_cast<SpecColl*>(std::malloc(sizeof(SpecColl)));
+                std::memset(tmp_sc, 0, sizeof(SpecColl));
+                std::memcpy(tmp_sc, tmp->specColl, sizeof(SpecColl));
+                curr->specColl = tmp_sc;
+            }
+
+            //irods::log(LOG_NOTICE, fmt::format("[{}:{}] - head:[{}],prev:[{}],curr:[{}],tmp:[{}],tmp->next:[{}]",
+                //__FUNCTION__, __LINE__, fmt::ptr(head), fmt::ptr(prev), fmt::ptr(curr), fmt::ptr(tmp), fmt::ptr(tmp->next)));
+
             if (!head) {
                 head = curr;
             }
@@ -257,7 +339,7 @@ namespace irods::experimental::data_object
         }
 
         return {data_object_proxy{*head}, lifetime_manager{*head}};
-    } // make_data_object_proxy
+    } // duplicate_data_object
 
     /// \brief Takes an existing data_object_proxy and duplicates the underlying struct.
     ///
@@ -272,29 +354,7 @@ namespace irods::experimental::data_object
     static auto duplicate_data_object(const data_object_proxy<DataObjInfo>& _obj)
         -> std::pair<data_object_proxy<DataObjInfo>, lifetime_manager<DataObjInfo>>
     {
-        DataObjInfo* head{};
-        DataObjInfo* prev{};
-
-        for (const auto& r : _obj.replicas()) {
-            DataObjInfo* curr = static_cast<DataObjInfo*>(std::malloc(sizeof(DataObjInfo)));
-            std::memset(curr, 0, sizeof(DataObjInfo));
-
-            std::memcpy(curr, r.get(), sizeof(DataObjInfo));
-
-            if (!head) {
-                head = curr;
-            }
-            else {
-                prev->next = curr;
-            }
-            prev = curr;
-        }
-
-        if (!head) {
-            THROW(SYS_INTERNAL_ERR, "list remains unpopulated");
-        }
-
-        return {data_object_proxy{*head}, lifetime_manager{*head}};
+        return duplicate_data_object(*_obj.get());
     } //duplicate_data_object
 
     /// \brief Finds a replica in the list based on resource hierarchy

@@ -33,29 +33,60 @@ TEST_CASE("test_replica_proxy", "[lib]")
 
     auto rp = replica::make_replica_proxy(r0);
 
-    // access
-    CHECK(&r0            == rp.get());
-    CHECK(DATA_ID_1      == rp.data_id());
-    CHECK(COLL_ID_1      == rp.collection_id());
-    CHECK(LOGICAL_PATH_1 == rp.logical_path());
-    CHECK(RESC_1         == rp.resource());
+    SECTION("test lib")
+    {
+        // access
+        CHECK(&r0            == rp.get());
+        CHECK(DATA_ID_1      == rp.data_id());
+        CHECK(COLL_ID_1      == rp.collection_id());
+        CHECK(LOGICAL_PATH_1 == rp.logical_path());
+        CHECK(RESC_1         == rp.resource());
 
-    // modification
-    rp.data_id(DATA_ID_2);
-    CHECK(DATA_ID_2 == rp.data_id());
-    CHECK(DATA_ID_2 == r0.dataId);
+        // modification
+        rp.data_id(DATA_ID_2);
+        CHECK(DATA_ID_2 == rp.data_id());
+        CHECK(DATA_ID_2 == r0.dataId);
 
-    rp.collection_id(COLL_ID_2);
-    CHECK(COLL_ID_2 == rp.collection_id());
-    CHECK(COLL_ID_2 == r0.collId);
+        rp.collection_id(COLL_ID_2);
+        CHECK(COLL_ID_2 == rp.collection_id());
+        CHECK(COLL_ID_2 == r0.collId);
 
-    rp.logical_path(LOGICAL_PATH_2);
-    CHECK(LOGICAL_PATH_2 == rp.logical_path());
-    CHECK(LOGICAL_PATH_2 == r0.objPath);
+        rp.logical_path(LOGICAL_PATH_2);
+        CHECK(LOGICAL_PATH_2 == rp.logical_path());
+        CHECK(LOGICAL_PATH_2 == r0.objPath);
 
-    rp.resource(RESC_2);
-    CHECK(RESC_2 == rp.resource());
-    CHECK(RESC_2 == r0.rescName);
+        rp.resource(RESC_2);
+        CHECK(RESC_2 == rp.resource());
+        CHECK(RESC_2 == r0.rescName);
+    }
+
+    SECTION("test duplication")
+    {
+        auto [dup, lm] = replica::duplicate_replica(r0);
+
+        // replica-level access
+        CHECK(DATA_ID_1       == dup.data_id());
+        CHECK(COLL_ID_1       == dup.collection_id());
+        CHECK(LOGICAL_PATH_1  == dup.logical_path());
+        CHECK(RESC_1          == dup.resource());
+
+        // ensure that these are new structs
+        CHECK(&r0             != dup.get());
+
+        // modification
+        dup.data_id(DATA_ID_2);
+        dup.collection_id(COLL_ID_2);
+        dup.logical_path(LOGICAL_PATH_2);
+        CHECK(DATA_ID_2 == dup.data_id());
+        CHECK(COLL_ID_2 == dup.collection_id());
+        CHECK(LOGICAL_PATH_2 == dup.logical_path());
+
+        // ensure that original structs did not change
+        CHECK(DATA_ID_1 == r0.dataId);
+        CHECK(COLL_ID_1 == r0.collId);
+        CHECK(LOGICAL_PATH_1 == r0.objPath);
+    }
+
 }
 
 TEST_CASE("test_data_object_proxy", "[lib]")
@@ -172,6 +203,17 @@ TEST_CASE("test_data_object_proxy", "[lib]")
         CHECK(COLL_ID_1 == r0.collId);
         CHECK(LOGICAL_PATH_1 == r1.objPath);
         CHECK(LOGICAL_PATH_1 == r0.objPath);
+    }
+
+    SECTION("test duplication memory allocation")
+    {
+        // lifetime_managers should not conflict
+        auto [dup1, lm1] = data_object::duplicate_data_object(o);
+        auto [dup2, lm2] = data_object::duplicate_data_object(o);
+
+        auto [dup_r, lm_r] = replica::duplicate_replica(o.replicas().back());
+        dup2.add_replica(*lm_r.release());
+        CHECK(REPLICA_COUNT + 1 == dup2.replica_count());
     }
 
     SECTION("test adding a new replica")
