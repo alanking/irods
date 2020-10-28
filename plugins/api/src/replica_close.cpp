@@ -18,8 +18,6 @@
 
 #include "objDesc.hpp"
 #include "rsFileClose.hpp"
-#include "rsFileStat.hpp"
-#include "rsModDataObjMeta.hpp"
 #include "irods_server_api_call.hpp"
 #include "irods_re_serialization.hpp"
 #include "irods_resource_backport.hpp"
@@ -33,6 +31,9 @@
 #include "filesystem.hpp"
 #define IRODS_REPLICA_ENABLE_SERVER_SIDE_API
 #include "replica.hpp"
+
+#include "replica_state_table.hpp"
+#include "rs_data_object_finalize.hpp"
 
 #include "fmt/format.h"
 #include "json.hpp"
@@ -51,27 +52,22 @@ namespace
 {
     namespace ix = irods::experimental;
     namespace fs = irods::experimental::filesystem;
+    namespace replica = irods::experimental::replica;
+    namespace data_object = irods::experimental::data_object;
 
     // clang-format off
-    using json      = nlohmann::json;
-    using operation = std::function<int(rsComm_t*, bytesBuf_t*)>;
-    using log       = ix::log;
-    // clang-format on
-
-    //
-    // Constants
-    //
-
-    // clang-format off
-    const char* const REPLICA_STATUS_STALE = "0";
-    const char* const REPLICA_STATUS_GOOD  = "1";
+    using data_object_proxy   = irods::experimental::data_object::data_object_proxy<DataObjInfo>;
+    using json                = nlohmann::json;
+    using log                 = ix::log;
+    using operation           = std::function<int(RsComm*, bytesBuf_t*)>;
+    using replica_state_table = irods::experimental::replica_state_table;
     // clang-format on
 
     //
     // Function Prototypes
     //
 
-    auto call_replica_close(irods::api_entry*, rsComm_t*, bytesBuf_t*) -> int;
+    auto call_replica_close(irods::api_entry*, RsComm*, bytesBuf_t*) -> int;
 
     auto is_input_valid(const bytesBuf_t*) -> std::tuple<bool, std::string>;
 
@@ -79,34 +75,29 @@ namespace
 
     auto get_file_descriptor_index(const json& _json) -> std::tuple<int, int>;
 
-    auto rs_replica_close(rsComm_t* _comm, bytesBuf_t* _input) -> int;
+    auto rs_replica_close(RsComm* _comm, bytesBuf_t* _input) -> int;
 
-    auto close_physical_object(rsComm_t& _comm, int _l3desc_index) -> int;
+    auto close_physical_object(RsComm& _comm, int _l3desc_index) -> int;
 
-    auto get_file_size(rsComm_t& _comm, const l1desc_t& _l1desc) -> std::int64_t;
+    auto update_replica_size_and_status(RsComm& _comm, const l1desc_t& _l1desc) -> void;
 
-    auto current_time_in_seconds() -> std::string;
+    auto update_replica_size(RsComm& _comm, const l1desc_t& _l1desc) -> void;
 
-    auto update_replica_size_and_status(rsComm_t& _comm,
-                                        const l1desc_t& _l1desc,
-                                        bool _send_notifications) -> int;
+    auto update_replica_status(RsComm& _comm, const l1desc_t& _l1desc, const int _new_status) -> void;
 
-    auto update_replica_size(rsComm_t& _comm,
-                             const l1desc_t& _l1desc,
-                             bool _send_notifications) -> int;
-
-    auto update_replica_status(rsComm_t& _comm,
-                               const l1desc_t& _l1desc,
-                               std::string_view _new_status,
-                               bool _send_notifications) -> int;
+    auto update_replica_checksum(RsComm& _comm, const l1desc_t& _l1desc) -> void;
 
     auto free_l1_descriptor(int _l1desc_index) -> int;
+
+    auto get_data_object_state(const l1desc_t& _l1desc, const replica_state_table::state_type& _state) -> replica_state_table::data_object_handle;
+
+    auto update_catalog(RsComm& _comm) -> void;
 
     //
     // Function Implementations
     //
 
-    auto call_replica_close(irods::api_entry* _api, rsComm_t* _comm, bytesBuf_t* _input) -> int
+    auto call_replica_close(irods::api_entry* _api, RsComm* _comm, bytesBuf_t* _input) -> int
     {
         return _api->call_handler<bytesBuf_t*>(_comm, _input);
     }
@@ -150,158 +141,96 @@ namespace
         }
     }
 
-    auto close_physical_object(rsComm_t& _comm, int _l3desc_index) -> int
+    auto close_physical_object(RsComm& _comm, int _l3desc_index) -> int
     {
         fileCloseInp_t input{};
         input.fileInx = _l3desc_index;
         return rsFileClose(&_comm, &input);
     }
 
-    auto get_file_size(rsComm_t& _comm, const l1desc_t& _l1desc) -> std::int64_t
+    auto update_replica_size_and_status(RsComm& _comm, const l1desc_t& _l1desc) -> void
+    {
+        auto [after, after_lm] = get_data_object_state(_l1desc, replica_state_table::state_type::after);
+        auto replica = *data_object::find_replica(after, _l1desc.dataObjInfo->rescHier);
+
+        const auto size_on_disk = replica::get_replica_size_from_storage(
+            _comm,
+            _l1desc.dataObjInfo->objPath,
+            _l1desc.dataObjInfo->rescHier,
+            _l1desc.dataObjInfo->filePath);
+
+        // If the size of the replica has changed since opening it, then update the size.
+        if (_l1desc.dataObjInfo->dataSize != size_on_disk) {
+            replica.size(size_on_disk);
+            replica.mtime(SET_TIME_TO_NOW_KW);
+            replica.replica_status(GOOD_REPLICA);
+        }
+        // If the contents of the replica has changed, then update the last modified timestamp.
+        else if (_l1desc.bytesWritten > 0) {
+            replica.mtime(SET_TIME_TO_NOW_KW);
+            replica.replica_status(GOOD_REPLICA);
+        }
+        // If this is a new replica and the size is supposed to be 0, mark it as good.
+        else if (_l1desc.dataObjInp->openFlags & O_CREAT && 0 == _l1desc.dataObjInfo->dataSize) {
+            replica.replica_status(GOOD_REPLICA);
+        }
+        // If the contents have not changed, use the previous replica status.
+        else {
+            auto [before, before_lm] = get_data_object_state(_l1desc, replica_state_table::state_type::before);
+            auto before_replica = *data_object::find_replica(before, _l1desc.dataObjInfo->rescHier);
+            replica.replica_status(before_replica.replica_status());
+        }
+
+        replica_state_table::instance().set_data_object_state(_l1desc.dataObjInfo->objPath, after, replica_state_table::state_type::after);
+    } // update_replica_size_and_status
+
+    auto update_replica_size(RsComm& _comm, const l1desc_t& _l1desc) -> void
+    {
+        auto [after, after_lm] = get_data_object_state(_l1desc, replica_state_table::state_type::after);
+        auto replica = *data_object::find_replica(after, _l1desc.dataObjInfo->rescHier);
+
+        const auto size_on_disk = replica::get_replica_size_from_storage(
+            _comm,
+            _l1desc.dataObjInfo->objPath,
+            _l1desc.dataObjInfo->rescHier,
+            _l1desc.dataObjInfo->filePath);
+
+        // If the size of the replica has changed since opening it, then update the size.
+        if (_l1desc.dataObjInfo->dataSize != size_on_disk) {
+            replica.size(size_on_disk);
+            replica.mtime(SET_TIME_TO_NOW_KW);
+        }
+        // If the contents of the replica has changed, then update the last modified timestamp.
+        else if (_l1desc.bytesWritten > 0) {
+            replica.mtime(SET_TIME_TO_NOW_KW);
+        }
+
+        replica_state_table::instance().set_data_object_state(_l1desc.dataObjInfo->objPath, after, replica_state_table::state_type::after);
+    } // update_replica_size
+
+    auto update_replica_status(RsComm& _comm, const l1desc_t& _l1desc, const int _new_status) -> void
+    {
+        auto [after, after_lm] = get_data_object_state(_l1desc, replica_state_table::state_type::after);
+        auto replica = *data_object::find_replica(after, _l1desc.dataObjInfo->rescHier);
+
+        replica.replica_status(_new_status);
+
+        replica_state_table::instance().set_data_object_state(_l1desc.dataObjInfo->objPath, after, replica_state_table::state_type::after);
+    } // update_replica_status
+
+    auto update_replica_checksum(RsComm& _comm, const l1desc_t& _l1desc) -> void
     {
         const auto& info = *_l1desc.dataObjInfo;
+        constexpr const auto calculation = replica::verification_calculation::always;
+        const auto checksum = replica::replica_checksum(_comm, info.objPath, info.rescName, calculation);
 
-        std::string location;
-        if (const auto err = irods::get_loc_for_hier_string(info.rescHier, location); !err.ok()) {
-            log::api::error("Failed to resolve resource hierarchy to hostname [error_code={}]", err.code());
-            return err.code();
-        }
+        auto [after, after_lm] = get_data_object_state(_l1desc, replica_state_table::state_type::after);
+        auto replica = *data_object::find_replica(after, info.rescHier);
 
-        fileStatInp_t stat_input{};
-        std::strncpy(stat_input.objPath, info.objPath, MAX_NAME_LEN);
-        std::strncpy(stat_input.fileName, info.filePath, MAX_NAME_LEN);
-        std::strncpy(stat_input.rescHier, info.rescHier, MAX_NAME_LEN);
-        std::strncpy(stat_input.addr.hostAddr, location.c_str(), NAME_LEN);
+        replica.checksum(checksum);
 
-        rodsStat_t* stat_output{};
-        if (const auto ec = rsFileStat(&_comm, &stat_input, &stat_output); ec != 0) {
-            log::api::error("Could not stat file [error_code={}, logical_path={}, physical_path={}]",
-                            ec, info.objPath, info.filePath);
-            return ec;
-        }
-
-        const auto size = stat_output->st_size;
-        std::free(stat_output);
-
-        return size;
-    }
-
-    auto current_time_in_seconds() -> std::string
-    {
-        // clang-format off
-        using clock_type    = fs::object_time_type::clock;
-        using duration_type = fs::object_time_type::duration;
-        // clang-format on
-
-        const auto now = std::chrono::time_point_cast<duration_type>(clock_type::now());
-
-        return fmt::format("{:011}", now.time_since_epoch().count());
-    }
-
-    auto update_replica_size_and_status(rsComm_t& _comm, const l1desc_t& _l1desc, bool _send_notifications) -> int
-    {
-        const auto size_on_disk = get_file_size(_comm, _l1desc);
-
-        if (size_on_disk < 0) {
-            log::api::error("Failed to retrieve the replica's size on disk [error_code={}].", size_on_disk);
-            return size_on_disk;
-        }
-
-        dataObjInfo_t info{};
-        std::strncpy(info.objPath, _l1desc.dataObjInfo->objPath, MAX_NAME_LEN);
-        std::strncpy(info.rescHier, _l1desc.dataObjInfo->rescHier, MAX_NAME_LEN);
-
-        keyValPair_t reg_params{};
-        addKeyVal(&reg_params, REPL_STATUS_KW, REPLICA_STATUS_GOOD);
-
-        // If the size of the replica has changed since opening it, then update the size.
-        if (_l1desc.dataObjInfo->dataSize != size_on_disk) {
-            addKeyVal(&reg_params, DATA_SIZE_KW, std::to_string(size_on_disk).data());
-            addKeyVal(&reg_params, DATA_MODIFY_KW, current_time_in_seconds().data());
-        }
-        // If the contents of the replica has changed, then update the last modified timestamp.
-        else if (_l1desc.bytesWritten > 0) {
-            addKeyVal(&reg_params, DATA_MODIFY_KW, current_time_in_seconds().data());
-        }
-
-        // Possibly triggers file modified notification.
-        if (_send_notifications) {
-            addKeyVal(&reg_params, OPEN_TYPE_KW, std::to_string(_l1desc.openType).data());
-        }
-
-        modDataObjMeta_t input{};
-        input.dataObjInfo = &info;
-        input.regParam = &reg_params;
-
-        return rsModDataObjMeta(&_comm, &input);
-    }
-
-    auto update_replica_size(rsComm_t& _comm, const l1desc_t& _l1desc, bool _send_notifications) -> int
-    {
-        const auto size_on_disk = get_file_size(_comm, _l1desc);
-
-        if (size_on_disk < 0) {
-            log::api::error("Failed to retrieve the replica's size on disk [error_code={}].", size_on_disk);
-            return size_on_disk;
-        }
-
-        dataObjInfo_t info{};
-        std::strncpy(info.objPath, _l1desc.dataObjInfo->objPath, MAX_NAME_LEN);
-        std::strncpy(info.rescHier, _l1desc.dataObjInfo->rescHier, MAX_NAME_LEN);
-
-        keyValPair_t reg_params{};
-
-        // If the size of the replica has changed since opening it, then update the size.
-        if (_l1desc.dataObjInfo->dataSize != size_on_disk) {
-            addKeyVal(&reg_params, DATA_SIZE_KW, std::to_string(size_on_disk).data());
-            addKeyVal(&reg_params, DATA_MODIFY_KW, current_time_in_seconds().data());
-        }
-        // If the contents of the replica has changed, then update the last modified timestamp.
-        else if (_l1desc.bytesWritten > 0) {
-            addKeyVal(&reg_params, DATA_MODIFY_KW, current_time_in_seconds().data());
-        }
-        else {
-            // Return immediately if nothing needs to be updated. Allowing the function
-            // to continue pass this point results in an SQL update error due to invalid
-            // SQL (i.e. no columns were specified for the update).
-            return 0;
-        }
-
-        // Possibly triggers file modified notification.
-        if (_send_notifications) {
-            addKeyVal(&reg_params, OPEN_TYPE_KW, std::to_string(_l1desc.openType).data());
-        }
-
-        modDataObjMeta_t input{};
-        input.dataObjInfo = &info;
-        input.regParam = &reg_params;
-
-        return rsModDataObjMeta(&_comm, &input);
-    }
-
-    auto update_replica_status(rsComm_t& _comm,
-                               const l1desc_t& _l1desc,
-                               std::string_view _new_status,
-                               bool _send_notifications) -> int
-    {
-        dataObjInfo_t info{};
-        std::strncpy(info.objPath, _l1desc.dataObjInfo->objPath, MAX_NAME_LEN);
-        std::strncpy(info.rescHier, _l1desc.dataObjInfo->rescHier, MAX_NAME_LEN);
-
-        keyValPair_t reg_params{};
-        addKeyVal(&reg_params, REPL_STATUS_KW, _new_status.data());
-
-        // Possibly triggers file modified notification.
-        if (_send_notifications) {
-            addKeyVal(&reg_params, OPEN_TYPE_KW, std::to_string(_l1desc.openType).data());
-        }
-
-        modDataObjMeta_t input{};
-        input.dataObjInfo = &info;
-        input.regParam = &reg_params;
-
-        return rsModDataObjMeta(&_comm, &input);
-    }
+        replica_state_table::instance().set_data_object_state(info.objPath, after, replica_state_table::state_type::after);
+    } // update_replica_checksum
 
     auto free_l1_descriptor(int _l1desc_index) -> int
     {
@@ -313,7 +242,31 @@ namespace
         return 0;
     }
 
-    auto rs_replica_close(rsComm_t* _comm, bytesBuf_t* _input) -> int
+    auto get_data_object_state(const l1desc_t& _l1desc, const replica_state_table::state_type& _state) -> replica_state_table::data_object_handle
+    {
+        auto& rst = replica_state_table::instance();
+        auto current_obj_tuple = rst.get_data_object_state(_l1desc.dataObjInfo->objPath, _state);
+        if (!current_obj_tuple) {
+            THROW(SYS_INTERNAL_ERR, fmt::format(
+                "[{}] - no entry for [{}] in replica state table",
+                __FUNCTION__, _l1desc.dataObjInfo->objPath));
+        }
+        return std::move(*current_obj_tuple);
+    } // get_data_object_state
+
+    auto update_catalog(RsComm& _comm, std::string_view _logical_path) -> void
+    {
+        char* output{};
+        const auto input = irods::experimental::replica_state_table::to_json(_logical_path.data()).dump();
+
+        if (const int ec = rs_data_object_finalize(&_comm, input.c_str(), &output); ec < 0) {
+            THROW(ec, fmt::format(
+                "[{}:{}] - finalize failed with [{}] and [{}]",
+                __FUNCTION__, __LINE__, ec, output));
+        }
+    } // update_catalog
+
+    auto rs_replica_close(RsComm* _comm, bytesBuf_t* _input) -> int
     {
         if (const auto [valid, msg] = is_input_valid(_input); !valid) {
             log::api::error(msg);
@@ -343,7 +296,7 @@ namespace
         }
 
         const auto& l1desc = L1desc[l1desc_index];
-        const auto send_notifications = !json_input.contains("send_notifications") || json_input.at("send_notifications").get<bool>();
+        //const auto send_notifications = !json_input.contains("send_notifications") || json_input.at("send_notifications").get<bool>();
 
         try {
             if (l1desc.inuseFlag != FD_INUSE) {
@@ -368,41 +321,66 @@ namespace
             }
 
             const auto is_write_operation = (O_RDONLY != (l1desc.dataObjInp->openFlags & O_ACCMODE));
-
-            // Allow updates to the replica's catalog information if the stream supports
-            // write operations (i.e. the stream is opened in write-only or read-write mode).
-            if (is_write_operation) {
-                const auto update_size = !json_input.contains("update_size") || json_input.at("update_size").get<bool>();
-                const auto update_status = !json_input.contains("update_status") || json_input.at("update_status").get<bool>();
-
-                // Update the replica's information in the catalog if requested.
-                if (update_size && update_status) {
-                    if (const auto ec = update_replica_size_and_status(*_comm, l1desc, send_notifications); ec != 0) {
-                        log::api::error("Failed to update the replica size and status in the catalog [error_code={}].", ec);
-                        update_replica_status(*_comm, l1desc, REPLICA_STATUS_STALE, send_notifications);
-                        return ec;
+            {
+                const irods::at_scope_exit cleanup{[&l1desc]
+                {
+                    try {
+                        auto& rst = replica_state_table::instance();
+                        rst.erase_entry(l1desc.dataObjInfo->objPath);
                     }
-                }
-                else if (update_size) {
-                    if (const auto ec = update_replica_size(*_comm, l1desc, send_notifications); ec != 0) {
-                        log::api::error("Failed to update the replica size in the catalog [error_code={}].", ec);
-                        update_replica_status(*_comm, l1desc, REPLICA_STATUS_STALE, send_notifications);
-                        return ec;
+                    catch (const irods::exception& e) {
+                        irods::log(LOG_ERROR, fmt::format(
+                            "[{}] - failed to erase replica_state_table entry:[{}:{}]",
+                            __FUNCTION__, e.code(), e.what()));
                     }
-                }
-                else if (update_status) {
-                    if (const auto ec = update_replica_status(*_comm, l1desc, REPLICA_STATUS_GOOD, send_notifications); ec != 0) {
-                        log::api::error("Failed to update the replica status in the catalog [error_code={}].", ec);
-                        update_replica_status(*_comm, l1desc, REPLICA_STATUS_STALE, send_notifications);
-                        return ec;
+                    catch (const std::exception& e) {
+                        irods::log(LOG_ERROR, fmt::format(
+                            "[{}] - failed to erase replica_state_table entry:[{}]",
+                            __FUNCTION__, e.what()));
                     }
-                }
+                    catch (...) {
+                        irods::log(LOG_ERROR, fmt::format(
+                            "[{}] - unknown error occurred while erasing replica_state_table entry",
+                            __FUNCTION__));
+                    }
+                }};
 
-                // [Re]compute a checksum for the replica if requested.
-                if (json_input.contains("compute_checksum") && json_input.at("compute_checksum").get<bool>()) {
-                    const auto& info = *l1desc.dataObjInfo;
-                    constexpr const auto calculation = irods::experimental::replica::verification_calculation::always;
-                    irods::experimental::replica::replica_checksum(*_comm, info.objPath, info.replNum, calculation);
+                try {
+                    // Allow updates to the replica's catalog information if the stream supports
+                    // write operations (i.e. the stream is opened in write-only or read-write mode).
+                    const auto update_status = !json_input.contains("update_status") || json_input.at("update_status").get<bool>();
+                    if (is_write_operation) {
+                        const auto update_size = !json_input.contains("update_size") || json_input.at("update_size").get<bool>();
+
+                        // Update the replica's information in the catalog if requested.
+                        if (update_size && update_status) {
+                            update_replica_size_and_status(*_comm, l1desc);
+                        }
+                        else if (update_size) {
+                            update_replica_size(*_comm, l1desc);
+                        }
+                        else if (update_status) {
+                            update_replica_status(*_comm, l1desc, GOOD_REPLICA);
+                        }
+
+                        // [Re]compute a checksum for the replica if requested.
+                        if (json_input.contains("compute_checksum") && json_input.at("compute_checksum").get<bool>()) {
+                            update_replica_checksum(*_comm, l1desc);
+                        }
+                    }
+                    else {
+                        if (update_status) {
+                            update_replica_status(*_comm, l1desc, GOOD_REPLICA);
+                        }
+                    }
+
+                    update_catalog(*_comm, l1desc.dataObjInfo->objPath);
+                }
+                catch (const irods::exception& e) {
+                    irods::log(LOG_ERROR, fmt::format("[{}] - failed to update replica:[{}]", __FUNCTION__, e.what()));
+                    update_replica_status(*_comm, l1desc, STALE_REPLICA);
+                    update_catalog(*_comm, l1desc.dataObjInfo->objPath);
+                    return e.code();
                 }
             }
 
@@ -418,37 +396,38 @@ namespace
                 }
 
                 log::api::error("Failed to close file object [error_code={}].", ec);
-                update_replica_status(*_comm, l1desc, REPLICA_STATUS_STALE, send_notifications);
+                update_replica_status(*_comm, l1desc, STALE_REPLICA);
                 return ec;
             }
 
             const auto ec = free_l1_descriptor(l1desc_index);
-            
+
             if (ec != 0) {
-                update_replica_status(*_comm, l1desc, REPLICA_STATUS_STALE, send_notifications);
+                // TODO: need to make sure the index is still valid before using
+                update_replica_status(*_comm, l1desc, STALE_REPLICA);
             }
 
             return ec;
         }
         catch (const json::type_error& e) {
             log::api::error("Failed to extract property from JSON object [error_code={}]", SYS_INTERNAL_ERR);
-            update_replica_status(*_comm, l1desc, REPLICA_STATUS_STALE, send_notifications);
+            update_replica_status(*_comm, l1desc, STALE_REPLICA);
             return SYS_INTERNAL_ERR;
         }
         catch (const irods::exception& e) {
             log::api::error("{} [error_code={}]", e.what(), e.code());
-            update_replica_status(*_comm, l1desc, REPLICA_STATUS_STALE, send_notifications);
+            update_replica_status(*_comm, l1desc, STALE_REPLICA);
             return e.code();
         }
         catch (const fs::filesystem_error& e) {
             log::api::error("{} [error_code={}]", e.what(), e.code().value());
-            update_replica_status(*_comm, l1desc, REPLICA_STATUS_STALE, send_notifications);
+            update_replica_status(*_comm, l1desc, STALE_REPLICA);
             return e.code().value();
         }
         catch (const std::exception& e) {
             log::api::error("An unexpected error occurred while closing the replica. {} [error_code={}]",
                             e.what(), SYS_INTERNAL_ERR);
-            update_replica_status(*_comm, l1desc, REPLICA_STATUS_STALE, send_notifications);
+            update_replica_status(*_comm, l1desc, STALE_REPLICA);
             return SYS_INTERNAL_ERR;
         }
     }
