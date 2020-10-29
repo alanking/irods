@@ -172,11 +172,6 @@ namespace irods {
                               file_object_ptr  _file_obj,
                               dataObjInfo_t**  _data_obj_info = nullptr);
 
-    irods::file_object_ptr make_file_object(
-        rsComm_t&       _comm,
-        dataObjInp_t&   _data_obj_inp,
-        dataObjInfo_t** _data_obj_info = nullptr);
-
     /// \param[in] _obj File object to search
     /// \param[in] _hierarchy
     ///
