@@ -11,10 +11,12 @@
 #include "resource.hpp"
 #include "rodsConnect.h"
 #include "rsExecCmd.hpp"
+#include "rsFileStat.hpp"
 #include "rsGenQuery.hpp"
 #include "rsGlobalExtern.hpp"
 #include "rsIcatOpr.hpp"
 #include "rsLog.hpp"
+#include "rs_data_object_finalize.hpp"
 #include "sockComm.h"
 
 #include "irods_configuration_parser.hpp"
@@ -27,10 +29,12 @@
 #include "irods_threads.hpp"
 #include "replica_state_table.hpp"
 
-#include <vector>
+#include <chrono>
+#include <fstream>
 #include <set>
 #include <string>
-#include <fstream>
+#include <sstream>
+#include <vector>
 
 #include <boost/filesystem.hpp>
 #include <boost/format.hpp>
@@ -39,6 +43,183 @@
 
 static time_t LastBrokenPipeTime = 0;
 static int BrokenPipeCnt = 0;
+
+namespace
+{
+    using replica_proxy = irods::experimental::replica::replica_proxy<DataObjInfo>;
+
+    auto update_checksum_if_needed(RsComm& _comm, const int _fd) -> std::string
+    {
+        auto& l1desc = L1desc[_fd];
+
+        bool update_checksum = !getValByKey(&l1desc.dataObjInp->condInput, NO_CHK_COPY_LEN_KW);
+
+        if ((OPEN_FOR_WRITE_TYPE == l1desc.openType || CREATE_TYPE == l1desc.openType) &&
+            !std::string_view{l1desc.dataObjInfo->chksum}.empty()) {
+            l1desc.chksumFlag = REG_CHKSUM;
+            update_checksum = true;
+        }
+
+        if (!update_checksum) {
+            return {};
+        }
+
+        char* checksum_string = nullptr;
+        irods::at_scope_exit free_checksum_string{[&checksum_string] { free(checksum_string); }};
+
+        auto open_replica = replica_proxy{*l1desc.dataObjInfo};
+
+        if (!l1desc.chksumFlag) {
+            if (open_replica.checksum().length() <= 0) {
+                return {};
+            }
+            l1desc.chksumFlag = VERIFY_CHKSUM;
+        }
+
+        switch (l1desc.chksumFlag) {
+            case VERIFY_CHKSUM:
+                if (!std::string_view{l1desc.chksum}.length()) {
+                    return {};
+                }
+
+                open_replica.cond_input()[ORIG_CHKSUM_KW] = l1desc.chksum;
+                if (const int ec = _dataObjChksum(&_comm, open_replica.get(), &checksum_string); ec < 0) {
+                    THROW(ec, "failed in _dataObjChksum");
+                }
+                open_replica.cond_input().erase(ORIG_CHKSUM_KW);
+
+                // verify against the input value
+                if (std::string_view{checksum_string} != l1desc.chksum) {
+                    THROW(USER_CHKSUM_MISMATCH, fmt::format(
+                        "{}: mismatch chksum for {}.inp={},compute {}",
+                        __FUNCTION__, open_replica.logical_path(),
+                        l1desc.chksum, checksum_string));
+                }
+
+                return {checksum_string};
+
+            case REG_CHKSUM:
+                if (std::string_view{l1desc.chksum}.length() > 0) {
+                    open_replica.cond_input()[ORIG_CHKSUM_KW] = l1desc.chksum;
+                }
+
+                if (const int ec = _dataObjChksum(&_comm, open_replica.get(), &checksum_string ); ec < 0) {
+                    THROW(ec, "failed in _dataObjChksum");
+                }
+
+                if (std::string_view{l1desc.chksum}.length() > 0) {
+                    open_replica.cond_input().erase(ORIG_CHKSUM_KW);
+                }
+
+                if (!checksum_string) {
+                    irods::log(LOG_NOTICE, fmt::format(
+                        "[{}] - checksum returned empty for [{}]",
+                        __FUNCTION__, open_replica.logical_path()));
+                    return {};
+                }
+
+                return {checksum_string};
+
+            default:
+                return {};
+        }
+    } // update_checksum_if_needed
+
+    auto stale_all_open_replicas(RsComm& _comm) -> void
+    {
+        // clang-format off
+        namespace fs      = irods::experimental::filesystem;
+        namespace replica = irods::experimental::replica;
+        namespace sc      = std::chrono;
+        using state_type  = irods::experimental::replica_state_table::state_type;
+        // clang-format on
+
+        auto& rst = irods::experimental::replica_state_table::instance();
+
+        for (int i = 3; i < NUM_L1_DESC; ++i) {
+            try {
+                if (FD_INUSE == L1desc[i].inuseFlag) {
+                    if (!L1desc[i].dataObjInfo) {
+                        irods::log(LOG_WARNING, fmt::format("[{}] - dataObjInfo null for fd [{}]", __FUNCTION__, i));
+                        continue;
+                    }
+
+                    auto replica = irods::experimental::replica::replica_proxy{*L1desc[i].dataObjInfo};
+                    // TODO: investigate making this less abrasive to use (std::optional<std::tuple<data_object_proxy, lifetime_manager>> -> data_object_proxy (direct access rather than copy) or throw)
+                    auto after_tuple = *rst.get_data_object_state(replica.logical_path().data(), state_type::after);
+                    auto& [after, after_lm] = after_tuple;
+
+                    auto open_replica = irods::experimental::data_object::find_replica(after, replica.hierarchy());
+                    if (!open_replica) {
+                        irods::log(LOG_ERROR, fmt::format(
+                            "[{}] - could not find replica in after state with hier [{}] for [{}]",
+                            __FUNCTION__, replica.hierarchy(), replica.logical_path()));
+                        continue;
+                    }
+
+                    if (const auto accmode = L1desc[i].dataObjInp->openFlags & O_ACCMODE; O_RDONLY == accmode) {
+                        auto before_tuple = *rst.get_data_object_state(replica.logical_path().data(), state_type::before);
+                        auto& [before, before_lm] = before_tuple;
+                        auto before_replica = irods::experimental::data_object::find_replica(before, replica.hierarchy());
+
+                        if (!before_replica) {
+                            irods::log(LOG_ERROR, fmt::format(
+                                "[{}] - could not find replica in before state with hier [{}] for [{}]",
+                                __FUNCTION__, replica.hierarchy(), replica.logical_path()));
+                            continue;
+                        }
+
+                        open_replica->replica_status(before_replica->replica_status());
+                    }
+                    else {
+                        const auto size_in_storage = replica::get_replica_size_from_storage(
+                            _comm,
+                            fs::path{open_replica->logical_path().data()},
+                            open_replica->hierarchy(),
+                            open_replica->physical_path());
+                        open_replica->size(size_in_storage);
+
+                        try {
+                            if (const auto checksum = update_checksum_if_needed(_comm, i); !checksum.empty()) {
+                                open_replica->checksum(checksum);
+                            }
+                        }
+                        catch (const irods::exception& e) {
+                            irods::log(LOG_ERROR, fmt::format(
+                                "[{}] - error while calculating checksum for [{}]:[{}]",
+                                __FUNCTION__, open_replica->logical_path(), e.what()));
+                        }
+
+                        if (!(L1desc[i].dataObjInp->openFlags & O_CREAT)) {
+                            open_replica->mtime(SET_TIME_TO_NOW_KW);
+                        }
+
+                        open_replica->replica_status(STALE_REPLICA);
+                    }
+
+                    rst.set_data_object_state(replica.logical_path().data(), after, state_type::after);
+
+                    const auto input = irods::experimental::replica_state_table::to_json(replica.logical_path().data()).dump();
+                    char* output{};
+                    if (const int ec = rs_data_object_finalize(&_comm, input.c_str(), &output); ec < 0) {
+                        irods::log(LOG_ERROR, fmt::format(
+                            "[{}:{}] - rs_data_object_finalize failed. ec:[{}],output:[{}]",
+                            __FUNCTION__, __LINE__, ec, output));
+                    }
+                }
+            }
+            catch (const irods::exception& e) {
+                irods::log(LOG_ERROR, e.what());
+            }
+            catch (const std::exception& e) {
+                irods::log(LOG_ERROR, e.what());
+            }
+            catch (...) {
+                irods::log(LOG_ERROR, fmt::format("[{}] - an unknown error occurred", __FUNCTION__));
+            }
+        }
+    } // stale_all_open_replicas
+} // anonymous namespace
 
 
 InformationRequiredToSafelyRenameProcess::InformationRequiredToSafelyRenameProcess(char**argv) {
@@ -540,6 +721,9 @@ cleanup() {
     }
 
     if ( InitialState == INITIAL_DONE ) {
+        // TODO: stale-ify open replicas
+        stale_all_open_replicas(*ThisComm);
+
         /* close all opened descriptors */
         closeAllL1desc( ThisComm );
 
