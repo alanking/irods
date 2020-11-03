@@ -277,8 +277,12 @@ namespace irods {
     error file_object_factory( rsComm_t*        _comm,
                                dataObjInp_t*    _data_obj_inp,
                                file_object_ptr  _file_obj,
-                               dataObjInfo_t**  _data_obj_info ) {
-        // =-=-=-=-=-=-=-
+                               dataObjInfo_t**  _data_obj_info)
+    {
+        if (!_comm || !_data_obj_inp) {
+            return ERROR(SYS_INTERNAL_NULL_INPUT_ERR, "some inputs were null");
+        }
+
         // start populating file_object
         _file_obj->comm( _comm );
         _file_obj->logical_path( _data_obj_inp->objPath );
@@ -299,10 +303,10 @@ namespace irods {
                 _file_obj->repl_requested(std::stoi(repl_num));
             }
             catch (const std::invalid_argument& e) {
-                return ERROR(USER_INVALID_REPLICA_INPUT, "invalid replica number argument");
+                return ERROR(USER_INVALID_REPLICA_INPUT, fmt::format("invalid replica number argument:[{}]", repl_num));
             }
             catch (const std::out_of_range& e) {
-                return ERROR(USER_INVALID_REPLICA_INPUT, "replica number is out of range");
+                return ERROR(USER_INVALID_REPLICA_INPUT, fmt::format("replica number is out of range:[{}]", repl_num));
             }
         }
 
@@ -410,4 +414,11 @@ namespace irods {
         return obj;
     } // make_file_object
 
+    auto hierarchy_has_replica(const irods::file_object_ptr _obj, std::string_view _hierarchy) -> bool
+    {
+        return std::any_of(std::cbegin(_obj->replicas()), std::cend(_obj->replicas()),
+            [&_hierarchy](const irods::physical_object& _r) {
+                return _r.resc_hier() == _hierarchy;
+            });
+    } // hierarchy_has_replica
 } // namespace irods
