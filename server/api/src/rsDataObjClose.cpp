@@ -8,7 +8,6 @@
 #include "fileClose.h"
 #include "fileStat.h"
 #include "getRescQuota.h"
-#include "key_value_proxy.hpp"
 #include "miscServerFunct.hpp"
 #include "modAVUMetadata.h"
 #include "modAVUMetadata.h"
@@ -74,7 +73,7 @@ namespace
     namespace replica           = irods::experimental::replica;
     using data_object_proxy     = irods::experimental::data_object::data_object_proxy<DataObjInfo>;
     using replica_proxy         = irods::experimental::replica::replica_proxy<DataObjInfo>;
-    using replica_state_table     = irods::experimental::replica_state_table;
+    using replica_state_table   = irods::experimental::replica_state_table;
     using replica_state         = irods::experimental::replica_state_table::state_type;
     using json                  = nlohmann::json;
     // clang-format off
@@ -179,6 +178,21 @@ namespace
         }
     } // applyACLFromKVP
 
+    auto erase_replica_state_table_entry(const int _fd) -> void
+    {
+        auto& l1desc = L1desc[_fd];
+        auto& rst = replica_state_table::instance();
+
+        try {
+            if (rst.contains(l1desc.dataObjInfo->objPath)) {
+                rst.erase_entry(l1desc.dataObjInfo->objPath);
+            }
+        }
+        catch (const irods::exception& e) {
+            irods::log(e);
+        }
+    } // erase_replica_state_table_entry
+
     auto purge_cache(RsComm& _comm, const int _fd) -> int
     {
         auto& l1desc = L1desc[_fd];
@@ -217,14 +231,20 @@ namespace
 
         auto destination_replica = replica_proxy{*l1desc.dataObjInfo};
         if ( oprType == REPLICATE_DEST || oprType == PHYMV_DEST ) {
-            const int srcL1descInx = l1desc.srcL1descInx;
-            if (srcL1descInx < 3) {
-                THROW(SYS_FILE_DESC_OUT_OF_RANGE, fmt::format(
-                    "{}: srcL1descInx {} out of range",
-                    __FUNCTION__, srcL1descInx));
+            //const int srcL1descInx = l1desc.srcL1descInx;
+            //if (srcL1descInx < 3) {
+                //THROW(SYS_FILE_DESC_OUT_OF_RANGE, fmt::format(
+                    //"{}: srcL1descInx {} out of range",
+                    //__FUNCTION__, srcL1descInx));
+            //}
+            //
+            //auto source_replica = replica_proxy{*L1desc[srcL1descInx].dataObjInfo};
+
+            if (!l1desc.replDataObjInfo) {
+                THROW(SYS_FILE_DESC_OUT_OF_RANGE, fmt::format("{}: source replica dataObjInfo invalid", __FUNCTION__));
             }
 
-            auto source_replica = replica_proxy{*L1desc[srcL1descInx].dataObjInfo};
+            auto source_replica = replica_proxy{*l1desc.replDataObjInfo};
             if (source_replica.checksum().length() > 0 && STALE_REPLICA != source_replica.replica_status()) {
                 destination_replica.cond_input()[ORIG_CHKSUM_KW] = source_replica.checksum();
 
@@ -315,16 +335,22 @@ namespace
 
             // TODO come back to this case...
             if (COPY_DEST == oprType) {
-                const int srcL1descInx = l1desc.srcL1descInx;
-                if (srcL1descInx < 3) {
-                    irods::log(LOG_DEBUG, fmt::format(
-                        "{}: invalid srcL1descInx {} for copy",
-                        __FUNCTION__, srcL1descInx));
-                    // just register it for now
-                    return {};
+                //const int srcL1descInx = l1desc.srcL1descInx;
+                //if (srcL1descInx < 3) {
+                    //irods::log(LOG_DEBUG, fmt::format(
+                        //"{}: invalid srcL1descInx {} for copy",
+                        //__FUNCTION__, srcL1descInx));
+                    //// just register it for now
+                    //return {};
+                //}
+
+                //auto source_replica = replica_proxy{*L1desc[srcL1descInx].dataObjInfo};
+
+                if (!l1desc.replDataObjInfo) {
+                    THROW(SYS_FILE_DESC_OUT_OF_RANGE, fmt::format("{}: source replica dataObjInfo invalid", __FUNCTION__));
                 }
 
-                auto source_replica = replica_proxy{*L1desc[srcL1descInx].dataObjInfo};
+                auto source_replica = replica_proxy{*l1desc.replDataObjInfo};
 
                 if (source_replica.checksum().length() > 0) {
                     destination_replica.cond_input()[ORIG_CHKSUM_KW] = source_replica.checksum();
@@ -473,60 +499,94 @@ namespace
         }
     } // update_checksum_if_needed
 
+    auto get_keywords_for_file_modified(const irods::experimental::key_value_proxy<KeyValPair>& _src) -> std::string
+    {
+        using json = nlohmann::json;
+
+        json out{};
+
+        // TODO: just make a to_json method for key_value_proxy...
+        if (_src.contains(ADMIN_KW)) {
+            out[ADMIN_KW] = _src.at(ADMIN_KW).value();
+        }
+        if (_src.contains(IN_PDMO_KW)) {
+            out[IN_PDMO_KW] = _src.at(IN_PDMO_KW).value();
+        }
+        if (_src.contains(SYNC_OBJ_KW)) {
+            out[SYNC_OBJ_KW] = _src.at(SYNC_OBJ_KW).value();
+        }
+        if (_src.contains(REPL_STATUS_KW)) {
+            out[REPL_STATUS_KW] = _src.at(REPL_STATUS_KW).value();
+        }
+        if (_src.contains(OPEN_TYPE_KW)) {
+            out[OPEN_TYPE_KW] = _src.at(OPEN_TYPE_KW).value();
+        }
+        //if (_src.contains(IN_REPL_KW)) {
+            //out[IN_REPL_KW] = _src.at(IN_REPL_KW).value();
+        //}
+
+        return out.dump();
+    } // get_keywords_for_file_modified
+
     auto finalize_destination_replica_for_replication(RsComm& _comm, const openedDataObjInp_t& _inp, const int _fd) -> void
     {
         auto& l1desc = L1desc[_fd];
 
-        const int srcL1descInx = l1desc.srcL1descInx;
-        if (srcL1descInx < 3) {
-            THROW(SYS_FILE_DESC_OUT_OF_RANGE, fmt::format(
-                "{}: srcL1descInx {} out of range",
-                __FUNCTION__, srcL1descInx));
+        if (!l1desc.replDataObjInfo) {
+            THROW(SYS_FILE_DESC_OUT_OF_RANGE, fmt::format("{}: source replica dataObjInfo invalid", __FUNCTION__));
         }
 
-        auto source_replica = replica_proxy{*L1desc[srcL1descInx].dataObjInfo};
-        auto destination_replica = replica_proxy{*l1desc.dataObjInfo};
+        auto& rst = replica_state_table::instance();
+        auto current_obj_tuple = rst.get_data_object_state(l1desc.dataObjInfo->objPath, replica_state::after);
+        if (!current_obj_tuple) {
+            THROW(SYS_INTERNAL_ERR, fmt::format(
+                "[{}] - no entry for [{}] in replica state table",
+                __FUNCTION__, l1desc.dataObjInfo->objPath));
+        }
+        auto& [current_object, current_object_lm] = *current_obj_tuple;
 
-        auto [reg_param, lm] = irods::experimental::make_key_value_proxy({{OPEN_TYPE_KW, std::to_string(l1desc.openType)}});
-        reg_param[REPL_STATUS_KW] = std::to_string(source_replica.replica_status());
-        reg_param[DATA_MODIFY_KW] = std::to_string((int)time(nullptr));
-        reg_param[FILE_PATH_KW] = destination_replica.physical_path();
-        reg_param[DATA_SIZE_KW] = std::to_string(source_replica.size());
+        auto previous_obj_tuple = rst.get_data_object_state(l1desc.dataObjInfo->objPath, replica_state::before);
+        if (!previous_obj_tuple) {
+            THROW(SYS_INTERNAL_ERR, fmt::format(
+                "[{}] - no entry for [{}] in replica state table",
+                __FUNCTION__, l1desc.dataObjInfo->objPath));
+        }
+        auto& [previous_object, previous_object_lm] = *previous_obj_tuple;
+
+        //const auto source_replica = replica_proxy{*L1desc[srcL1descInx].dataObjInfo};
+        const auto source_replica = replica_proxy{*l1desc.replDataObjInfo};
+        auto destination_replica = *data_object::find_replica(current_object, l1desc.dataObjInfo->rescHier);
+        destination_replica.replica_status(GOOD_REPLICA);
+        destination_replica.mtime(SET_TIME_TO_NOW_KW);
         destination_replica.size(source_replica.size());
 
         const auto cond_input = irods::experimental::make_key_value_proxy(l1desc.dataObjInp->condInput);
-        if (cond_input.contains(ADMIN_KW)) {
-            reg_param[ADMIN_KW] = cond_input.at(ADMIN_KW);
-        }
-        if (const char* pdmo_kw = getValByKey(&_inp.condInput, IN_PDMO_KW); pdmo_kw) {
-            reg_param[IN_PDMO_KW] = pdmo_kw;
-        }
-        if (cond_input.contains(SYNC_OBJ_KW)) {
-            reg_param[SYNC_OBJ_KW] = cond_input.at(SYNC_OBJ_KW);
-        }
         if (PHYMV_DEST == l1desc.oprType) {
-            reg_param[REPL_NUM_KW] = std::to_string(source_replica.replica_number());
+            destination_replica.replica_number(source_replica.replica_number());
         }
         if (cond_input.contains(CHKSUM_KW)) {
-            reg_param[CHKSUM_KW] = cond_input.at(CHKSUM_KW);
+            destination_replica.checksum(cond_input.at(CHKSUM_KW).value());
         }
 
-        irods::log(LOG_DEBUG8, fmt::format(
-            "[{}:{}] - modifying [{}] on [{}]",
-            __FUNCTION__, __LINE__,
-            destination_replica.logical_path(),
-            destination_replica.hierarchy()));
-
-        modDataObjMeta_t mod_inp{};
-        mod_inp.dataObjInfo = destination_replica.get();
-        mod_inp.regParam = reg_param.get();
-        const int ec = rsModDataObjMeta(&_comm, &mod_inp);
-
-        if (l1desc.dataObjInp->openFlags & O_CREAT) {
-            updatequotaOverrun(destination_replica.hierarchy().data(), destination_replica.size(), ALL_QUOTA);
+        if (const auto file_modified_kw = get_keywords_for_file_modified(cond_input); !file_modified_kw.empty()) {
+            destination_replica.cond_input()[FILE_MODIFIED_KW] = file_modified_kw;
         }
 
-        if (ec < 0) {
+        irods::log(LOG_NOTICE, fmt::format("[{}:{}] - obj:[{}],replica:[{}]", __FUNCTION__, __LINE__, destination_replica.logical_path(), destination_replica.hierarchy()));
+
+        char* output{};
+        const auto input = replica_state_table::to_json(previous_object, current_object).dump();
+
+        // Remove the file_modified keyword to prevent recording in the replica state table
+        destination_replica.cond_input().erase(FILE_MODIFIED_KW);
+        rst.set_data_object_state(destination_replica.logical_path().data(), current_object, replica_state::after);
+
+        auto [destination_replica_duplicate, lm] = replica::duplicate_replica(destination_replica);
+
+        // Need to pre-emptively remove this reference to the replica state table in case replication occurs
+        erase_replica_state_table_entry(_fd);
+
+        if (const int ec = rs_data_object_finalize(&_comm, input.c_str(), &output); ec < 0) {
             l1desc.oprStatus = ec;
 
             if (CATALOG_ALREADY_HAS_ITEM_BY_THAT_NAME != ec) {
@@ -534,8 +594,12 @@ namespace
             }
 
             THROW(ec, fmt::format(
-                "{}: RegReplica/ModDataObjMeta {} err. stat = {}",
-                __FUNCTION__, destination_replica.logical_path(), ec));
+                "[{}:{}] - finalize failed with [{}] and [{}]",
+                __FUNCTION__, __LINE__, ec, output));
+        }
+
+        if (CREATE_TYPE == l1desc.openType) {
+            updatequotaOverrun(destination_replica_duplicate.hierarchy().data(), destination_replica_duplicate.size(), ALL_QUOTA);
         }
     } // finalize_destination_replica_for_replication
 
@@ -570,37 +634,63 @@ namespace
                 "[{}] - no entry for [{}] in replica state table",
                 __FUNCTION__, l1desc.dataObjInfo->objPath));
         }
-
         auto& [current_object, current_object_lm] = *current_obj_tuple;
+
+        auto previous_obj_tuple = rst.get_data_object_state(l1desc.dataObjInfo->objPath, replica_state::before);
+        if (!previous_obj_tuple) {
+            THROW(SYS_INTERNAL_ERR, fmt::format(
+                "[{}] - no entry for [{}] in replica state table",
+                __FUNCTION__, l1desc.dataObjInfo->objPath));
+        }
+        auto& [previous_object, previous_object_lm] = *previous_obj_tuple;
+
         // TODO: consider using l1desc_replica for everything and replacing the replica here with that
         auto current_replica = *data_object::find_replica(current_object, l1desc.dataObjInfo->rescHier);
 
         const auto vault_size = get_size_in_vault(_comm, _fd);
         current_replica.size(vault_size);
-        l1desc.dataObjInfo->dataSize = vault_size;
 
-        if (l1desc.dataObjInp->openFlags & O_CREAT) {
+        auto cond_input = irods::experimental::make_key_value_proxy(l1desc.dataObjInp->condInput);
+        if (CREATE_TYPE == l1desc.openType) {
             current_replica.replica_status(GOOD_REPLICA);
+            cond_input[OPEN_TYPE_KW] = std::to_string(CREATE_TYPE);
         }
         else {
             for (auto& replica : current_object.replicas()) {
+                irods::log(LOG_NOTICE, fmt::format("[{}:{}] - hier:[{}],current:[{}]",
+                    __FUNCTION__, __LINE__, replica.hierarchy(), current_replica.hierarchy()));
                 if (replica.hierarchy() != current_replica.hierarchy()) {
+                    irods::log(LOG_NOTICE, fmt::format("[{}:{}] - staling hier:[{}]",
+                        __FUNCTION__, __LINE__, replica.hierarchy(), current_replica.hierarchy()));
                     replica.replica_status(STALE_REPLICA);
                 }
             }
             current_replica.replica_status(GOOD_REPLICA);
             current_replica.mtime(SET_TIME_TO_NOW_KW);
+            cond_input[OPEN_TYPE_KW] = std::to_string(OPEN_FOR_WRITE_TYPE);
         }
 
-        const auto cond_input = irods::experimental::make_key_value_proxy(l1desc.dataObjInp->condInput);
         if (cond_input.contains(CHKSUM_KW)) {
             current_replica.checksum(cond_input.at(CHKSUM_KW).value());
         }
 
-        rst.set_data_object_state(current_replica.logical_path().data(), current_object, replica_state::after);
+        if (const auto file_modified_kw = get_keywords_for_file_modified(cond_input); !file_modified_kw.empty()) {
+            current_replica.cond_input()[FILE_MODIFIED_KW] = file_modified_kw;
+        }
+
+        irods::log(LOG_NOTICE, fmt::format("[{}:{}] - obj:[{}],replica:[{}]", __FUNCTION__, __LINE__, current_replica.logical_path(), current_replica.hierarchy()));
 
         char* output{};
-        const auto input = irods::experimental::generate_before_and_after_states(current_object.logical_path()).dump();
+        const auto input = replica_state_table::to_json(previous_object, current_object).dump();
+
+        // Remove the file_modified keyword to prevent recording in the replica state table
+        current_replica.cond_input().erase(FILE_MODIFIED_KW);
+        rst.set_data_object_state(current_replica.logical_path().data(), current_object, replica_state::after);
+
+        auto [current_replica_duplicate, lm] = replica::duplicate_replica(current_replica);
+
+        // Remove this reference to the replica state table
+        erase_replica_state_table_entry(_fd);
 
         if (const int ec = rs_data_object_finalize(&_comm, input.c_str(), &output); ec < 0) {
             THROW(ec, fmt::format(
@@ -609,7 +699,7 @@ namespace
         }
 
         if (GOOD_REPLICA == current_replica.replica_status()) {
-            updatequotaOverrun(current_replica.hierarchy().data(), current_replica.size(), ALL_QUOTA);
+            updatequotaOverrun(current_replica_duplicate.hierarchy().data(), current_replica_duplicate.size(), ALL_QUOTA);
         }
     } // finalize_data_object_for_put_or_copy
 
@@ -624,8 +714,16 @@ namespace
                 "[{}] - no entry for [{}] in replica state table",
                 __FUNCTION__, l1desc.dataObjInfo->objPath));
         }
-
         auto& [current_object, current_object_lm] = *current_obj_tuple;
+
+        auto previous_obj_tuple = rst.get_data_object_state(l1desc.dataObjInfo->objPath, replica_state::before);
+        if (!previous_obj_tuple) {
+            THROW(SYS_INTERNAL_ERR, fmt::format(
+                "[{}] - no entry for [{}] in replica state table",
+                __FUNCTION__, l1desc.dataObjInfo->objPath));
+        }
+        auto& [previous_object, previous_object_lm] = *previous_obj_tuple;
+
         auto current_replica = *data_object::find_replica(current_object, l1desc.dataObjInfo->rescHier);
 
         const auto accmode = l1desc.dataObjInp->openFlags & O_ACCMODE;
@@ -640,10 +738,16 @@ namespace
             current_replica.replica_status(original_replica->replica_status());
         }
 
-        rst.set_data_object_state(current_replica.logical_path().data(), current_object, replica_state::after);
+        irods::log(LOG_NOTICE, fmt::format("[{}:{}] - obj:[{}],replica:[{}]", __FUNCTION__, __LINE__, current_replica.logical_path(), current_replica.hierarchy()));
 
         char* output{};
-        const auto input = irods::experimental::generate_before_and_after_states(current_object.logical_path()).dump();
+        const auto input = replica_state_table::to_json(previous_object, current_object).dump();
+
+        // Remove the file_modified keyword to prevent recording in the replica state table
+        current_replica.cond_input().erase(FILE_MODIFIED_KW);
+        rst.set_data_object_state(current_replica.logical_path().data(), current_object, replica_state::after);
+
+        erase_replica_state_table_entry(_fd);
 
         if (const int ec = rs_data_object_finalize(&_comm, input.c_str(), &output); ec < 0) {
             irods::log(LOG_NOTICE, fmt::format(
@@ -679,18 +783,41 @@ namespace
         }
         auto& [current_object, current_object_lm] = *current_obj_tuple;
 
+        auto previous_obj_tuple = rst.get_data_object_state(l1desc.dataObjInfo->objPath, replica_state::before);
+        if (!previous_obj_tuple) {
+            THROW(SYS_INTERNAL_ERR, fmt::format(
+                "[{}] - no entry for [{}] in replica state table",
+                __FUNCTION__, l1desc.dataObjInfo->objPath));
+        }
+        auto& [previous_object, previous_object_lm] = *previous_obj_tuple;
+
         auto current_replica = *data_object::find_replica(current_object, l1desc.dataObjInfo->rescHier);
 
-        if (l1desc.dataObjInp->openFlags & O_CREAT) {
+        auto cond_input = irods::experimental::make_key_value_proxy(l1desc.dataObjInp->condInput);
+
+        if (CREATE_TYPE == l1desc.openType) {
+            cond_input[OPEN_TYPE_KW] = std::to_string(CREATE_TYPE);
             current_replica.replica_status(GOOD_REPLICA);
+            if (const auto file_modified_kw = get_keywords_for_file_modified(cond_input); !file_modified_kw.empty()) {
+                current_replica.cond_input()[FILE_MODIFIED_KW] = file_modified_kw;
+            }
         }
         else {
             if (const auto accmode = l1desc.dataObjInp->openFlags & O_ACCMODE; O_RDONLY != accmode) {
+                cond_input[OPEN_TYPE_KW] = std::to_string(OPEN_FOR_WRITE_TYPE);
                 current_replica.mtime(SET_TIME_TO_NOW_KW);
+                if (const auto file_modified_kw = get_keywords_for_file_modified(cond_input); !file_modified_kw.empty()) {
+                    current_replica.cond_input()[FILE_MODIFIED_KW] = file_modified_kw;
+                }
             }
 
-            auto original_obj_tuple = *rst.get_data_object_state(current_replica.logical_path().data(), replica_state::before);
-            auto original_replica = data_object::find_replica(std::get<0>(original_obj_tuple), current_replica.hierarchy());
+            auto original_obj_tuple = rst.get_data_object_state(current_replica.logical_path().data(), replica_state::before);
+            if (!original_obj_tuple) {
+                THROW(KEY_NOT_FOUND, fmt::format(
+                    "[{}] - no before entry for [{}] in replica state table",
+                    __FUNCTION__, l1desc.dataObjInfo->objPath));
+            }
+            auto original_replica = data_object::find_replica(std::get<0>(*original_obj_tuple), current_replica.hierarchy());
 
             current_replica.replica_status(original_replica->replica_status());
         }
@@ -702,10 +829,19 @@ namespace
             }
         }
 
-        rst.set_data_object_state(current_replica.logical_path().data(), current_object, replica_state::after);
+        irods::log(LOG_NOTICE, fmt::format(
+            "[{}:{}] - obj:[{}],replica:[{}]",
+            __FUNCTION__, __LINE__, current_replica.logical_path(), current_replica.hierarchy()));
 
         char* output{};
-        const auto input = irods::experimental::generate_before_and_after_states(current_object.logical_path()).dump();
+        const auto input = replica_state_table::to_json(previous_object, current_object).dump();
+
+        // Remove the file_modified keyword to prevent recording in the replica state table
+        current_replica.cond_input().erase(FILE_MODIFIED_KW);
+        rst.set_data_object_state(current_replica.logical_path().data(), current_object, replica_state::after);
+
+        erase_replica_state_table_entry(_fd);
+
         if (const int ec = rs_data_object_finalize(&_comm, input.c_str(), &output); ec < 0) {
             irods::log(LOG_NOTICE, fmt::format(
                 "[{}:{}] - finalize failed with [{}] and [{}]",
@@ -753,9 +889,11 @@ namespace
 
             if (REPLICATE_DEST == l1desc.oprType || PHYMV_DEST == l1desc.oprType) {
                 finalize_destination_replica_for_replication(_comm, _inp, _fd);
+                irods::log(LOG_NOTICE, fmt::format("[{}:{}] - done with replication", __FUNCTION__, __LINE__));
             }
             else if (!opened_replica.special_collection_info()) {
                 finalize_data_object_for_put_or_copy(_comm, _inp, _fd);
+                irods::log(LOG_NOTICE, fmt::format("[{}:{}] - done with object creation/overwrite", __FUNCTION__, __LINE__));
             }
 
             l1desc.bytesWritten = l1desc.dataObjInfo->dataSize;
@@ -892,42 +1030,33 @@ int rsDataObjClose(rsComm_t* rsComm, openedDataObjInp_t* dataObjCloseInp)
     }
 
     try {
-        irods::at_scope_exit clean_up{[&fd]
-        {
-            auto& l1desc = L1desc[fd];
-            auto& rst = replica_state_table::instance();
-
-            try {
-                rst.erase_entry(l1desc.dataObjInfo->objPath);
-            }
-            catch (const irods::exception& e) {
-                irods::log(e);
-            }
-
-            freeL1desc(fd);
-        }};
-
         close_physical_file(*rsComm, fd);
 
         ec = finalize_replica(*rsComm, fd, *dataObjCloseInp);
         if (ec < 0 || l1desc.oprStatus < 0) {
+            freeL1desc(fd);
             return ec;
         }
 
         apply_static_peps(*rsComm, *dataObjCloseInp, fd, ec);
 
+        freeL1desc(fd);
+
         return ec;
     }
     catch (const irods::exception& e) {
         irods::log(e);
+        freeL1desc(fd);
         return ec = e.code();
     }
     catch (const std::exception& e) {
         irods::log(LOG_ERROR, fmt::format("[{}:{}] - [{}]", __FUNCTION__, __LINE__, e.what()));
+        freeL1desc(fd);
         return ec = SYS_INTERNAL_ERR;
     }
     catch (...) {
         irods::log(LOG_ERROR, fmt::format("an unknown error occurred in [{}]", __FUNCTION__));
+        freeL1desc(fd);
         return ec = SYS_UNKNOWN_ERROR;
     }
 } // rsDataObjClose

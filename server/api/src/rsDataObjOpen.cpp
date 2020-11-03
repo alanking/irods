@@ -87,13 +87,14 @@
 namespace
 {
     // clang-format off
-    namespace ix            = irods::experimental;
-    namespace fs            = irods::experimental::filesystem;
-    namespace data_object   = irods::experimental::data_object;
-    namespace replica       = irods::experimental::replica;
-    using replica_proxy     = irods::experimental::replica::replica_proxy<DataObjInfo>;
-    using data_object_proxy = irods::experimental::data_object::data_object_proxy<DataObjInfo>;
-    using log               = irods::experimental::log;
+    namespace ix              = irods::experimental;
+    namespace fs              = irods::experimental::filesystem;
+    namespace data_object     = irods::experimental::data_object;
+    namespace replica         = irods::experimental::replica;
+    using data_object_proxy   = irods::experimental::data_object::data_object_proxy<DataObjInfo>;
+    using log                 = irods::experimental::log;
+    using replica_proxy       = irods::experimental::replica::replica_proxy<DataObjInfo>;
+    using replica_state_table = irods::experimental::replica_state_table;
     // clang-format on
 
     // Instructs how "update_replica_access_table" should update the
@@ -190,9 +191,11 @@ namespace
         replDataObjInp(&_inp, l1desc.dataObjInp);
 
         l1desc.dataObjInpReplFlag = 1;
-        l1desc.dataObjInfo = _replica.get();
+        // Give ownership of the dataObjInfo completely to l1 descriptor
+        auto [info, info_lm] = replica::duplicate_replica(*_replica.get());
+        l1desc.dataObjInfo = info_lm.release();
         l1desc.oprType = _inp.oprType;
-        l1desc.replStatus = _replica.replica_status();
+        l1desc.replStatus = info.replica_status();
         l1desc.dataSize = dataSize;
         l1desc.purgeCacheFlag = static_cast<int>(cond_input.contains(PURGE_CACHE_KW));
 
@@ -206,7 +209,7 @@ namespace
         }
 
         if (cond_input.contains(KEY_VALUE_PASSTHROUGH_KW)) {
-            _replica.cond_input()[KEY_VALUE_PASSTHROUGH_KW] = cond_input.at(KEY_VALUE_PASSTHROUGH_KW);
+            info.cond_input()[KEY_VALUE_PASSTHROUGH_KW] = cond_input.at(KEY_VALUE_PASSTHROUGH_KW);
         }
 
         return l1_index;
@@ -229,7 +232,7 @@ namespace
         }
 
         replica->replica_status(_new_replica_status);
-        irods::experimental::replica_state_table::instance().set_data_object_state(_obj.logical_path().data(), _obj);
+        replica_state_table::instance().set_data_object_state(_obj.logical_path().data(), _obj);
 
         keyValPair_t kvp{};
         irods::experimental::key_value_proxy dst{kvp};
@@ -389,9 +392,9 @@ namespace
         auto cond_input = irods::experimental::make_key_value_proxy(_inp.condInput);
         std::string_view hierarchy = cond_input.at(RESC_HIER_STR_KW).value();
 
-        // conjuring a brand new data object info - intentionally take ownership of allocated struct
-        auto [new_replica, lm] = replica::make_replica_proxy();
-        lm.release();
+        DataObjInfo new_info{};
+        auto new_replica = replica::make_replica_proxy(new_info);
+
         new_replica.logical_path(_inp.objPath);
         new_replica.replica_status(INTERMEDIATE_REPLICA);
         new_replica.hierarchy(hierarchy);
@@ -401,6 +404,7 @@ namespace
         new_replica.type(cond_input.contains(DATA_TYPE_KW) ? cond_input.at(DATA_TYPE_KW).value() : GENERIC_DT_STR);
 
         cond_input[OPEN_TYPE_KW] = std::to_string(CREATE_TYPE);
+
         const int l1_index = populate_L1desc_with_inp(_inp, new_replica, _inp.dataSize);
         auto& l1desc = L1desc[l1_index];
 
@@ -420,42 +424,24 @@ namespace
                 THROW(ec, fmt::format("[{}] - failed in rsPhyPathReg", __FUNCTION__));
             }
 
+            // Duplicate l1 descriptor dataObjInfo so that it is not free'd along with the other replicas
+            auto [open_replica, open_replica_lm] = replica::duplicate_replica(*l1desc.dataObjInfo);
+
+            // If this replica is a new data object, make the new replica the head of the list
             if (!_info_head) {
-                // no other replica exists, so make new replica the head
-                _info_head = l1desc.dataObjInfo;
-            }
-            else {
-                // add new replica to the tail of the list
-                DataObjInfo* tmp = _info_head;
-                while (tmp->next) tmp = tmp->next;
-                tmp->next = l1desc.dataObjInfo;
+                // Intentionally release memory here as _info_head will be free'd in the calling function
+                _info_head = open_replica_lm.release();
             }
 
             auto obj = data_object::data_object_proxy{*_info_head};
 
-            auto& rst = irods::experimental::replica_state_table::instance();
-
-            if (rst.contains(obj.logical_path().data())) {
-                auto before_tuple = rst.get_data_object_state(obj.logical_path().data(), irods::experimental::replica_state_table::state_type::before);
-                auto after_tuple = rst.get_data_object_state(obj.logical_path().data(), irods::experimental::replica_state_table::state_type::after);
-                if (!before_tuple || !after_tuple) {
-                    THROW(KEY_NOT_FOUND, fmt::format("[{}] - incomplete entry for [{}]", __FUNCTION__, obj.logical_path()));
-                }
-                auto& [before, before_lm] = *before_tuple;
-                auto& [after, after_lm] = *after_tuple;
-
-                // duplicate the replica and give ownership to the other lifetime_managers
-                auto [new_before_replica, before_replica_lm] = irods::experimental::replica::duplicate_replica(obj.replicas().back());
-                auto [new_after_replica, after_replica_lm] = irods::experimental::replica::duplicate_replica(obj.replicas().back());
-                before_replica_lm.release();
-                after_replica_lm.release();
-
-                before.add_replica(*new_before_replica.get());
-                after.add_replica(*new_after_replica.get());
-
-                rst.set_data_object_state(obj.logical_path().data(), before, irods::experimental::replica_state_table::state_type::before);
-                rst.set_data_object_state(obj.logical_path().data(), after, irods::experimental::replica_state_table::state_type::after);
+            // If this replica is an existing data object, add it to the existing list of replicas
+            if (_info_head != l1desc.dataObjInfo) {
+                // Intentionally release memory here as _info_head will be free'd in the calling function
+                obj.add_replica(*open_replica_lm.release());
             }
+
+            auto& rst = replica_state_table::instance();
 
             rst.create_entry(obj);
 
@@ -785,7 +771,12 @@ int stageBundledData( rsComm_t * rsComm, dataObjInfo_t **subfileObjInfoHead ) {
             auto cond_input = irods::experimental::key_value_proxy(dataObjInp->condInput);
 
             // get data object information and resolve hierarchy if necessary
-            auto [file_obj, info_head, hierarchy] = resolve_resource_hierarchy_for_open(*rsComm, *dataObjInp);
+            irods::file_object_ptr file_obj;
+            DataObjInfo* info_head{};
+            std::string hierarchy;
+            std::tie(file_obj, info_head, hierarchy) = resolve_resource_hierarchy_for_open(*rsComm, *dataObjInp);
+
+            irods::at_scope_exit free_info{[&info_head] { freeAllDataObjInfo(info_head); }};
 
             if (!cond_input.contains(RESC_HIER_STR_KW)) {
                 cond_input[RESC_HIER_STR_KW] = hierarchy;
@@ -833,7 +824,7 @@ int stageBundledData( rsComm_t * rsComm, dataObjInfo_t **subfileObjInfoHead ) {
                     __FUNCTION__, info_head->objPath, hierarchy));
             }
 
-            auto& rst = irods::experimental::replica_state_table::instance();
+            auto& rst = replica_state_table::instance();
             rst.create_entry(obj);
 
             const bool open_for_write = dataObjInp->openFlags & O_WRONLY || dataObjInp->openFlags & O_RDWR;

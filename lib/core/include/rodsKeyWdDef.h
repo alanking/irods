@@ -304,6 +304,10 @@
 // to data_object_finalize, the mtime for that replica is set to the current time.
 #define SET_TIME_TO_NOW_KW "set time to now"
 
+// data_object_finalize checks for this keyword in order to determine whether a
+// fileModified notification should be sent to the resource plugins.
+#define FILE_MODIFIED_KW "file_modified"
+
 // clang-format on
 
 #endif	// RODS_KEYWD_DEF_H__

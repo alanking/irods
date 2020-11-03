@@ -213,8 +213,7 @@ namespace {
         irods::at_scope_exit free_data_obj_info_head{ [data_obj_info_head] { freeAllDataObjInfo(data_obj_info_head); } };
 
         // Populate information for the replica being registered
-        auto [destination_replica, destination_replica_lm] = irods::experimental::replica::make_replica_proxy();
-        std::memcpy(destination_replica.get(), data_obj_info_head, sizeof(dataObjInfo_t));
+        auto [destination_replica, destination_replica_lm] = irods::experimental::replica::duplicate_replica(*data_obj_info_head);
         destination_replica.physical_path(filePath);
         destination_replica.resource(_resc_name);
         destination_replica.hierarchy(phy_path_reg_cond_input.at(RESC_HIER_STR_KW).value());
@@ -249,6 +248,7 @@ namespace {
         // Indicates whether data movement is expected
         if (phy_path_reg_cond_input.contains(REGISTER_AS_INTERMEDIATE_KW)) {
             reg_replica_cond_input[REGISTER_AS_INTERMEDIATE_KW] = "";
+            destination_replica.replica_status(INTERMEDIATE_REPLICA);
         }
 
         // Registers the replica; bails on failure
@@ -261,14 +261,8 @@ namespace {
 
         // Free the existing opened data object info and replace with the newly created replica using opened L1 descriptor info
         if (auto* l1desc = irods::find_l1desc(fs::path{destination_replica.logical_path().data()}, destination_replica.hierarchy()); l1desc) {
-#if 1
             freeAllDataObjInfo(l1desc->dataObjInfo);
             l1desc->dataObjInfo = destination_replica_lm.release();
-#else
-            DataObjInfo* tmp = l1desc->dataObjInfo;
-            while(tmp->next) tmp = tmp->next;
-            tmp->next = destination_replica_lm.release();
-#endif
         }
 
         return 0;
@@ -375,14 +369,10 @@ namespace {
 
         // Free the existing opened data object info and replace with the newly created replica using opened L1 descriptor info
         if (auto* l1desc = irods::find_l1desc(fs::path{destination_replica.logical_path().data()}, destination_replica.hierarchy()); l1desc) {
-#if 1
             freeAllDataObjInfo(l1desc->dataObjInfo);
             l1desc->dataObjInfo = destination_replica_lm.release();
-#else
-            DataObjInfo* tmp = l1desc->dataObjInfo;
-            while(tmp->next) tmp = tmp->next;
-            tmp->next = destination_replica_lm.release();
-#endif
+            freeAllDataObjInfo(l1desc->dataObjInfo->next);
+            l1desc->dataObjInfo->next = nullptr;
         }
 
         return ec;

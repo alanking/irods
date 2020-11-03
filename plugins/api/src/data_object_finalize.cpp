@@ -1,4 +1,5 @@
 #include "api_plugin_number.h"
+#include "fileDriver.hpp"
 #include "irods_configuration_keywords.hpp"
 #include "rodsDef.h"
 #include "rcConnect.h"
@@ -25,8 +26,8 @@
 #include "irods_get_full_path_for_config_file.hpp"
 #include "irods_get_l1desc.hpp"
 #include "irods_logger.hpp"
-#include "irods_query.hpp"
 #include "irods_re_serialization.hpp"
+#include "irods_resource_manager.hpp"
 #include "irods_rs_comm_query.hpp"
 #include "irods_server_api_call.hpp"
 #include "irods_stacktrace.hpp"
@@ -36,6 +37,9 @@
 
 #define IRODS_FILESYSTEM_ENABLE_SERVER_SIDE_API
 #include "filesystem.hpp"
+
+#define IRODS_REPLICA_ENABLE_SERVER_SIDE_API
+#include "data_object_proxy.hpp"
 
 #include "json.hpp"
 #include "fmt/format.h"
@@ -48,14 +52,19 @@
 #include <chrono>
 #include <system_error>
 
-namespace {
+extern irods::resource_manager resc_mgr;
+
+namespace
+{
     // clang-format off
-    namespace fs    = irods::experimental::filesystem;
-    namespace ic    = irods::experimental::catalog;
+    namespace fs          = irods::experimental::filesystem;
+    namespace ic          = irods::experimental::catalog;
+    namespace replica     = irods::experimental::replica;
+    namespace data_object = irods::experimental::data_object;
 
     using log       = irods::experimental::log;
     using json      = nlohmann::json;
-    using operation = std::function<int(rsComm_t*, bytesBuf_t*, bytesBuf_t**)>;
+    using operation = std::function<int(RsComm*, BytesBuf*, BytesBuf**)>;
     // clang-format on
 
     const auto& cmap = ic::data_objects::column_mapping_operators;
@@ -65,7 +74,7 @@ namespace {
         return json{{"error_message", _error_msg}};
     } // make_error_object
 
-    auto to_bytes_buffer(const std::string& _s) -> bytesBuf_t*
+    auto to_bytes_buffer(const std::string& _s) -> BytesBuf*
     {
         constexpr auto allocate = [](const auto bytes) noexcept
         {
@@ -77,7 +86,7 @@ namespace {
         auto* buf = static_cast<char*>(allocate(sizeof(char) * buf_size));
         std::strncpy(buf, _s.c_str(), _s.length());
 
-        auto* bbp = static_cast<bytesBuf_t*>(allocate(sizeof(bytesBuf_t)));
+        auto* bbp = static_cast<BytesBuf*>(allocate(sizeof(BytesBuf)));
         bbp->len = buf_size;
         bbp->buf = buf;
 
@@ -86,26 +95,26 @@ namespace {
 
     auto call_data_object_finalize(
         irods::api_entry* _api,
-        rsComm_t* _comm,
-        bytesBuf_t* _input,
-        bytesBuf_t** _output) -> int
+        RsComm* _comm,
+        BytesBuf* _input,
+        BytesBuf** _output) -> int
     {
-        return _api->call_handler<bytesBuf_t*, bytesBuf_t**>(_comm, _input, _output);
+        return _api->call_handler<BytesBuf*, BytesBuf**>(_comm, _input, _output);
     } // call_data_object_finalize
 
-    auto validate_after_values(json& _after) -> void
+    auto validate_values(json& _obj) -> void
     {
         // clang-format off
         using clock_type    = fs::object_time_type::clock;
         using duration_type = fs::object_time_type::duration;
         // clang-format on
 
-        if (std::string_view{SET_TIME_TO_NOW_KW} == _after.at("modify_ts")) {
+        if (std::string_view{SET_TIME_TO_NOW_KW} == _obj.at("modify_ts")) {
             const auto now = std::chrono::time_point_cast<duration_type>(clock_type::now());
 
-            _after["modify_ts"] = fmt::format("{:011}", now.time_since_epoch().count());
+            _obj["modify_ts"] = fmt::format("{:011}", now.time_since_epoch().count());
         }
-    } // validate_after_values
+    } // validate_values
 
     auto set_replica_state(
         nanodbc::connection& _db_conn,
@@ -169,7 +178,7 @@ namespace {
         try {
             for (auto&& r : _replicas) {
                 auto& after = r.at("after");
-                validate_after_values(after);
+                validate_values(after);
 
                 set_replica_state(_db_conn, _data_id, r.at("before"), after);
             }
@@ -185,10 +194,102 @@ namespace {
         }
     } // set_data_object_state
 
+    auto set_file_object_keywords(const json& _src, irods::file_object_ptr _obj) -> void
+    {
+        auto out = irods::experimental::make_key_value_proxy(_obj->cond_input());
+
+        irods::log(LOG_NOTICE, fmt::format("[{}:{}] - src:[{}]", __FUNCTION__, __LINE__, _src.dump()));
+
+        // TODO: just make a make_key_value_proxy which accepts a std::map/json structure...
+        if (_src.contains(ADMIN_KW)) {
+            out[ADMIN_KW] = _src.at(ADMIN_KW).get<std::string>();
+        }
+        if (_src.contains(IN_PDMO_KW)) {
+            _obj->in_pdmo(_src.at(IN_PDMO_KW).get<std::string>());
+            out[IN_PDMO_KW] = _src.at(IN_PDMO_KW).get<std::string>();
+        }
+        if (_src.contains(OPEN_TYPE_KW)) {
+            out[OPEN_TYPE_KW] = _src.at(OPEN_TYPE_KW).get<std::string>();
+        }
+        if (_src.contains(SYNC_OBJ_KW)) {
+            out[SYNC_OBJ_KW] = _src.at(SYNC_OBJ_KW).get<std::string>();
+        }
+        if (_src.contains(REPL_STATUS_KW)) {
+            out[REPL_STATUS_KW] = _src.at(REPL_STATUS_KW).get<std::string>();
+        }
+        if (_src.contains(IN_REPL_KW)) {
+            out[IN_REPL_KW] = _src.at(IN_REPL_KW).get<std::string>();
+        }
+    } // set_file_object_keywords
+
+    auto send_notifications(
+        RsComm& _comm,
+        std::string_view _data_id,
+        json& _replicas) -> int
+    {
+        try {
+            for (auto&& replica : _replicas) {
+                irods::log(LOG_DEBUG, fmt::format("[{}:{}] - replica:[{}]", __FUNCTION__, __LINE__, replica.dump()));
+
+                if (replica.contains(FILE_MODIFIED_KW)) {
+                    const auto leaf_resource_id = std::stoll(replica.at("after").at("resc_id").get<std::string>());
+
+                    auto [data_obj, obj_lm] = data_object::make_data_object_proxy(_comm, std::stoll(_data_id.data()));
+
+                    irods::file_object_ptr obj{new irods::file_object{&_comm, data_obj.get()}};
+
+                    obj->resc_hier(resc_mgr.leaf_id_to_hier(leaf_resource_id));
+
+                    set_file_object_keywords(replica.at(FILE_MODIFIED_KW), obj);
+
+                    const auto obj_cond_input = irods::experimental::make_key_value_proxy(obj->cond_input());
+                    if (obj_cond_input.contains(IN_REPL_KW) ||
+                        (obj_cond_input.contains(OPEN_TYPE_KW) &&
+                         obj_cond_input.at(OPEN_TYPE_KW).value() == std::to_string(OPEN_FOR_READ_TYPE))) {
+                        return 0;
+                    }
+
+                    if (const auto ret = fileModified(&_comm, obj); !ret.ok()) {
+                        irods::log(LOG_ERROR, fmt::format(
+                            "[{}] - failed to signal the resource that [{}] on [{}] was modified",
+                            __FUNCTION__, obj->logical_path(), obj->resc_hier()));
+
+                        return ret.code();
+                    }
+
+                    irods::log(LOG_NOTICE, fmt::format(
+                        "[{}:{}] - (CHANGE THIS TO DEBUG) fileModified complete,obj:[{}],hier:[{}]",
+                        __FUNCTION__, __LINE__, obj->logical_path(), obj->resc_hier()));
+
+                    // TODO: consider more than one?
+                    return 0;
+                }
+            }
+
+            irods::log(LOG_NOTICE, fmt::format(
+                "[{}:{}] - (CHANGE THIS TO DEBUG) no fileModified",
+                __FUNCTION__, __LINE__));
+
+            return 0;
+        }
+        catch (const irods::exception& e) {
+            irods::log(e);
+            return e.code();
+        }
+        catch (const std::exception& e) {
+            irods::log(LOG_ERROR, fmt::format("[{}] - [{}]", __FUNCTION__, e.what()));
+            return SYS_INTERNAL_ERR;
+        }
+        catch (...) {
+            irods::log(LOG_ERROR, fmt::format("[{}:{}] - unknown error occurred", __FUNCTION__, __LINE__));
+            return SYS_UNKNOWN_ERROR;
+        }
+    } // send_notifications
+
     auto rs_data_object_finalize(
-        rsComm_t* _comm,
-        bytesBuf_t* _input,
-        bytesBuf_t** _output) -> int
+        RsComm* _comm,
+        BytesBuf* _input,
+        BytesBuf** _output) -> int
     {
         try {
             if (!ic::connected_to_catalog_provider(*_comm)) {
@@ -247,6 +348,8 @@ namespace {
             return SYS_INVALID_INPUT_PARAM;
         }
 
+        // TODO: check permissions on data object?
+
         nanodbc::connection db_conn;
 
         try {
@@ -257,19 +360,25 @@ namespace {
             return SYS_CONFIG_FILE_ERR;
         }
 
-        return ic::execute_transaction(db_conn, [&](auto& _trans) -> int
-        {
-            try {
+        try {
+            const auto ec = ic::execute_transaction(db_conn, [&](auto& _trans) -> int
+            {
                 set_data_object_state(db_conn, _trans, data_id, replicas);
                 *_output = to_bytes_buffer("{}");
                 return 0;
+            });
+
+            if (ec < 0) {
+                return ec;
             }
-            catch (const irods::exception& e) {
-                log::database::error(e.what());
-                *_output = to_bytes_buffer(make_error_object(e.what()).dump());
-                return e.code();
-            }
-        });
+
+            return send_notifications(*_comm, data_id, replicas);
+        }
+        catch (const irods::exception& e) {
+            log::database::error(e.what());
+            *_output = to_bytes_buffer(make_error_object(e.what()).dump());
+            return e.code();
+        }
     } // rs_data_object_finalize
 
     const operation op = rs_data_object_finalize;
@@ -283,7 +392,7 @@ namespace {
 //
 
 namespace {
-    using operation = std::function<int(rsComm_t*, bytesBuf_t*, bytesBuf_t**)>;
+    using operation = std::function<int(RsComm*, BytesBuf*, BytesBuf**)>;
     const operation op{};
     #define CALL_DATA_OBJECT_FINALIZE nullptr
 } // anonymous namespace
