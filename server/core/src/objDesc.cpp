@@ -1,34 +1,31 @@
-/*** Copyright (c), The Regents of the University of California            ***
- *** For more information please refer to files in the COPYRIGHT directory ***/
-
-/* objDesc.c - L1 type operation. Will call low level l1desc drivers
- */
-
-#include "rcMisc.h"
-#include "rodsDef.h"
-#include "objDesc.hpp"
-#include "dataObjOpr.hpp"
-#include "rodsDef.h"
-#include "rsGlobalExtern.hpp"
-#include "fileChksum.h"
-#include "modDataObjMeta.h"
-#include "objMetaOpr.hpp"
 #include "collection.hpp"
-#include "resource.hpp"
 #include "dataObjClose.h"
-#include "rcGlobalExtern.h"
+#include "dataObjOpr.hpp"
+#include "fileChksum.h"
 #include "genQuery.h"
+#include "modDataObjMeta.h"
+#include "objDesc.hpp"
+#include "objMetaOpr.hpp"
+#include "rcGlobalExtern.h"
+#include "rcMisc.h"
+#include "resource.hpp"
+#include "rodsDef.h"
+#include "rodsDef.h"
+#include "rsDataObjClose.hpp"
 #include "rsGenQuery.hpp"
 #include "rsGetHierFromLeafId.hpp"
+#include "rsGlobalExtern.hpp"
 #include "rsQuerySpecColl.hpp"
-#include "rsDataObjClose.hpp"
 
-#include "irods_resource_backport.hpp"
-#include "irods_hierarchy_parser.hpp"
-#include "irods_stacktrace.hpp"
-#include "irods_re_structs.hpp"
 #include "get_hier_from_leaf_id.h"
+#include "irods_hierarchy_parser.hpp"
+#include "irods_re_structs.hpp"
+#include "irods_resource_backport.hpp"
+#include "irods_stacktrace.hpp"
 #include "key_value_proxy.hpp"
+
+#define IRODS_REPLICA_ENABLE_SERVER_SIDE_API
+#include "replica_proxy.hpp"
 
 int
 initL1desc() {
@@ -149,81 +146,6 @@ freeL1desc( int l1descInx ) {
     L1desc[l1descInx].replica_token.clear();
 
     memset( &L1desc[l1descInx], 0, sizeof( l1desc_t ) );
-
-    return 0;
-}
-
-int
-fillL1desc( int l1descInx, dataObjInp_t *dataObjInp,
-            dataObjInfo_t *dataObjInfo, int replStatus, rodsLong_t dataSize ) {
-    keyValPair_t *condInput;
-    char *tmpPtr;
-
-    // Initialize the bytesWritten to -1 rather than 0.  If this is negative then we
-    // know no bytes have been written.  This is so that zero length files can be handled
-    // similarly to non-zero length files.
-    L1desc[l1descInx].bytesWritten = -1;
-
-    char* resc_hier = getValByKey( &dataObjInp->condInput, RESC_HIER_STR_KW );
-    if ( dataObjInfo->rescHier[0] == '\0' && resc_hier ) {
-        rstrcpy( dataObjInfo->rescHier, resc_hier, MAX_NAME_LEN );
-        if (dataObjInfo->rescName[0] == '\0') {
-            const std::string root = irods::hierarchy_parser{resc_hier}.first_resc();
-            rstrcpy( dataObjInfo->rescName, root.c_str(), NAME_LEN );
-        }
-    }
-
-    condInput = &dataObjInp->condInput;
-    char* in_pdmo = getValByKey( condInput, IN_PDMO_KW );
-    if ( in_pdmo != NULL ) {
-        rstrcpy( L1desc[l1descInx].in_pdmo, in_pdmo, MAX_NAME_LEN );
-    }
-    else {
-        rstrcpy( L1desc[l1descInx].in_pdmo, "", MAX_NAME_LEN );
-    }
-
-    const auto open_type{getValByKey(condInput, OPEN_TYPE_KW)};
-    if (open_type) {
-        L1desc[l1descInx].openType = std::atoi(open_type);
-    }
-
-    if ( dataObjInp != NULL ) {
-        /* always repl the .dataObjInp */
-        L1desc[l1descInx].dataObjInp = ( dataObjInp_t* )malloc( sizeof( dataObjInp_t ) );
-        replDataObjInp( dataObjInp, L1desc[l1descInx].dataObjInp );
-        L1desc[l1descInx].dataObjInpReplFlag = 1;
-    }
-    else {
-        /* XXXX this can be a problem in rsDataObjClose */
-        L1desc[l1descInx].dataObjInp = NULL;
-    }
-
-    L1desc[l1descInx].dataObjInfo = dataObjInfo;
-    if ( dataObjInp != NULL ) {
-        L1desc[l1descInx].oprType = dataObjInp->oprType;
-    }
-    L1desc[l1descInx].replStatus = replStatus;
-    L1desc[l1descInx].dataSize = dataSize;
-    if ( condInput != NULL && condInput->len > 0 ) {
-        if ( ( tmpPtr = getValByKey( condInput, REG_CHKSUM_KW ) ) != NULL ) {
-            L1desc[l1descInx].chksumFlag = REG_CHKSUM;
-            rstrcpy( L1desc[l1descInx].chksum, tmpPtr, NAME_LEN );
-        }
-        else if ( ( tmpPtr = getValByKey( condInput, VERIFY_CHKSUM_KW ) ) !=
-                  NULL ) {
-            L1desc[l1descInx].chksumFlag = VERIFY_CHKSUM;
-            rstrcpy( L1desc[l1descInx].chksum, tmpPtr, NAME_LEN );
-        }
-    }
-
-    if (getValByKey(&dataObjInp->condInput, PURGE_CACHE_KW)) {
-        L1desc[l1descInx].purgeCacheFlag = 1;
-    }
-
-    const char* kvp_str = getValByKey(&dataObjInp->condInput, KEY_VALUE_PASSTHROUGH_KW);
-    if (kvp_str) {
-        addKeyVal(&dataObjInfo->condInput, KEY_VALUE_PASSTHROUGH_KW, kvp_str);
-    }
 
     return 0;
 }

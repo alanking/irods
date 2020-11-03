@@ -325,16 +325,9 @@ getchkPathPerm( rsComm_t *rsComm, dataObjInp_t *dataObjInp,
         return NO_CHK_PATH_PERM;
     }
 
-    if ( dataObjInp == NULL || dataObjInfo == NULL ) {
+    if (!dataObjInp || !dataObjInfo) {
         return NO_CHK_PATH_PERM;
     }
-
-#if 1
-    // Possibly need to revisit this -- this is wrong
-    if (getValByKey(&dataObjInp->condInput, REGISTER_AS_INTERMEDIATE_KW)) {
-        return NO_CHK_PATH_PERM;
-    }
-#endif
 
     int chkPathPerm = NO_CHK_PATH_PERM;
     if ( ( filePath = getValByKey( &dataObjInp->condInput, FILE_PATH_KW ) ) != NULL

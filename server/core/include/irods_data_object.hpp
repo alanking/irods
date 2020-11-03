@@ -110,6 +110,9 @@ namespace irods {
             virtual void flags( int _f )                         {
                 flags_           = _f;
             }
+            virtual keyValPair_t& cond_input() {
+                return cond_input_;
+            }
             virtual void cond_input( const keyValPair_t& _cond_input ) {
                 replKeyVal( &_cond_input, &cond_input_ );
             }

@@ -1,8 +1,3 @@
-/*** Copyright (c), The Unregents of the University of California            ***
- *** For more information please refer to files in the COPYRIGHT directory ***/
-/* unregDataObj.c
- */
-
 #include "rsModDataObjMeta.hpp"
 #include "modDataObjMeta.h"
 #include "icatHighLevelRoutines.hpp"
@@ -13,6 +8,7 @@
 #include "irods_file_object.hpp"
 #include "irods_stacktrace.hpp"
 #include "irods_configuration_keywords.hpp"
+#include "key_value_proxy.hpp"
 
 #include "boost/format.hpp"
 
@@ -215,13 +211,15 @@ int _call_file_modified_for_modification(
     rei2.doi = modDataObjMetaInp->dataObjInfo;
     rei2.condInputData = modDataObjMetaInp->regParam;
     regParam = modDataObjMetaInp->regParam;
+
     dataObjInfo = modDataObjMetaInp->dataObjInfo;
 
+    auto reg_param = irods::experimental::key_value_proxy{*regParam};
     if ( regParam->len == 0 ) {
         return 0;
     }
 
-    if ( getValByKey( regParam, ALL_KW ) != NULL ) {
+    if (reg_param.contains(ALL_KW)) {
         /* all copies */
         dataObjInfo_t *dataObjInfoHead = NULL;
         dataObjInfo_t *tmpDataObjInfo;
@@ -283,9 +281,10 @@ int _call_file_modified_for_modification(
 
         // Need to pass along admin keyword here to ensure replicas can be managed
         dataObjInp_t dataObjInp{};
+        auto cond_input = irods::experimental::key_value_proxy{dataObjInp.condInput};
         rstrcpy(dataObjInp.objPath, dataObjInfo->objPath, MAX_NAME_LEN);
-        if (getValByKey(regParam, ADMIN_KW)) {
-            addKeyVal(&dataObjInp.condInput, ADMIN_KW, "");
+        if (reg_param.contains(ADMIN_KW)) {
+            cond_input[ADMIN_KW] = "";
         }
 
         // Use temporary as file_object_factory overwrites dataObjInfo pointer
@@ -297,27 +296,24 @@ int _call_file_modified_for_modification(
         }
         // Factory overwrites rescHier with the resource which holds replica 0 - put it back
         file_obj->resc_hier(dataObjInfo->rescHier);
+        auto file_obj_cond_input = irods::experimental::key_value_proxy{file_obj->cond_input()};
 
-        if (getValByKey(regParam, ADMIN_KW)) {
-            addKeyVal((keyValPair_t*)&file_obj->cond_input(), ADMIN_KW, "");
+        if (reg_param.contains(ADMIN_KW)) {
+            file_obj_cond_input[ADMIN_KW] = "";
         }
-        const auto pdmo_kw{getValByKey(regParam, IN_PDMO_KW)};
-        if (pdmo_kw) {
-            // TODO: log in_pdmo kw
-            file_obj->in_pdmo(pdmo_kw);
+        if (reg_param.contains(IN_PDMO_KW)) {
+            file_obj_cond_input[IN_PDMO_KW] = reg_param.at(IN_PDMO_KW);
         }
-        const auto open_type{getValByKey(regParam, OPEN_TYPE_KW)};
-        if (open_type) {
-            addKeyVal((keyValPair_t*)&file_obj->cond_input(), OPEN_TYPE_KW, open_type);
+        if (reg_param.contains(OPEN_TYPE_KW)) {
+            file_obj_cond_input[OPEN_TYPE_KW] = reg_param.at(OPEN_TYPE_KW);
         }
-        char* sync = getValByKey(regParam, SYNC_OBJ_KW );
-        if (sync) {
-            addKeyVal((keyValPair_t*)&file_obj->cond_input(), SYNC_OBJ_KW, sync);
+        if (reg_param.contains(SYNC_OBJ_KW)) {
+            file_obj_cond_input[SYNC_OBJ_KW] = reg_param.at(SYNC_OBJ_KW);
         }
-        const auto repl_status{getValByKey(regParam, REPL_STATUS_KW)};
-        if (repl_status) {
-            addKeyVal((keyValPair_t*)&file_obj->cond_input(), REPL_STATUS_KW, repl_status);
+        if (reg_param.contains(REPL_STATUS_KW)) {
+            file_obj_cond_input[REPL_STATUS_KW] = reg_param.at(REPL_STATUS_KW);
         }
+
         ret = fileModified(rsComm, file_obj);
         if (!ret.ok()) {
             irods::log(PASSMSG((boost::format(

@@ -73,9 +73,6 @@ int
 freeL1Desc( int fileInx );
 
 int
-fillL1desc( int l1descInx, dataObjInp_t *dataObjInp,
-            dataObjInfo_t *dataObjInfo, int replStatus, rodsLong_t dataSize );
-int
 getL1descIndexByDataObjInfo( const dataObjInfo_t * dataObjInfo );
 int
 getNumThreads( rsComm_t *rsComm, rodsLong_t dataSize, int inpNumThr,

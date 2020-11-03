@@ -261,8 +261,14 @@ namespace {
 
         // Free the existing opened data object info and replace with the newly created replica using opened L1 descriptor info
         if (auto* l1desc = irods::find_l1desc(fs::path{destination_replica.logical_path().data()}, destination_replica.hierarchy()); l1desc) {
+#if 1
             freeAllDataObjInfo(l1desc->dataObjInfo);
             l1desc->dataObjInfo = destination_replica_lm.release();
+#else
+            DataObjInfo* tmp = l1desc->dataObjInfo;
+            while(tmp->next) tmp = tmp->next;
+            tmp->next = destination_replica_lm.release();
+#endif
         }
 
         return 0;
@@ -369,8 +375,14 @@ namespace {
 
         // Free the existing opened data object info and replace with the newly created replica using opened L1 descriptor info
         if (auto* l1desc = irods::find_l1desc(fs::path{destination_replica.logical_path().data()}, destination_replica.hierarchy()); l1desc) {
+#if 1
             freeAllDataObjInfo(l1desc->dataObjInfo);
             l1desc->dataObjInfo = destination_replica_lm.release();
+#else
+            DataObjInfo* tmp = l1desc->dataObjInfo;
+            while(tmp->next) tmp = tmp->next;
+            tmp->next = destination_replica_lm.release();
+#endif
         }
 
         return ec;
