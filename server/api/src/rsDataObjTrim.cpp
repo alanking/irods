@@ -1,57 +1,32 @@
-/*** Copyright (c), The Regents of the University of California            ***
- *** For more information please refer to files in the COPYRIGHT directory ***/
-/* See dataObjTrim.h for a description of this API call.*/
-
+#include "dataObjOpr.hpp"
 #include "dataObjTrim.h"
 #include "dataObjUnlink.h"
-#include "dataObjOpr.hpp"
-#include "rodsLog.h"
-#include "objMetaOpr.hpp"
-#include "specColl.hpp"
-#include "rsDataObjTrim.hpp"
-#include "icatDefines.h"
 #include "getRemoteZoneResc.h"
-#include "rsDataObjUnlink.hpp"
+#include "icatDefines.h"
+#include "objMetaOpr.hpp"
+#include "rodsLog.h"
 #include "rsDataObjOpen.hpp"
+#include "rsDataObjTrim.hpp"
+#include "rsDataObjUnlink.hpp"
+#include "specColl.hpp"
 
-// =-=-=-=-=-=-=-
 #include "irods_resource_redirect.hpp"
 #include "irods_hierarchy_parser.hpp"
 #include "irods_at_scope_exit.hpp"
 #include "irods_linked_list_iterator.hpp"
 
+#define IRODS_REPLICA_ENABLE_SERVER_SIDE_API
+#include "data_object_proxy.hpp"
+
 #include <tuple>
 
-namespace {
-    dataObjInfo_t convert_physical_object_to_dataObjInfo_t(const irods::physical_object obj) {
-        dataObjInfo_t info{};
-
-        info.dataSize = obj.size();
-        info.dataId = obj.id();
-        info.collId = obj.coll_id();
-        info.replNum = obj.repl_num();
-        info.replStatus = obj.replica_status();
-        info.dataMapId = obj.map_id();
-        info.rescId = obj.resc_id();
-
-        rstrcpy(info.objPath, obj.name().c_str(), sizeof(info.objPath));
-        rstrcpy(info.version, obj.version().c_str(), sizeof(info.version));
-        rstrcpy(info.dataType, obj.type_name().c_str(), sizeof(info.dataType));
-        rstrcpy(info.rescName, obj.resc_name().c_str(), sizeof(info.rescName));
-        rstrcpy(info.filePath, obj.path().c_str(), sizeof(info.filePath));
-        rstrcpy(info.dataOwnerName, obj.owner_name().c_str(), sizeof(info.dataOwnerName));
-        rstrcpy(info.dataOwnerZone, obj.owner_zone().c_str(), sizeof(info.dataOwnerZone));
-        rstrcpy(info.statusString, obj.status().c_str(), sizeof(info.statusString));
-        rstrcpy(info.chksum, obj.checksum().c_str(), sizeof(info.chksum));
-        rstrcpy(info.dataExpiry, obj.expiry_ts().c_str(), sizeof(info.dataExpiry));
-        rstrcpy(info.dataMode, obj.mode().c_str(), sizeof(info.dataMode));
-        rstrcpy(info.dataComments, obj.r_comment().c_str(), sizeof(info.dataComments));
-        rstrcpy(info.dataCreate, obj.create_ts().c_str(), sizeof(info.dataCreate));
-        rstrcpy(info.dataModify, obj.modify_ts().c_str(), sizeof(info.dataModify));
-        rstrcpy(info.rescHier, obj.resc_hier().c_str(), sizeof(info.rescHier));
-
-        return info;
-    }
+namespace
+{
+    // clang-format off
+    using c_data_object_proxy = irods::experimental::data_object::data_object_proxy<const DataObjInfo>;
+    using c_replica_proxy     = irods::experimental::replica::replica_proxy<const DataObjInfo>;
+    using trim_list_type      = std::vector<const DataObjInfo*>;
+    // clang-format on
 
     int get_time_of_expiration(const char* age_kw) {
         if (!age_kw) {
@@ -90,58 +65,72 @@ namespace {
         }
     }
 
-    std::vector<irods::physical_object> get_replica_list(
-        rsComm_t *rsComm,
-        dataObjInp_t& dataObjInp) {
-        if (!getValByKey(&dataObjInp.condInput, RESC_HIER_STR_KW)) {
-            auto result = irods::resolve_resource_hierarchy(irods::UNLINK_OPERATION, rsComm, dataObjInp);
-            auto file_obj = std::get<irods::file_object_ptr>(result);
-            return file_obj->replicas();
+    auto resolve_resource_hierarchy_for_trim(RsComm& _comm, DataObjInp& _inp) -> DataObjInfo*
+    {
+        DataObjInfo* info_head{};
+
+        if (!getValByKey(&_inp.condInput, RESC_HIER_STR_KW)) {
+            irods::resolve_resource_hierarchy(irods::UNLINK_OPERATION, &_comm, _inp, &info_head);
         }
         else {
-            irods::file_object_ptr file_obj( new irods::file_object() );
-            irods::error fac_err = irods::file_object_factory(rsComm, &dataObjInp, file_obj);
-            if (!fac_err.ok()) {
-                THROW(fac_err.code(), "file_object_factory failed");
+            irods::file_object_ptr tmp{new irods::file_object()};
+            if (const auto err = irods::file_object_factory(&_comm, &_inp, tmp, &info_head); !err.ok()) {
+                THROW(err.code(), "file_object_factory failed");
             }
-            return file_obj->replicas();
         }
-    }
 
-    std::vector<irods::physical_object> get_list_of_replicas_to_trim(
-        dataObjInp_t& _inp,
-        const std::vector<irods::physical_object>& _list) {
-        std::vector<irods::physical_object> trim_list;
-        const unsigned long good_replica_count = std::count_if(_list.begin(), _list.end(),
-            [](const auto& repl) {
-                return (repl.replica_status() & 0x0F) == GOOD_REPLICA;
+        if (!info_head) {
+            THROW(SYS_REPLICA_DOES_NOT_EXIST, fmt::format(
+                "[{}] - no results for [{}] returned from resolve_resource_hierarchy",
+                __FUNCTION__, _inp.objPath));
+        }
+
+        return info_head;
+    } // resolve_resource_hierarchy_for_trim
+
+    auto get_list_of_replicas_to_trim(DataObjInp& _inp, const c_data_object_proxy& _obj) -> trim_list_type
+    {
+        auto cond_input = irods::experimental::make_key_value_proxy(_inp.condInput);
+
+        trim_list_type trim_list;
+
+        const unsigned long good_replica_count = std::count_if(
+            std::begin(_obj.replicas()), std::end(_obj.replicas()),
+            [](const auto& _replica) {
+                return GOOD_REPLICA == _replica.replica_status();
             });
 
         const auto minimum_replica_count = get_minimum_replica_count(getValByKey(&_inp.condInput, COPIES_KW));
         const auto expiration = get_time_of_expiration(getValByKey(&_inp.condInput, AGE_KW));
-        const auto expired = [&expiration](const irods::physical_object& obj) {
-            return expiration && std::atoi(obj.modify_ts().c_str()) > expiration;
+        const auto expired = [&expiration](const c_replica_proxy& _replica) {
+            return expiration && std::stoi(_replica.mtime().data()) > expiration;
         };
 
         // If a specific replica number is specified, only trim that one!
-        const char* repl_num = getValByKey(&_inp.condInput, REPL_NUM_KW);
-        if (repl_num) {
+        if (cond_input.contains(REPL_NUM_KW)) {
             try {
-                const auto num = std::stoi(repl_num);
-                const auto repl = std::find_if(_list.begin(), _list.end(),
-                    [&num](const auto& repl) {
-                        return num == repl.repl_num();
+                const auto repl_num = std::stoi(cond_input.at(REPL_NUM_KW).value().data());
+
+                const auto repl = std::find_if(
+                    std::cbegin(_obj.replicas()), std::cend(_obj.replicas()),
+                    [&repl_num](const auto& _replica) {
+                        return repl_num == _replica.replica_number();
                     });
-                if (repl == _list.end()) {
+
+                if (repl == std::cend(_obj.replicas())) {
                     THROW(SYS_REPLICA_DOES_NOT_EXIST, "target replica does not exist");
                 }
+
                 if (expired(*repl)) {
                     THROW(USER_INCOMPATIBLE_PARAMS, "target replica is not old enough for removal");
                 }
-                if (good_replica_count <= minimum_replica_count && (repl->replica_status() & 0x0F) == GOOD_REPLICA) {
+
+                if (good_replica_count <= minimum_replica_count && GOOD_REPLICA == repl->replica_status()) {
                     THROW(USER_INCOMPATIBLE_PARAMS, "cannot remove the last good replica");
                 }
-                trim_list.push_back(*repl);
+
+                trim_list.push_back(repl->get());
+
                 return trim_list;
             }
             catch (const std::invalid_argument& e) {
@@ -154,54 +143,61 @@ namespace {
             }
         }
 
-        const char* resc_name = getValByKey(&_inp.condInput, RESC_NAME_KW);
-        const auto matches_target_resource = [&resc_name](const irods::physical_object& obj) {
-            return resc_name && irods::hierarchy_parser{obj.resc_hier()}.first_resc() == resc_name;
+        std::string_view resc_name;
+        if (cond_input.contains(RESC_NAME_KW)) {
+            resc_name = cond_input.at(RESC_NAME_KW).value().data();
+        }
+
+        const auto matches_target_resource = [&resc_name](const c_replica_proxy& _replica) {
+            return resc_name == irods::hierarchy_parser{_replica.hierarchy().data()}.first_resc();
         };
 
         // Walk list and add stale replicas to the list
-        for (const auto& obj : _list) {
-            if ((obj.replica_status() & 0x0F) == STALE_REPLICA) {
-                if (expired(obj) || (resc_name && !matches_target_resource(obj))) {
+        for (const auto& replica : _obj.replicas()) {
+            if (STALE_REPLICA == replica.replica_status()) {
+                if (expired(replica) || !matches_target_resource(replica)) {
                     continue;
                 }
-                trim_list.push_back(obj);
+                trim_list.push_back(replica.get());
             }
         }
+
         if (good_replica_count <= minimum_replica_count) {
             return trim_list;
         }
 
         // If we have not reached the minimum count, walk list again and add good replicas
         unsigned long good_replicas_to_be_trimmed = 0;
-        for (const auto& obj : _list) {
-            if ((obj.replica_status() & 0x0F) == GOOD_REPLICA) {
-                if (expired(obj) || (resc_name && !matches_target_resource(obj))) {
+        for (const auto& replica : _obj.replicas()) {
+            if (GOOD_REPLICA == replica.replica_status()) {
+                if (expired(replica) || !matches_target_resource(replica)) {
                     continue;
                 }
+
                 if (good_replica_count - good_replicas_to_be_trimmed <= minimum_replica_count) {
                     return trim_list;
                 }
-                trim_list.push_back(obj);
+
+                trim_list.push_back(replica.get());
+
                 good_replicas_to_be_trimmed++;
             }
         }
+
         return trim_list;
-    }
-}
+    } // get_list_of_replicas_to_trim
+} // anonymous namespace
 
-int rsDataObjTrim(
-    rsComm_t *rsComm,
-    dataObjInp_t *dataObjInp) {
-
+int rsDataObjTrim(rsComm_t *rsComm, dataObjInp_t *dataObjInp)
+{
     if (!dataObjInp) {
         return SYS_INTERNAL_NULL_INPUT_ERR;
     }
 
+    auto cond_input = irods::experimental::make_key_value_proxy(dataObjInp->condInput);
+
     // -S and -n are incompatible...
-    const char* resc_name = getValByKey(&dataObjInp->condInput, RESC_NAME_KW);
-    const char* repl_num = getValByKey(&dataObjInp->condInput, REPL_NUM_KW);
-    if (resc_name && repl_num) {
+    if (cond_input.contains(RESC_NAME_KW) && cond_input.contains(REPL_NUM_KW)) {
         return USER_INCOMPATIBLE_PARAMS;
     }
     // TODO: If !repl_num && !resc_name, use default resource.
@@ -221,43 +217,55 @@ int rsDataObjTrim(
 
     int retVal = 0;
     try {
+        namespace data_object = irods::experimental::data_object;
+
         // Temporarily remove REPL_NUM_KW to ensure we are returned all replicas in the list
-        std::string repl_num_str{};
-        if (repl_num) {
-            repl_num_str = repl_num;
-            rmKeyVal(&dataObjInp->condInput, REPL_NUM_KW);
+        std::string repl_num;
+        if (cond_input.contains(REPL_NUM_KW)) {
+            repl_num = cond_input.at(REPL_NUM_KW).value().data();
+            cond_input.erase(REPL_NUM_KW);
         }
-        const std::vector<irods::physical_object> repl_list = get_replica_list(rsComm, *dataObjInp);
-        if (!repl_num_str.empty()) {
-            addKeyVal(&dataObjInp->condInput, REPL_NUM_KW, repl_num_str.c_str());
+
+        const auto* info_head = resolve_resource_hierarchy_for_trim(*rsComm, *dataObjInp);
+        const auto obj = data_object::make_data_object_proxy(*info_head);
+        const auto obj_lm = irods::experimental::lifetime_manager{*obj.get()};
+
+        if (!repl_num.empty()) {
+            cond_input[REPL_NUM_KW] = repl_num;
         }
-        const auto trim_list = get_list_of_replicas_to_trim(*dataObjInp, repl_list);
-        for (const auto& obj : trim_list) {
-            if (getValByKey(&dataObjInp->condInput, DRYRUN_KW)) {
+
+        for (const auto* replica : get_list_of_replicas_to_trim(*dataObjInp, obj)) {
+            if (cond_input.contains(DRYRUN_KW)) {
                 retVal = 1;
                 continue;
             }
 
-            dataObjInfo_t tmp = convert_physical_object_to_dataObjInfo_t(obj);
-            int status = dataObjUnlinkS(rsComm, dataObjInp, &tmp);
-            if ( status < 0 ) {
-                if ( retVal == 0 ) {
-                    retVal = status;
-                }
+            auto [r, r_lm] = irods::experimental::replica::duplicate_replica(*replica);
+
+            if (const int ec = dataObjUnlinkS(rsComm, dataObjInp, r.get()); ec < 0) {
+                retVal = (0 == retVal) ? ec : retVal;
             }
             else {
                 retVal = 1;
             }
         }
     }
-    catch (const std::invalid_argument& e) {
-        irods::log(LOG_ERROR, e.what());
-        return USER_INCOMPATIBLE_PARAMS;
-    }
     catch (const irods::exception& e) {
         irods::log(LOG_NOTICE, e.what());
         return e.code();
     }
-    return retVal;
-}
+    catch (const std::invalid_argument& e) {
+        irods::log(LOG_ERROR, e.what());
+        return USER_INCOMPATIBLE_PARAMS;
+    }
+    catch (const std::exception& e) {
+        irods::log(LOG_ERROR, e.what());
+        return SYS_LIBRARY_ERROR;
+    }
+    catch (...) {
+        irods::log(LOG_ERROR, fmt::format("[{}] - unknown error occurred during trim", __FUNCTION__));
+        return SYS_UNKNOWN_ERROR;
+    }
 
+    return retVal;
+} // rsDataObjTrim
