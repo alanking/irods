@@ -198,7 +198,7 @@ namespace
     {
         auto out = irods::experimental::make_key_value_proxy(_obj->cond_input());
 
-        irods::log(LOG_NOTICE, fmt::format("[{}:{}] - src:[{}]", __FUNCTION__, __LINE__, _src.dump()));
+        irods::log(LOG_DEBUG, fmt::format("[{}:{}] - src:[{}]", __FUNCTION__, __LINE__, _src.dump()));
 
         // TODO: just make a make_key_value_proxy which accepts a std::map/json structure...
         if (_src.contains(ADMIN_KW)) {
@@ -257,8 +257,8 @@ namespace
                         return ret.code();
                     }
 
-                    irods::log(LOG_NOTICE, fmt::format(
-                        "[{}:{}] - (CHANGE THIS TO DEBUG) fileModified complete,obj:[{}],hier:[{}]",
+                    irods::log(LOG_DEBUG, fmt::format(
+                        "[{}:{}] - fileModified complete,obj:[{}],hier:[{}]",
                         __FUNCTION__, __LINE__, obj->logical_path(), obj->resc_hier()));
 
                     // TODO: consider more than one?
@@ -266,8 +266,8 @@ namespace
                 }
             }
 
-            irods::log(LOG_NOTICE, fmt::format(
-                "[{}:{}] - (CHANGE THIS TO DEBUG) no fileModified",
+            irods::log(LOG_DEBUG, fmt::format(
+                "[{}:{}] - no fileModified",
                 __FUNCTION__, __LINE__));
 
             return 0;

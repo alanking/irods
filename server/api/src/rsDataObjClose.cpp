@@ -335,17 +335,6 @@ namespace
 
             // TODO come back to this case...
             if (COPY_DEST == oprType) {
-                //const int srcL1descInx = l1desc.srcL1descInx;
-                //if (srcL1descInx < 3) {
-                    //irods::log(LOG_DEBUG, fmt::format(
-                        //"{}: invalid srcL1descInx {} for copy",
-                        //__FUNCTION__, srcL1descInx));
-                    //// just register it for now
-                    //return {};
-                //}
-
-                //auto source_replica = replica_proxy{*L1desc[srcL1descInx].dataObjInfo};
-
                 if (!l1desc.replDataObjInfo) {
                     THROW(SYS_FILE_DESC_OUT_OF_RANGE, fmt::format("{}: source replica dataObjInfo invalid", __FUNCTION__));
                 }
@@ -572,7 +561,9 @@ namespace
             destination_replica.cond_input()[FILE_MODIFIED_KW] = file_modified_kw;
         }
 
-        irods::log(LOG_NOTICE, fmt::format("[{}:{}] - obj:[{}],replica:[{}]", __FUNCTION__, __LINE__, destination_replica.logical_path(), destination_replica.hierarchy()));
+        irods::log(LOG_DEBUG, fmt::format(
+            "[{}:{}] - obj:[{}],replica:[{}]",
+            __FUNCTION__, __LINE__, destination_replica.logical_path(), destination_replica.hierarchy()));
 
         char* output{};
         const auto input = replica_state_table::to_json(previous_object, current_object).dump();
@@ -657,11 +648,13 @@ namespace
         }
         else {
             for (auto& replica : current_object.replicas()) {
-                irods::log(LOG_NOTICE, fmt::format("[{}:{}] - hier:[{}],current:[{}]",
+                irods::log(LOG_DEBUG, fmt::format("[{}:{}] - hier:[{}],current:[{}]",
                     __FUNCTION__, __LINE__, replica.hierarchy(), current_replica.hierarchy()));
+
                 if (replica.hierarchy() != current_replica.hierarchy()) {
-                    irods::log(LOG_NOTICE, fmt::format("[{}:{}] - staling hier:[{}]",
+                    irods::log(LOG_DEBUG, fmt::format("[{}:{}] - staling hier:[{}]",
                         __FUNCTION__, __LINE__, replica.hierarchy(), current_replica.hierarchy()));
+
                     replica.replica_status(STALE_REPLICA);
                 }
             }
@@ -678,7 +671,9 @@ namespace
             current_replica.cond_input()[FILE_MODIFIED_KW] = file_modified_kw;
         }
 
-        irods::log(LOG_NOTICE, fmt::format("[{}:{}] - obj:[{}],replica:[{}]", __FUNCTION__, __LINE__, current_replica.logical_path(), current_replica.hierarchy()));
+        irods::log(LOG_DEBUG, fmt::format(
+            "[{}:{}] - obj:[{}],replica:[{}]",
+            __FUNCTION__, __LINE__, current_replica.logical_path(), current_replica.hierarchy()));
 
         char* output{};
         const auto input = replica_state_table::to_json(previous_object, current_object).dump();
@@ -738,7 +733,9 @@ namespace
             current_replica.replica_status(original_replica->replica_status());
         }
 
-        irods::log(LOG_NOTICE, fmt::format("[{}:{}] - obj:[{}],replica:[{}]", __FUNCTION__, __LINE__, current_replica.logical_path(), current_replica.hierarchy()));
+        irods::log(LOG_DEBUG, fmt::format(
+            "[{}:{}] - obj:[{}],replica:[{}]",
+            __FUNCTION__, __LINE__, current_replica.logical_path(), current_replica.hierarchy()));
 
         char* output{};
         const auto input = replica_state_table::to_json(previous_object, current_object).dump();
@@ -829,7 +826,7 @@ namespace
             }
         }
 
-        irods::log(LOG_NOTICE, fmt::format(
+        irods::log(LOG_DEBUG, fmt::format(
             "[{}:{}] - obj:[{}],replica:[{}]",
             __FUNCTION__, __LINE__, current_replica.logical_path(), current_replica.hierarchy()));
 
@@ -889,11 +886,9 @@ namespace
 
             if (REPLICATE_DEST == l1desc.oprType || PHYMV_DEST == l1desc.oprType) {
                 finalize_destination_replica_for_replication(_comm, _inp, _fd);
-                irods::log(LOG_NOTICE, fmt::format("[{}:{}] - done with replication", __FUNCTION__, __LINE__));
             }
             else if (!opened_replica.special_collection_info()) {
                 finalize_data_object_for_put_or_copy(_comm, _inp, _fd);
-                irods::log(LOG_NOTICE, fmt::format("[{}:{}] - done with object creation/overwrite", __FUNCTION__, __LINE__));
             }
 
             l1desc.bytesWritten = l1desc.dataObjInfo->dataSize;

@@ -96,7 +96,7 @@ namespace irods::experimental
 
         auto& e = itr->second;
         if (e.ref_count > 1) {
-            irods::log(LOG_NOTICE, fmt::format("[{}:{}] - (CHANGE TO DEBUG) ref_count:[{}]", __FUNCTION__, __LINE__, e.ref_count));
+            irods::log(LOG_DEBUG, fmt::format("[{}:{}] - ref_count:[{}]", __FUNCTION__, __LINE__, e.ref_count));
             --e.ref_count;
             return;
         }
@@ -110,7 +110,7 @@ namespace irods::experimental
 
         g_state_map.erase(_logical_path);
 
-        irods::log(LOG_NOTICE, fmt::format("[{}:{}] - map size:[{}]", __FUNCTION__, __LINE__, g_state_map.size()));
+        irods::log(LOG_DEBUG, fmt::format("[{}:{}] - map size:[{}]", __FUNCTION__, __LINE__, g_state_map.size()));
     } // erase_entry
 
     auto replica_state_table::contains(const key_type& _logical_path) -> bool
@@ -218,7 +218,7 @@ namespace irods::experimental
                 }
             }
             catch (const json::parse_error& e) {
-                irods::log(LOG_ERROR, fmt::format("[{}] - json::parse failed:[{}]", __FUNCTION__, e.what()));
+                irods::log(LOG_DEBUG, fmt::format("[{}] - json::parse failed:[{}]", __FUNCTION__, e.what()));
                 input["replicas"].back().erase(FILE_MODIFIED_KW);
             }
         }

@@ -488,7 +488,6 @@ namespace {
         data_obj_close_inp.l1descInx = _fd;
         l1desc.oprStatus = _fd;
 
-        irods::log(LOG_NOTICE, fmt::format("[{}:{}] - in_pdmo:[{}]", __FUNCTION__, __LINE__, l1desc.dataObjInfo->rescHier));
         addKeyVal(&data_obj_close_inp.condInput, IN_PDMO_KW, l1desc.dataObjInfo->rescHier);
         addKeyVal(&l1desc.dataObjInp->condInput, IN_PDMO_KW, l1desc.dataObjInfo->rescHier);
 
