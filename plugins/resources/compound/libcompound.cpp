@@ -27,6 +27,9 @@
 #include "irods_random.hpp"
 #include "irods_at_scope_exit.hpp"
 
+#define IRODS_REPLICA_ENABLE_SERVER_SIDE_API
+#include "replica_proxy.hpp"
+
 // =-=-=-=-=-=-=-
 // stl includes
 #include <iostream>
@@ -419,14 +422,14 @@ namespace {
         source_data_obj_inp.oprType = REPLICATE_SRC;
         source_data_obj_inp.openFlags = O_RDONLY;
         addKeyVal( &source_data_obj_inp.condInput, RESC_HIER_STR_KW, src_hier.c_str() );
-        int source_l1descInx = rsDataObjOpen(_ctx.comm(), &source_data_obj_inp);
-        if ( source_l1descInx < 0 ) {
+        const int source_fd = rsDataObjOpen(_ctx.comm(), &source_data_obj_inp);
+        if ( source_fd < 0 ) {
             std::stringstream msg;
             msg << "Failed to open source for [" << obj->logical_path() << "] ";
             irods::log(LOG_ERROR, msg.str());
-            THROW(source_l1descInx, msg.str());
+            THROW(source_fd, msg.str());
         }
-        return source_l1descInx;
+        return source_fd;
     } // open_source_replica
 
     int open_destination_replica(
@@ -468,309 +471,332 @@ namespace {
         destination_data_obj_inp.oprType = REPLICATE_DEST;
         destination_data_obj_inp.openFlags = O_CREAT | O_RDWR;
 
-        int destination_l1descInx = rsDataObjOpen(_ctx.comm(), &destination_data_obj_inp);
-        if ( destination_l1descInx < 0 ) {
-            THROW(destination_l1descInx,
+        const int destination_fd = rsDataObjOpen(_ctx.comm(), &destination_data_obj_inp);
+        if ( destination_fd < 0 ) {
+            THROW(destination_fd,
                   (boost::format("Failed to open destination for [%s]") %
                    destination_data_obj_inp.objPath).str().c_str());
         }
-        return destination_l1descInx;
+        return destination_fd;
     } // open_destination_replica
 
-    int close_replica(
-        irods::plugin_context& _ctx,
-        const int l1descInx) {
+    int close_replica(irods::plugin_context& _ctx, const int _fd)
+    {
+        auto& l1desc = L1desc[_fd];
+
         openedDataObjInp_t data_obj_close_inp{};
-        data_obj_close_inp.l1descInx = l1descInx;
-        L1desc[data_obj_close_inp.l1descInx].oprStatus = l1descInx;
-        addKeyVal(&data_obj_close_inp.condInput, IN_PDMO_KW, L1desc[l1descInx].dataObjInfo->rescHier);
+        data_obj_close_inp.l1descInx = _fd;
+        l1desc.oprStatus = _fd;
+
+        irods::log(LOG_NOTICE, fmt::format("[{}:{}] - in_pdmo:[{}]", __FUNCTION__, __LINE__, l1desc.dataObjInfo->rescHier));
+        addKeyVal(&data_obj_close_inp.condInput, IN_PDMO_KW, l1desc.dataObjInfo->rescHier);
+        addKeyVal(&l1desc.dataObjInp->condInput, IN_PDMO_KW, l1desc.dataObjInfo->rescHier);
+
         int close_status = rsDataObjClose( _ctx.comm(), &data_obj_close_inp);
         if (close_status < 0) {
             rodsLog(LOG_ERROR, "[%s] - rsDataObjClose failed with [%d]", __FUNCTION__, close_status);
         }
         clearKeyVal( &data_obj_close_inp.condInput );
         return close_status;
-    }
-}
+    } // close_replica
 
-/// =-=-=-=-=-=-=-
-/// @brief replicate a given object for either a sync or a stage
-irods::error repl_object(
-    irods::plugin_context& _ctx,
-    const char*            _stage_sync_kw ) {
-
-    // =-=-=-=-=-=-=-
-    // error check incoming params
-    if (!_stage_sync_kw || std::string_view{_stage_sync_kw}.empty()) {
-        return ERROR(SYS_INVALID_INPUT_PARAM, "Null or empty _stage_sync_kw.");
-    }
-
-    // =-=-=-=-=-=-=-
-    // get the file object from the fco
-    irods::file_object_ptr obj = boost::dynamic_pointer_cast< irods::file_object >( _ctx.fco() );
-
-    // =-=-=-=-=-=-=-
-    // get the root resource to pass to the cond input
-    irods::hierarchy_parser parser;
-    parser.set_string( obj->resc_hier() );
-
-    // =-=-=-=-=-=-=-
-    // get the parent name
-    std::string parent_id_str;
-    irods::error ret = _ctx.prop_map().get< std::string >( irods::RESOURCE_PARENT, parent_id_str );
-    if (!ret.ok()) {
-        return PASSMSG("Failed to get the parent name.", ret);
-    }
-
-    std::string parent_name;
-    ret = resc_mgr.resc_id_to_name(
-            parent_id_str,
-            parent_name );
-    if(!ret.ok()) {
-        return PASS(ret);
-    }
-
-    // =-=-=-=-=-=-=-
-    // get the cache name
-    std::string cache_name;
-    ret = _ctx.prop_map().get< std::string >( CACHE_CONTEXT_TYPE, cache_name );
-    if (!ret.ok()) {
-        return PASSMSG("Failed to get the cache name.", ret);
-    }
-
-    // =-=-=-=-=-=-=-
-    // get the archive name
-    std::string arch_name;
-    ret = _ctx.prop_map().get< std::string >( ARCHIVE_CONTEXT_TYPE, arch_name );
-    if (!ret.ok()) {
-        return PASSMSG("Failed to get the archive name.", ret);
-    } // if arch_name
-
-    // =-=-=-=-=-=-=-
-    // manufacture a resc hier to either the archive or the cache resc
-    std::string keyword  = _stage_sync_kw;
-    std::string inp_hier = obj->resc_hier();
-
-    std::string tgt_name, src_name;
-    if ( keyword == STAGE_OBJ_KW ) {
-        tgt_name = cache_name;
-        src_name = arch_name;
-    }
-    else if ( keyword == SYNC_OBJ_KW ) {
-        tgt_name = arch_name;
-        src_name = cache_name;
-    }
-    else {
-        std::stringstream msg;
-        msg << "stage_sync_kw value is unexpected [" << _stage_sync_kw << "]";
-        return ERROR( SYS_INVALID_INPUT_PARAM, msg.str() );
-    }
-
-    std::string current_name;
-    ret = _ctx.prop_map().get<std::string>( irods::RESOURCE_NAME, current_name );
-    if (!ret.ok()) {
-        return PASSMSG("Failed to get the resource name.", ret);
-    } // if current_name
-
-    size_t pos = inp_hier.find( parent_name );
-    if ( std::string::npos == pos ) {
-        std::stringstream msg;
-        msg << "parent resc ["
-            << parent_name
-            << "] not in fco resc hier ["
-            << inp_hier
-            << "]";
-        return ERROR(
-                SYS_INVALID_INPUT_PARAM,
-                msg.str() );
-    }
-
-    // =-=-=-=-=-=-=-
-    // Generate src and tgt hiers
-    std::string dst_hier = inp_hier.substr( 0, pos + parent_name.size() );
-    if ( !dst_hier.empty() ) {
-        dst_hier += irods::hierarchy_parser::delimiter();
-    }
-    dst_hier += current_name +
-        irods::hierarchy_parser::delimiter() +
-        tgt_name;
-
-    std::string src_hier = inp_hier.substr( 0, pos + parent_name.size() );
-    if ( !src_hier.empty() ) {
-        src_hier += irods::hierarchy_parser::delimiter();
-    }
-    src_hier += current_name + irods::hierarchy_parser::delimiter() + src_name;
-
-    addKeyVal((keyValPair_t*)&obj->cond_input(), _stage_sync_kw, "");
-
-    int source_l1descInx{};
-    int destination_l1descInx{};
-    const irods::at_scope_exit close_l1_descriptors{
-        [&]()
-        {
-            if (destination_l1descInx > 0) {
-                close_replica(_ctx, destination_l1descInx);
-            }
-            if (source_l1descInx > 0) {
-                close_replica(_ctx, source_l1descInx);
-            }
+    /// =-=-=-=-=-=-=-
+    /// @brief replicate a given object for either a sync or a stage
+    irods::error repl_object(irods::plugin_context& _ctx, std::string_view _stage_sync_kw)
+    {
+        if (_stage_sync_kw.empty()) {
+            return ERROR(SYS_INVALID_INPUT_PARAM, "Empty _stage_sync_kw.");
         }
-    };
-    if (STAGE_OBJ_KW == keyword) {
-        log::resource::debug("staging replica [{}] to archive [{}] from [{}]");
-        try {
-            source_l1descInx = open_source_replica(_ctx, obj, src_hier);
-            destination_l1descInx = open_destination_replica(_ctx, obj, source_l1descInx, dst_hier);
-            L1desc[destination_l1descInx].srcL1descInx = source_l1descInx;
-        }
-        catch (const irods::exception& _e) {
-            irods::log(_e);
-            return irods::error(_e);
-        }
-
-        irods::resource_ptr resc;
-        ret = get_archive( _ctx, resc );
-        if ( !ret.ok() ) {
-            std::stringstream msg;
-            msg << "failed to get child resource [" << current_name << "]";
-            return PASSMSG( msg.str(), ret );
-        }
-
-        irods::file_object_ptr file_obj(
-                new irods::file_object(
-                    _ctx.comm(),
-                    obj->logical_path().c_str(),
-                    L1desc[source_l1descInx].dataObjInfo->filePath, "", 0,
-                    getDefFileMode(),
-                    L1desc[source_l1descInx].dataObjInfo->flags ) );
-        file_obj->resc_hier( src_hier );
 
         // =-=-=-=-=-=-=-
-        // pass condInput
-        file_obj->cond_input( L1desc[destination_l1descInx].dataObjInp->condInput );
-
-        // set object id if provided
-        char *id_str = getValByKey(&file_obj->cond_input(), DATA_ID_KW);
-        if (id_str) {
-            file_obj->id(strtol(id_str, NULL, 10));
-        }
-
-        dataObjInfo_t* destDataObjInfo = L1desc[destination_l1descInx].dataObjInfo;
-        dataObjInfo_t* srcDataObjInfo = L1desc[source_l1descInx].dataObjInfo;
-
-        fileStageSyncInp_t file_stage{};
-        rstrcpy( file_stage.cacheFilename, destDataObjInfo->filePath, MAX_NAME_LEN );
-        rstrcpy( file_stage.rescHier,      destDataObjInfo->rescHier, MAX_NAME_LEN );
-        rstrcpy( file_stage.filename,      srcDataObjInfo->filePath,  MAX_NAME_LEN );
-        rstrcpy( file_stage.objPath,       srcDataObjInfo->objPath,   MAX_NAME_LEN );
-        file_stage.dataSize = srcDataObjInfo->dataSize;
-        file_stage.mode = getFileMode(L1desc[destination_l1descInx].dataObjInp);
-
-        int status = rsFileStageToCache(_ctx.comm(), &file_stage);
-        if (status < 0) {
-            ret = ERROR(status, "rsFileStageToCache failed");
-        }
-    }
-    else if (SYNC_OBJ_KW == keyword) {
-        try {
-            source_l1descInx = open_source_replica(_ctx, obj, src_hier);
-            destination_l1descInx = open_destination_replica(_ctx, obj, source_l1descInx, dst_hier);
-            L1desc[destination_l1descInx].srcL1descInx = source_l1descInx;
-        }
-        catch (const irods::exception& _e) {
-            irods::log(_e);
-            return irods::error(_e);
-        }
-
-        irods::resource_ptr resc;
-        ret = get_archive( _ctx, resc );
-        if ( !ret.ok() ) {
-            std::stringstream msg;
-            msg << "failed to get child resource [" << current_name << "]";
-            return PASSMSG( msg.str(), ret );
-        }
-
-        irods::file_object_ptr file_obj(
-                new irods::file_object(
-                    _ctx.comm(),
-                    obj->logical_path().c_str(),
-                    L1desc[destination_l1descInx].dataObjInfo->filePath, "", 0,
-                    getDefFileMode(),
-                    L1desc[destination_l1descInx].dataObjInfo->flags ) );
-        file_obj->resc_hier( L1desc[destination_l1descInx].dataObjInfo->rescHier );
+        // get the file object from the fco
+        irods::file_object_ptr obj = boost::dynamic_pointer_cast< irods::file_object >( _ctx.fco() );
 
         // =-=-=-=-=-=-=-
-        // pass condInput
-        file_obj->cond_input( L1desc[destination_l1descInx].dataObjInp->condInput );
+        // get the root resource to pass to the cond input
+        irods::hierarchy_parser parser;
+        parser.set_string( obj->resc_hier() );
 
-        // set object id if provided
-        char *id_str = getValByKey(&file_obj->cond_input(), DATA_ID_KW);
-        if (id_str) {
-            file_obj->id(strtol(id_str, NULL, 10));
+        // =-=-=-=-=-=-=-
+        // get the parent name
+        std::string parent_id_str;
+        irods::error ret = _ctx.prop_map().get< std::string >( irods::RESOURCE_PARENT, parent_id_str );
+        if (!ret.ok()) {
+            return PASSMSG("Failed to get the parent name.", ret);
         }
 
-        //ret = resc->call<const char*>( _ctx.comm(), irods::RESOURCE_OP_SYNCTOARCH, file_obj, L1desc[source_l1descInx].dataObjInfo->filePath );
-
-        // Sync to archive!
-        int dst_create_path = 0;
-        irods::error err = resc->get_property<int>(irods::RESOURCE_CREATE_PATH, dst_create_path);
-        if (!err.ok()) {
-            irods::log(PASS(err));
+        std::string parent_name;
+        ret = resc_mgr.resc_id_to_name(
+                parent_id_str,
+                parent_name );
+        if(!ret.ok()) {
+            return PASS(ret);
         }
 
-        dataObjInfo_t* destDataObjInfo = L1desc[destination_l1descInx].dataObjInfo;
-        dataObjInfo_t* srcDataObjInfo = L1desc[source_l1descInx].dataObjInfo;
-        if (CREATE_PATH == dst_create_path) {
-            dataObjInfo_t tmpDataObjInfo{};
-            int status = chkOrphanFile(
-                _ctx.comm(),
-                destDataObjInfo->filePath,
-                destDataObjInfo->rescName,
-                &tmpDataObjInfo);
-            if ( status == 0 && tmpDataObjInfo.dataId != destDataObjInfo->dataId ) {
-                /* someone is using it */
-                char tmp_str[MAX_NAME_LEN]{};
-                snprintf(tmp_str, MAX_NAME_LEN, "%s.%-u", destDataObjInfo->filePath, irods::getRandom<unsigned int>());
-                rstrcpy(destDataObjInfo->filePath, tmp_str, MAX_NAME_LEN);
+        // =-=-=-=-=-=-=-
+        // get the cache name
+        std::string cache_name;
+        ret = _ctx.prop_map().get< std::string >( CACHE_CONTEXT_TYPE, cache_name );
+        if (!ret.ok()) {
+            return PASSMSG("Failed to get the cache name.", ret);
+        }
+
+        // =-=-=-=-=-=-=-
+        // get the archive name
+        std::string arch_name;
+        ret = _ctx.prop_map().get< std::string >( ARCHIVE_CONTEXT_TYPE, arch_name );
+        if (!ret.ok()) {
+            return PASSMSG("Failed to get the archive name.", ret);
+        } // if arch_name
+
+        // =-=-=-=-=-=-=-
+        // manufacture a resc hier to either the archive or the cache resc
+        std::string keyword  = _stage_sync_kw.data();
+        std::string inp_hier = obj->resc_hier();
+
+        std::string tgt_name, src_name;
+        if ( keyword == STAGE_OBJ_KW ) {
+            tgt_name = cache_name;
+            src_name = arch_name;
+        }
+        else if ( keyword == SYNC_OBJ_KW ) {
+            tgt_name = arch_name;
+            src_name = cache_name;
+        }
+        else {
+            std::stringstream msg;
+            msg << "stage_sync_kw value is unexpected [" << _stage_sync_kw << "]";
+            return ERROR( SYS_INVALID_INPUT_PARAM, msg.str() );
+        }
+
+        std::string current_name;
+        ret = _ctx.prop_map().get<std::string>( irods::RESOURCE_NAME, current_name );
+        if (!ret.ok()) {
+            return PASSMSG("Failed to get the resource name.", ret);
+        } // if current_name
+
+        size_t pos = inp_hier.find( parent_name );
+        if ( std::string::npos == pos ) {
+            std::stringstream msg;
+            msg << "parent resc ["
+                << parent_name
+                << "] not in fco resc hier ["
+                << inp_hier
+                << "]";
+            return ERROR(
+                    SYS_INVALID_INPUT_PARAM,
+                    msg.str() );
+        }
+
+        // =-=-=-=-=-=-=-
+        // Generate src and tgt hiers
+        std::string dst_hier = inp_hier.substr( 0, pos + parent_name.size() );
+        if ( !dst_hier.empty() ) {
+            dst_hier += irods::hierarchy_parser::delimiter();
+        }
+        dst_hier += current_name +
+            irods::hierarchy_parser::delimiter() +
+            tgt_name;
+
+        std::string src_hier = inp_hier.substr( 0, pos + parent_name.size() );
+        if ( !src_hier.empty() ) {
+            src_hier += irods::hierarchy_parser::delimiter();
+        }
+        src_hier += current_name + irods::hierarchy_parser::delimiter() + src_name;
+
+        addKeyVal((keyValPair_t*)&obj->cond_input(), _stage_sync_kw.data(), "");
+
+        int source_fd{};
+        int destination_fd{};
+        const irods::at_scope_exit close_l1_descriptors{
+            [&]()
+            {
+                auto [source_replica, source_replica_lm] = irods::experimental::replica::duplicate_replica(*L1desc[source_fd].dataObjInfo);
+                L1desc[destination_fd].replDataObjInfo = source_replica_lm.release();
+
+                if (source_fd > 2) {
+                    if (const int ec = close_replica(_ctx, source_fd); ec < 0) {
+                        irods::log(LOG_ERROR, fmt::format(
+                            "[{}] - failed to close source [{}] on [{}]",
+                            __FUNCTION__, obj->logical_path(), src_hier));
+                    }
+                }
+                if (destination_fd > 2) {
+                    if (const int ec = close_replica(_ctx, destination_fd); ec < 0) {
+                        irods::log(LOG_ERROR, fmt::format(
+                            "[{}] - failed to close destination [{}] on [{}]",
+                            __FUNCTION__, obj->logical_path(), dst_hier));
+                    }
+                }
+            }
+        };
+
+        if (STAGE_OBJ_KW == keyword) {
+            log::resource::debug("staging replica [{}] to archive [{}] from [{}]");
+            try {
+                source_fd = open_source_replica(_ctx, obj, src_hier);
+                if (source_fd < 3) {
+                    return ERROR(source_fd, fmt::format(
+                        "[{}:{}] - failed to open source [{}] on [{}]:[{}]",
+                        __FUNCTION__, __LINE__, obj->logical_path(), src_hier, source_fd));
+                }
+                destination_fd = open_destination_replica(_ctx, obj, source_fd, dst_hier);
+                if (destination_fd < 3) {
+                    return ERROR(destination_fd, fmt::format(
+                        "[{}:{}] - failed to open destination [{}] on [{}]:[{}]",
+                        __FUNCTION__, __LINE__, obj->logical_path(), dst_hier, destination_fd));
+                }
+                L1desc[destination_fd].srcL1descInx = source_fd;
+            }
+            catch (const irods::exception& _e) {
+                irods::log(_e);
+                return irods::error(_e);
+            }
+
+            irods::resource_ptr resc;
+            ret = get_archive( _ctx, resc );
+            if ( !ret.ok() ) {
+                std::stringstream msg;
+                msg << "failed to get child resource [" << current_name << "]";
+                return PASSMSG( msg.str(), ret );
+            }
+
+            irods::file_object_ptr file_obj(
+                    new irods::file_object(
+                        _ctx.comm(),
+                        obj->logical_path().c_str(),
+                        L1desc[source_fd].dataObjInfo->filePath, "", 0,
+                        getDefFileMode(),
+                        L1desc[source_fd].dataObjInfo->flags ) );
+            file_obj->resc_hier( src_hier );
+
+            // =-=-=-=-=-=-=-
+            // pass condInput
+            file_obj->cond_input( L1desc[destination_fd].dataObjInp->condInput );
+
+            // set object id if provided
+            char *id_str = getValByKey(&file_obj->cond_input(), DATA_ID_KW);
+            if (id_str) {
+                file_obj->id(strtol(id_str, NULL, 10));
+            }
+
+            dataObjInfo_t* destDataObjInfo = L1desc[destination_fd].dataObjInfo;
+            dataObjInfo_t* srcDataObjInfo = L1desc[source_fd].dataObjInfo;
+
+            fileStageSyncInp_t file_stage{};
+            rstrcpy( file_stage.cacheFilename, destDataObjInfo->filePath, MAX_NAME_LEN );
+            rstrcpy( file_stage.rescHier,      destDataObjInfo->rescHier, MAX_NAME_LEN );
+            rstrcpy( file_stage.filename,      srcDataObjInfo->filePath,  MAX_NAME_LEN );
+            rstrcpy( file_stage.objPath,       srcDataObjInfo->objPath,   MAX_NAME_LEN );
+            file_stage.dataSize = srcDataObjInfo->dataSize;
+            file_stage.mode = getFileMode(L1desc[destination_fd].dataObjInp);
+
+            int status = rsFileStageToCache(_ctx.comm(), &file_stage);
+            if (status < 0) {
+                ret = ERROR(status, "rsFileStageToCache failed");
+            }
+        }
+        else if (SYNC_OBJ_KW == keyword) {
+            try {
+                source_fd = open_source_replica(_ctx, obj, src_hier);
+                destination_fd = open_destination_replica(_ctx, obj, source_fd, dst_hier);
+                L1desc[destination_fd].srcL1descInx = source_fd;
+            }
+            catch (const irods::exception& _e) {
+                irods::log(_e);
+                return irods::error(_e);
+            }
+
+            irods::resource_ptr resc;
+            ret = get_archive( _ctx, resc );
+            if ( !ret.ok() ) {
+                std::stringstream msg;
+                msg << "failed to get child resource [" << current_name << "]";
+                return PASSMSG( msg.str(), ret );
+            }
+
+            irods::file_object_ptr file_obj(
+                    new irods::file_object(
+                        _ctx.comm(),
+                        obj->logical_path().c_str(),
+                        L1desc[destination_fd].dataObjInfo->filePath, "", 0,
+                        getDefFileMode(),
+                        L1desc[destination_fd].dataObjInfo->flags ) );
+            file_obj->resc_hier( L1desc[destination_fd].dataObjInfo->rescHier );
+
+            // =-=-=-=-=-=-=-
+            // pass condInput
+            file_obj->cond_input( L1desc[destination_fd].dataObjInp->condInput );
+
+            // set object id if provided
+            char *id_str = getValByKey(&file_obj->cond_input(), DATA_ID_KW);
+            if (id_str) {
+                file_obj->id(strtol(id_str, NULL, 10));
+            }
+
+            //ret = resc->call<const char*>( _ctx.comm(), irods::RESOURCE_OP_SYNCTOARCH, file_obj, L1desc[source_fd].dataObjInfo->filePath );
+
+            // Sync to archive!
+            int dst_create_path = 0;
+            irods::error err = resc->get_property<int>(irods::RESOURCE_CREATE_PATH, dst_create_path);
+            if (!err.ok()) {
+                irods::log(PASS(err));
+            }
+
+            dataObjInfo_t* destDataObjInfo = L1desc[destination_fd].dataObjInfo;
+            dataObjInfo_t* srcDataObjInfo = L1desc[source_fd].dataObjInfo;
+            if (CREATE_PATH == dst_create_path) {
+                dataObjInfo_t tmpDataObjInfo{};
+                int status = chkOrphanFile(
+                    _ctx.comm(),
+                    destDataObjInfo->filePath,
+                    destDataObjInfo->rescName,
+                    &tmpDataObjInfo);
+                if ( status == 0 && tmpDataObjInfo.dataId != destDataObjInfo->dataId ) {
+                    /* someone is using it */
+                    char tmp_str[MAX_NAME_LEN]{};
+                    snprintf(tmp_str, MAX_NAME_LEN, "%s.%-u", destDataObjInfo->filePath, irods::getRandom<unsigned int>());
+                    rstrcpy(destDataObjInfo->filePath, tmp_str, MAX_NAME_LEN);
+                }
+            }
+
+            fileStageSyncInp_t inp{};
+            inp.dataSize = srcDataObjInfo->dataSize;
+
+            rstrcpy( inp.filename,      destDataObjInfo->filePath,  MAX_NAME_LEN );
+            rstrcpy( inp.rescHier,      destDataObjInfo->rescHier,  MAX_NAME_LEN );
+            rstrcpy( inp.objPath,       srcDataObjInfo->objPath,    MAX_NAME_LEN );
+            rstrcpy( inp.cacheFilename, srcDataObjInfo->filePath,   MAX_NAME_LEN );
+
+            // add object id keyword to pass down to resource plugins
+            const std::string object_id = boost::lexical_cast<std::string>(srcDataObjInfo->dataId);
+            addKeyVal(&inp.condInput, DATA_ID_KW, object_id.c_str());
+
+            inp.mode = getFileMode(L1desc[destination_fd].dataObjInp);
+            fileSyncOut_t* sync_out = 0;
+            int status = rsFileSyncToArch(_ctx.comm(), &inp, &sync_out );
+
+            // Need to update the physical path with whatever the archive resource came up with
+            if (status >= 0 && CREATE_PATH == dst_create_path) {
+                rstrcpy( destDataObjInfo->filePath, sync_out->file_name, MAX_NAME_LEN );
             }
         }
 
-        fileStageSyncInp_t inp{};
-        inp.dataSize = srcDataObjInfo->dataSize;
-
-        rstrcpy( inp.filename,      destDataObjInfo->filePath,  MAX_NAME_LEN );
-        rstrcpy( inp.rescHier,      destDataObjInfo->rescHier,  MAX_NAME_LEN );
-        rstrcpy( inp.objPath,       srcDataObjInfo->objPath,    MAX_NAME_LEN );
-        rstrcpy( inp.cacheFilename, srcDataObjInfo->filePath,   MAX_NAME_LEN );
-
-        // add object id keyword to pass down to resource plugins
-        const std::string object_id = boost::lexical_cast<std::string>(srcDataObjInfo->dataId);
-        addKeyVal(&inp.condInput, DATA_ID_KW, object_id.c_str());
-
-        inp.mode = getFileMode(L1desc[destination_l1descInx].dataObjInp);
-        fileSyncOut_t* sync_out = 0;
-        int status = rsFileSyncToArch(_ctx.comm(), &inp, &sync_out );
-
-        // Need to update the physical path with whatever the archive resource came up with
-        if (status >= 0 && CREATE_PATH == dst_create_path) {
-            rstrcpy( destDataObjInfo->filePath, sync_out->file_name, MAX_NAME_LEN );
+        if ( !ret.ok() ) {
+            return PASS( ret );
         }
-    }
 
-    if ( !ret.ok() ) {
-        return PASS( ret );
-    }
+        if ( destination_fd < 0 ) {
+            std::stringstream msg;
+            msg << "Failed to replicate the data object [" << obj->logical_path() << "] ";
+            msg << "for operation [" << _stage_sync_kw << "]";
+            irods::log(LOG_ERROR, msg.str());
+            return ERROR( destination_fd, msg.str() );
+        }
 
-    if ( destination_l1descInx < 0 ) {
-        std::stringstream msg;
-        msg << "Failed to replicate the data object [" << obj->logical_path() << "] ";
-        msg << "for operation [" << _stage_sync_kw << "]";
-        irods::log(LOG_ERROR, msg.str());
-        return ERROR( destination_l1descInx, msg.str() );
-    }
-
-    return SUCCESS();
-} // repl_object
+        return SUCCESS();
+    } // repl_object
+} // anonymous namespace
 
 /// =-=-=-=-=-=-=-
 /// @brief interface for POSIX create
