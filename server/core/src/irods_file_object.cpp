@@ -4,7 +4,6 @@
 #include "irods_hierarchy_parser.hpp"
 #include "irods_log.hpp"
 #include "irods_stacktrace.hpp"
-#include "irods_hierarchy_parser.hpp"
 #include "irods_resource_backport.hpp"
 
 // =-=-=-=-=-=-=-
@@ -12,6 +11,12 @@
 #include "miscServerFunct.hpp"
 #include "dataObjOpr.hpp"
 #include "objDesc.hpp"
+
+#define IRODS_FILESYSTEM_ENABLE_SERVER_SIDE_API
+#include "filesystem.hpp"
+
+#define IRODS_REPLICA_ENABLE_SERVER_SIDE_API
+#include "data_object_proxy.hpp"
 
 // =-=-=-=-=-=-=-
 // boost includes
@@ -304,10 +309,14 @@ namespace irods {
 
         // =-=-=-=-=-=-=-
         // if a repl is requested, cache that fact
-        const char* repl_num = getValByKey( &_data_obj_inp->condInput, REPL_NUM_KW );
-        if (repl_num) {
+        if (const char* repl_num = getValByKey( &_data_obj_inp->condInput, REPL_NUM_KW ); repl_num) {
             try {
-                _file_obj->repl_requested(std::stoi(repl_num));
+                if (const auto replica_number = std::stoi(repl_num); replica_number < 0) {
+                    _file_obj->repl_requested(-1);
+                }
+                else {
+                    _file_obj->repl_requested(replica_number);
+                }
             }
             catch (const std::invalid_argument& e) {
                 return ERROR(USER_INVALID_REPLICA_INPUT, fmt::format("invalid replica number argument:[{}]", repl_num));
@@ -321,30 +330,32 @@ namespace irods {
         // make a call to build the linked list
         dataObjInfo_t* head_ptr = nullptr;
 
-        int status = getDataObjInfoIncSpecColl( _comm, _data_obj_inp, &head_ptr );
-
-        if ( !head_ptr || status < 0 ) {
-            if ( head_ptr ) {
-                freeAllDataObjInfo( head_ptr );
+        try {
+            auto [obj, obj_lm] = irods::experimental::data_object::make_data_object_proxy(*_comm, _file_obj->logical_path());
+            head_ptr = obj_lm.release();
+        }
+        catch (const irods::exception& e) {
+            if (head_ptr) {
+                freeAllDataObjInfo(head_ptr);
             }
 
-            if (repl_num && status == CAT_NO_ROWS_FOUND) {
-                return ERROR(SYS_REPLICA_DOES_NOT_EXIST, "replica does not exist");
+            if (_file_obj->repl_requested() >= 0 && CAT_NO_ROWS_FOUND == e.code()) {
+                return ERROR(SYS_REPLICA_DOES_NOT_EXIST, fmt::format(
+                    "[{}] - replica does not exist; obj:[{}], num:[{}]",
+                    __FUNCTION__, _file_obj->logical_path(), _file_obj->repl_requested()));
             }
 
-            char* sys_error = nullptr;
-            const char* rods_error = rodsErrorName( status, &sys_error );
-
-            std::stringstream msg;
-            msg << "failed in call to getDataObjInfoIncSpecColl";
-            msg << " for [";
-            msg << _data_obj_inp->objPath;
-            msg << "] ";
-            msg << rods_error << " " << sys_error;
-
-            free( sys_error );
-
-            return ERROR( status, msg.str() );
+            return ERROR(e.code(), e.what());
+        }
+        catch (const std::exception& e) {
+            return ERROR(SYS_LIBRARY_ERROR, fmt::format(
+                "[{}] - error occurred while fetching data object information; obj:[{}]",
+                __FUNCTION__, _file_obj->logical_path()));
+        }
+        catch (...) {
+            return ERROR(SYS_UNKNOWN_ERROR, fmt::format(
+                "[{}] - unknown error occurred while fetching data object information; obj:[{}]",
+                __FUNCTION__, _file_obj->logical_path()));
         }
 
         _file_obj->resc_hier( head_ptr->rescHier );

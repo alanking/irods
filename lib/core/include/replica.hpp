@@ -88,21 +88,6 @@ namespace irods::experimental::replica
             COLL_NAME
         };
 
-        /// \param[in] _comm connection object
-        /// \param[in] _logical_path
-        ///
-        /// \throws irods::exception if the path does not refer to a data object
-        ///
-        /// \since 4.2.9
-        inline auto throw_if_path_is_not_a_data_object(
-            rxComm& _comm,
-            const irods::experimental::filesystem::path& _logical_path) -> void
-        {
-            if (!irods::experimental::filesystem::NAMESPACE_IMPL::is_data_object(_comm, _logical_path)) {
-                THROW(SYS_INVALID_INPUT_PARAM, "path does not point to a data object");
-            }
-        } // throw_if_path_is_not_a_data_object
-
         /// \brief Enforce valid replica number for replica operation
         ///
         /// \param[in] _replica_number
@@ -117,26 +102,6 @@ namespace irods::experimental::replica
             }
         } // throw_if_replica_number_is_invalid
 
-        /// \brief Enforce valid path for replica operation
-        ///
-        /// \param[in] _comm connection object
-        /// \param[in] _logical_path
-        ///
-        /// \throws filesystem_error if the path is empty or too long
-        /// \throws irods::exception if the path does not refer to a data object or replica number is invalid
-        ///
-        /// \since 4.2.9
-        inline auto throw_if_replica_logical_path_is_invalid(
-            rxComm& _comm,
-            const irods::experimental::filesystem::path& _logical_path) -> void
-        {
-            irods::experimental::filesystem::detail::throw_if_path_is_empty(_logical_path);
-
-            irods::experimental::filesystem::detail::throw_if_path_length_exceeds_limit(_logical_path);
-
-            throw_if_path_is_not_a_data_object(_comm, _logical_path);
-        } // throw_if_replica_logical_path_is_invalid
-
         /// \brief Enforce valid resource name for replica operation
         ///
         /// \param[in] _resource_name
@@ -150,6 +115,43 @@ namespace irods::experimental::replica
                 THROW(SYS_INVALID_INPUT_PARAM, "resource name cannot be empty");
             }
         } // throw_if_replica_resource_name_is_invalid
+
+        /// \param[in] _comm connection object
+        /// \param[in] _logical_path
+        ///
+        /// \throws irods::exception if the path does not refer to a data object
+        ///
+        /// \since 4.2.9
+        template<typename rxComm>
+        auto throw_if_path_is_not_a_data_object(
+            rxComm& _comm,
+            const irods::experimental::filesystem::path& _logical_path) -> void
+        {
+            if (!irods::experimental::filesystem::NAMESPACE_IMPL::is_data_object(_comm, _logical_path)) {
+                THROW(SYS_INVALID_INPUT_PARAM, "path does not point to a data object");
+            }
+        } // throw_if_path_is_not_a_data_object
+
+        /// \brief Enforce valid path for replica operation
+        ///
+        /// \param[in] _comm connection object
+        /// \param[in] _logical_path
+        ///
+        /// \throws filesystem_error if the path is empty or too long
+        /// \throws irods::exception if the path does not refer to a data object or replica number is invalid
+        ///
+        /// \since 4.2.9
+        template<typename rxComm>
+        auto throw_if_replica_logical_path_is_invalid(
+            rxComm& _comm,
+            const irods::experimental::filesystem::path& _logical_path) -> void
+        {
+            irods::experimental::filesystem::detail::throw_if_path_is_empty(_logical_path);
+
+            irods::experimental::filesystem::detail::throw_if_path_length_exceeds_limit(_logical_path);
+
+            throw_if_path_is_not_a_data_object(_comm, _logical_path);
+        } // throw_if_replica_logical_path_is_invalid
 
         /// \brief Gets a row from r_data_main using irods::query
         ///

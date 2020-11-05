@@ -405,7 +405,8 @@ auto plugin_factory(const std::string& _instance_name,
                     const std::string& _context) -> irods::api_entry*
 {
 #ifdef RODS_SERVER
-    irods::client_api_whitelist::instance().add(DATA_OBJECT_FINALIZE_APN);
+    // TODO: do not add this to the whitelist for now - very similar to rcModDataObjMeta
+    //irods::client_api_whitelist::instance().add(DATA_OBJECT_FINALIZE_APN);
 #endif // RODS_SERVER
 
     // clang-format off
