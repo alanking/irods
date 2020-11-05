@@ -456,6 +456,8 @@ namespace
             return l1_index;
         }
         catch (const irods::exception& e) {
+            //const irods::at_scope_exit free_l1_desc{[&l1_index] { freeL1desc(l1_index); }};
+
             irods::log(LOG_ERROR, fmt::format(
                 "Closing data object and setting replica status to stale. "
                 "[path={}, error_code={}, exception={}]",
@@ -465,7 +467,8 @@ namespace
                 irods::log(LOG_ERROR, fmt::format(
                     "Failed to close replica [error_code={}, path={}, hierarchy={}]",
                     ec, _inp.objPath, hierarchy));
-                return ec;
+                //return ec;
+                return e.code();
             }
 
             if (_info_head) {
@@ -475,7 +478,7 @@ namespace
                         "Failed to set the replica's replica status to stale "
                         "[error_code={}, path={}, hierarchy={}]",
                         ec, _inp.objPath, hierarchy));
-                    return ec;
+                    //return ec;
                 }
             }
 
@@ -835,7 +838,14 @@ int stageBundledData( rsComm_t * rsComm, dataObjInfo_t **subfileObjInfoHead ) {
 
             try {
                 if (open_for_write) {
-                    const int status = change_replica_status(*rsComm, obj, hierarchy, INTERMEDIATE_REPLICA);
+                    if (const int status = change_replica_status(*rsComm, obj, hierarchy, INTERMEDIATE_REPLICA); status < 0) {
+                        //const irods::at_scope_exit free_l1_desc{[&l1_index] { freeL1desc(l1_index); }};
+
+                        if (const auto ec = close_replica(*rsComm, l1_index); ec < 0) {
+                            return ec;
+                        }
+                        return status;
+                    }
 
                     // Replica tokens only apply to write operations against intermediate replicas.
                     auto& rat = irods::experimental::replica_access_table::instance();
@@ -849,16 +859,11 @@ int stageBundledData( rsComm_t * rsComm, dataObjInfo_t **subfileObjInfoHead ) {
                     else {
                         update_replica_access_table(*rsComm, update_operation::create, l1_index, *dataObjInp);
                     }
-
-                    if (status < 0) {
-                        if (const auto ec = close_replica(*rsComm, l1_index); ec < 0) {
-                            return ec;
-                        }
-                        return status;
-                    }
                 }
             }
             catch (const irods::exception& e) {
+                //const irods::at_scope_exit free_l1_desc{[&l1_index] { freeL1desc(l1_index); }};
+
                 logger::api::error("Could not update replica access table for data object. "
                                    "Closing data object and setting replica status to its original value. "
                                    "[error_code={}, path={}, exception={}]",
@@ -867,14 +872,15 @@ int stageBundledData( rsComm_t * rsComm, dataObjInfo_t **subfileObjInfoHead ) {
                 if (const auto ec = close_replica(*rsComm, l1_index); ec < 0) {
                     log::api::error("Failed to close replica [error_code={}, path={}, hierarchy={}]",
                                        ec, dataObjInp->objPath, hierarchy);
-                    return ec;
+                    //return ec;
+                    return e.code();
                 }
 
                 if (const auto ec = change_replica_status(*rsComm, obj, hierarchy, old_replica_status); ec < 0) {
                     log::api::error("Failed to restore the replica's replica status "
                                        "[error_code={}, path={}, hierarchy={}, original_replica_status={}]",
                                        ec, dataObjInp->objPath, hierarchy, old_replica_status);
-                    return ec;
+                    //return ec;
                 }
 
                 return e.code();
@@ -888,7 +894,7 @@ int stageBundledData( rsComm_t * rsComm, dataObjInfo_t **subfileObjInfoHead ) {
         }
         catch (const std::exception& e) {
             irods::log(LOG_ERROR, fmt::format("[{}:{}] - [{}]", __FUNCTION__, __LINE__, e.what()));
-            return SYS_INTERNAL_ERR;
+            return SYS_LIBRARY_ERROR;
         }
         catch (...) {
             irods::log(LOG_ERROR, fmt::format("[{}] - unknown error has occurred.", __FUNCTION__));
