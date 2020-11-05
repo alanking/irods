@@ -102,8 +102,8 @@ namespace
 
         const auto minimum_replica_count = get_minimum_replica_count(getValByKey(&_inp.condInput, COPIES_KW));
         const auto expiration = get_time_of_expiration(getValByKey(&_inp.condInput, AGE_KW));
-        const auto expired = [&expiration](const c_replica_proxy& _replica) {
-            return expiration && std::stoi(_replica.mtime().data()) > expiration;
+        const auto old_enough_for_removal = [&expiration](const c_replica_proxy& _replica) {
+            return std::stoi(_replica.mtime().data()) > expiration;
         };
 
         // If a specific replica number is specified, only trim that one!
@@ -121,7 +121,7 @@ namespace
                     THROW(SYS_REPLICA_DOES_NOT_EXIST, "target replica does not exist");
                 }
 
-                if (expired(*repl)) {
+                if (expiration && !old_enough_for_removal(*repl)) {
                     THROW(USER_INCOMPATIBLE_PARAMS, "target replica is not old enough for removal");
                 }
 
@@ -155,7 +155,7 @@ namespace
         // Walk list and add stale replicas to the list
         for (const auto& replica : _obj.replicas()) {
             if (STALE_REPLICA == replica.replica_status()) {
-                if (expired(replica) || !matches_target_resource(replica)) {
+                if ((expiration && !old_enough_for_removal(replica)) || !matches_target_resource(replica)) {
                     continue;
                 }
                 trim_list.push_back(replica.get());
@@ -170,7 +170,7 @@ namespace
         unsigned long good_replicas_to_be_trimmed = 0;
         for (const auto& replica : _obj.replicas()) {
             if (GOOD_REPLICA == replica.replica_status()) {
-                if (expired(replica) || !matches_target_resource(replica)) {
+                if ((expiration && !old_enough_for_removal(replica)) || !matches_target_resource(replica)) {
                     continue;
                 }
 
