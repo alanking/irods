@@ -123,7 +123,7 @@ namespace irods
                 // Skip the API plugin if it was loaded before.
                 if (_api_tbl.is_plugin_loaded(path.c_str())) {
                     const auto* msg = "init_api_table :: API plugin [%s] has already been loaded. Skipping ...";
-                    rodsLog(LOG_DEBUG, msg, path.stem().c_str());
+                    rodsLog(LOG_DEBUG9, msg, path.stem().c_str());
                     continue;
                 }
 
@@ -155,7 +155,7 @@ namespace irods
                                 "api_context");
                 if (ret.ok() && entry) {
                     rodsLog(
-                        LOG_DEBUG,
+                        LOG_DEBUG9,
                         "init_api_table :: adding %d - [%s] - [%s]",
                         entry->apiNumber,
                         entry->operation_name.c_str(),

@@ -193,7 +193,7 @@ namespace irods {
             return ERROR( PLUGIN_ERROR, msg.str() );
         }
 
-        rodsLog(LOG_DEBUG, "load_plugin - calling plugin_factory() in [%s]", so_name.c_str());
+        rodsLog(LOG_DEBUG9, "load_plugin - calling plugin_factory() in [%s]", so_name.c_str());
 
         // =-=-=-=-=-=-=-
         // using the factory pointer create the plugin
@@ -209,7 +209,7 @@ namespace irods {
         // notify world of success
         // TODO :: add hash checking and provide hash value for log also
         rodsLog(
-            LOG_DEBUG,
+            LOG_DEBUG9,
             "load_plugin - loaded [%s]",
             _plugin_name.c_str() );
 
