@@ -98,7 +98,9 @@ namespace irods::experimental::replica
         inline auto throw_if_replica_number_is_invalid(const replica_number_type _replica_number) -> void
         {
             if (_replica_number < 0) {
-                THROW(SYS_INVALID_INPUT_PARAM, "invalid replica number");
+                THROW(SYS_INVALID_INPUT_PARAM, fmt::format(
+                    "[{}] - invalid replica number:[{}]",
+                    __FUNCTION__, _replica_number));
             }
         } // throw_if_replica_number_is_invalid
 
@@ -112,7 +114,9 @@ namespace irods::experimental::replica
         inline auto throw_if_replica_resource_name_is_invalid(const leaf_resource_name_type& _resource_name) -> void
         {
             if (_resource_name.size() <= 0) {
-                THROW(SYS_INVALID_INPUT_PARAM, "resource name cannot be empty");
+                THROW(SYS_INVALID_INPUT_PARAM, fmt::format(
+                    "[{}] - resource name cannot be empty:[{}]",
+                    __FUNCTION__, _resource_name));
             }
         } // throw_if_replica_resource_name_is_invalid
 
@@ -128,7 +132,9 @@ namespace irods::experimental::replica
             const irods::experimental::filesystem::path& _logical_path) -> void
         {
             if (!irods::experimental::filesystem::NAMESPACE_IMPL::is_data_object(_comm, _logical_path)) {
-                THROW(SYS_INVALID_INPUT_PARAM, "path does not point to a data object");
+                THROW(SYS_INVALID_INPUT_PARAM, fmt::format(
+                    "[{}] - path does not point to a data object:[{}]",
+                    __FUNCTION__, _logical_path));
             }
         } // throw_if_path_is_not_a_data_object
 
@@ -150,7 +156,9 @@ namespace irods::experimental::replica
 
             irods::experimental::filesystem::detail::throw_if_path_length_exceeds_limit(_logical_path);
 
-            throw_if_path_is_not_a_data_object(_comm, _logical_path);
+            // TODO: this should not be here - throws when object does not exist
+            //       should detect this scenario and return a CAT_NO_ROWS_FOUND instead of a SYS_INVALID_INPUT_PARAM
+            //throw_if_path_is_not_a_data_object(_comm, _logical_path);
         } // throw_if_replica_logical_path_is_invalid
 
         /// \brief Gets a row from r_data_main using irods::query
