@@ -3,7 +3,6 @@
 #include "fmt/format.h"
 
 #include <map>
-#include <mutex>
 
 namespace irods::experimental
 {
@@ -18,8 +17,6 @@ namespace irods::experimental
 
         // Global Variables
         std::map<key_type, value_type> g_state_map;
-
-        std::mutex rst_mutex;
 
         // Functions
         auto entry_is_valid(const replica_state_table::entry& _e)
@@ -66,14 +63,12 @@ namespace irods::experimental
 
     auto replica_state_table::init() -> void
     {
-        std::scoped_lock rst_lock{rst_mutex};
         irods::log(LOG_DEBUG9, fmt::format("[{}:{}] - initializing state table", __FUNCTION__, __LINE__));
         reset_state_map();
     } // init
 
     auto replica_state_table::deinit() -> void
     {
-        std::scoped_lock rst_lock{rst_mutex};
         irods::log(LOG_DEBUG9, fmt::format("[{}:{}] - de-initializing state table", __FUNCTION__, __LINE__));
         reset_state_map();
     } // deinit
@@ -88,8 +83,6 @@ namespace irods::experimental
     auto replica_state_table::insert(const data_object_proxy& _obj) -> void
     {
         const key_type logical_path = _obj.logical_path().data();
-
-        std::scoped_lock rst_lock{rst_mutex};
 
         if (std::end(g_state_map) != g_state_map.find(logical_path)) {
             auto& rst = instance();
@@ -127,8 +120,6 @@ namespace irods::experimental
 
     auto replica_state_table::erase(const key_type& _logical_path) -> void
     {
-        std::scoped_lock rst_lock{rst_mutex};
-
         auto itr = g_state_map.find(_logical_path);
         if (std::end(g_state_map) == itr) {
             THROW(KEY_NOT_FOUND, fmt::format("[{}] - no replica info held for [{}]", __FUNCTION__, _logical_path));
@@ -145,8 +136,6 @@ namespace irods::experimental
 
     auto replica_state_table::contains(const key_type& _logical_path) -> bool
     {
-        std::scoped_lock rst_lock{rst_mutex};
-
         for (auto&& [k, v] : g_state_map) {
             if (_logical_path == k) {
                 return true;
@@ -157,8 +146,6 @@ namespace irods::experimental
 
     auto replica_state_table::at(const key_type& _logical_path) -> replica_state_table::doi_pair_type
     {
-        std::scoped_lock rst_lock{rst_mutex};
-
         auto itr = g_state_map.find(_logical_path);
         if (std::cend(g_state_map) == itr) {
             THROW(KEY_NOT_FOUND, fmt::format("[{}] - no replica info held for [{}]", __FUNCTION__, _logical_path));
@@ -171,8 +158,6 @@ namespace irods::experimental
 
     auto replica_state_table::at(const key_type& _logical_path, const state_type _state) -> replica_state_table::data_object_proxy
     {
-        std::scoped_lock rst_lock{rst_mutex};
-
         auto itr = g_state_map.find(_logical_path);
         if (std::cend(g_state_map) == itr) {
             THROW(KEY_NOT_FOUND, fmt::format("[{}] - no replica info held for [{}]", __FUNCTION__, _logical_path));
@@ -198,8 +183,6 @@ namespace irods::experimental
 
     auto replica_state_table::set(const key_type& _logical_path, const data_object_proxy& _obj, const state_type _state) -> void
     {
-        std::scoped_lock rst_lock{rst_mutex};
-
         auto itr = g_state_map.find(_logical_path);
         if (std::cend(g_state_map) == itr) {
             THROW(KEY_NOT_FOUND, fmt::format("[{}] - no replica info held for [{}]", __FUNCTION__, _logical_path));
@@ -255,13 +238,9 @@ namespace irods::experimental
 
     auto replica_state_table::to_json(const key_type& _logical_path) -> nlohmann::json
     {
-        std::unique_lock rst_lock{rst_mutex};
-
         auto& rst = replica_state_table::instance();
 
         const auto& [before, after] = rst.at(_logical_path);
-
-        rst_lock.unlock();
 
         return replica_state_table::to_json(before, after);
     } // to_json
