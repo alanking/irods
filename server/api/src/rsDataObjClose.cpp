@@ -11,7 +11,6 @@
 #include "key_value_proxy.hpp"
 #include "miscServerFunct.hpp"
 #include "modAVUMetadata.h"
-#include "modAVUMetadata.h"
 #include "modAccessControl.h"
 #include "modDataObjMeta.h"
 #include "objMetaOpr.hpp"
@@ -43,6 +42,7 @@
 #include "subStructFileStat.h"
 
 // =-=-=-=-=-=-=-
+#include "finalize_utilities.hpp"
 #include "irods_resource_backport.hpp"
 #include "irods_stacktrace.hpp"
 #include "irods_hierarchy_parser.hpp"
@@ -54,7 +54,9 @@
 #include "irods_at_scope_exit.hpp"
 #include "key_value_proxy.hpp"
 #include "replica_access_table.hpp"
-#include "replica_proxy.hpp"
+
+#define IRODS_REPLICA_ENABLE_SERVER_SIDE_API
+#include "data_object_proxy.hpp"
 
 #include <memory>
 #include <functional>
@@ -214,6 +216,7 @@ namespace
 
                 if (const int ec = _dataObjChksum(&_comm, destination_replica.get(), &checksum_string); ec < 0) {
                     destination_replica.checksum("");
+
                     if (DIRECT_ARCHIVE_ACCESS == ec) {
                         destination_replica.checksum(source_replica.checksum());
                         return source_replica.checksum().data();
@@ -232,8 +235,8 @@ namespace
 
                 if (source_replica.checksum() != checksum_string) {
                     THROW(USER_CHKSUM_MISMATCH, fmt::format(
-                         "{}: chksum mismatch for {} src [{}] new [{}]",
-                         __FUNCTION__, destination_replica.logical_path(), source_replica.checksum(), checksum_string));
+                        "{}: chksum mismatch for {} src [{}] new [{}]",
+                        __FUNCTION__, destination_replica.logical_path(), source_replica.checksum(), checksum_string));
                 }
 
                 return destination_replica.checksum().data();
@@ -319,26 +322,7 @@ namespace
             return {};
         }
 
-        if (std::string_view{l1desc.chksum}.length() > 0) {
-            destination_replica.cond_input()[ORIG_CHKSUM_KW] = l1desc.chksum;
-        }
-
-        if (const int ec = _dataObjChksum(&_comm, destination_replica.get(), &checksum_string ); ec < 0) {
-            THROW(ec, "failed in _dataObjChksum");
-        }
-
-        if (std::string_view{l1desc.chksum}.length() > 0) {
-            destination_replica.cond_input().erase(ORIG_CHKSUM_KW);
-        }
-
-        if (!checksum_string) {
-            irods::log(LOG_NOTICE, fmt::format(
-                "[{}] - checksum returned empty for [{}]",
-                __FUNCTION__, destination_replica.logical_path()));
-            return {};
-        }
-
-        return {checksum_string};
+        return irods::register_new_checksum(_comm, *destination_replica.get(), l1desc.chksum);
     } // perform_checksum_operation_for_finalize
 
     auto finalize_destination_replica_for_replication(RsComm& _comm, const openedDataObjInp_t& _inp, const int _fd) -> int
@@ -360,6 +344,7 @@ namespace
         reg_param[DATA_SIZE_KW] = std::to_string(source_replica.size());
         reg_param[DATA_MODIFY_KW] = std::to_string((int)time(nullptr));
         reg_param[FILE_PATH_KW] = destination_replica.physical_path();
+        destination_replica.size(source_replica.size());
 
         const auto cond_input = irods::experimental::make_key_value_proxy(l1desc.dataObjInp->condInput);
         if (cond_input.contains(ADMIN_KW)) {
@@ -408,53 +393,17 @@ namespace
         return status;
     } // finalize_destination_replica_for_replication
 
-    auto finalize_destination_data_object_for_put_or_copy(RsComm& _comm, const openedDataObjInp_t& _inp, const int _fd, const rodsLong_t _vault_size) -> int
+    auto finalize_data_object_for_put_or_copy(RsComm& _comm, const openedDataObjInp_t& _inp, const int _fd) -> int
     {
         auto& l1desc = L1desc[_fd];
-        auto destination_replica = replica_proxy{*l1desc.dataObjInfo};
-        const auto cond_input = irods::experimental::make_key_value_proxy(l1desc.dataObjInp->condInput);
-        if (l1desc.l3descInx < 2 &&
-            cond_input.contains(CROSS_ZONE_CREATE_KW) &&
-            INTERMEDIATE_REPLICA == l1desc.replStatus) {
-            /* the comes from a cross zone copy. have not been registered yet */
-            // TODO: is there a test for this? can this be removed?
-            const int status = svrRegDataObj(&_comm, destination_replica.get());
-            if (status < 0) {
-                l1desc.oprStatus = status;
-                irods::log(LOG_NOTICE, fmt::format(
-                        "{}: svrRegDataObj for {} failed, status = {}",
-                        __FUNCTION__, destination_replica.logical_path(), status));
+
+        if (cross_zone_copy_operation(l1desc)) {
+            if (const int ec = svrRegDataObj(&_comm, l1desc.dataObjInfo); ec < 0) {
+                l1desc.oprStatus = ec;
+                THROW(ec, fmt::format(
+                    "{}: svrRegDataObj for {} failed, status = {}",
+                    __FUNCTION__, l1desc.dataObjInfo->objPath, ec));
             }
-        }
-
-        auto [reg_param, lm] = irods::experimental::make_key_value_proxy({{OPEN_TYPE_KW, std::to_string(l1desc.openType)}});
-        if (destination_replica.size() != _vault_size) {
-            /* update this in case we need to replicate it */
-            reg_param[DATA_SIZE_KW] = std::to_string(_vault_size);
-            destination_replica.size(_vault_size);
-        }
-
-        // TODO: Here is where we need to update the replica statuses
-        if (OPEN_FOR_WRITE_TYPE == l1desc.openType) {
-            reg_param[ALL_REPL_STATUS_KW] = "";
-            reg_param[DATA_MODIFY_KW] = std::to_string((int)time(nullptr));
-        }
-        else {
-            reg_param[REPL_STATUS_KW] = std::to_string(GOOD_REPLICA);
-        }
-
-        if (cond_input.contains(CHKSUM_KW)) {
-            reg_param[CHKSUM_KW] = cond_input.at(CHKSUM_KW);
-        }
-
-        modDataObjMeta_t mod_inp{};
-        mod_inp.dataObjInfo = l1desc.dataObjInfo;
-        mod_inp.regParam = reg_param.get();
-        const int status = rsModDataObjMeta(&_comm, &mod_inp);
-        if (status < 0) {
-            THROW(status,
-                fmt::format("{}: rsModDataObjMeta failed with {}",
-                __FUNCTION__, status));
         }
 
         try {
@@ -468,25 +417,64 @@ namespace
             throw;
         }
 
-        if (GOOD_REPLICA == l1desc.replStatus) {
+        auto replica = replica_proxy{*l1desc.dataObjInfo};
+        auto [reg_param, lm] = irods::experimental::make_key_value_proxy({{OPEN_TYPE_KW, std::to_string(l1desc.openType)}});
+
+        //const auto vault_size = replica::get_replica_size_from_storage(_comm, replica.logical_path(), replica.replica_number());
+        reg_param[DATA_SIZE_KW] = std::to_string(replica.size());
+
+        if (OPEN_FOR_WRITE_TYPE == l1desc.openType) {
+            replica.replica_status(GOOD_REPLICA);
+            //replica.mtime(SET_TIME_TO_NOW_KW);
+            replica.mtime(std::to_string((int)time(nullptr)));
+
+            reg_param[ALL_REPL_STATUS_KW] = "";
+            reg_param[DATA_MODIFY_KW] = std::to_string((int)time(nullptr));
+        }
+        else {
+            replica.replica_status(GOOD_REPLICA);
+            reg_param[REPL_STATUS_KW] = std::to_string(GOOD_REPLICA);
+        }
+
+        const auto cond_input = irods::experimental::make_key_value_proxy(l1desc.dataObjInp->condInput);
+        if (cond_input.contains(CHKSUM_KW)) {
+            replica.checksum(cond_input.at(CHKSUM_KW).value());
+            reg_param[CHKSUM_KW] = cond_input.at(CHKSUM_KW);
+        }
+
+        modDataObjMeta_t mod_inp{};
+        mod_inp.dataObjInfo = l1desc.dataObjInfo;
+        mod_inp.regParam = reg_param.get();
+        const int status = rsModDataObjMeta(&_comm, &mod_inp);
+        if (status < 0) {
+            THROW(status,
+                fmt::format("{}: rsModDataObjMeta failed with {}",
+                __FUNCTION__, status));
+        }
+
+        //if (GOOD_REPLICA == l1desc.replStatus) {
+        if (GOOD_REPLICA == replica.replica_status()) {
             /* update quota overrun */
-            updatequotaOverrun(destination_replica.hierarchy().data(), _vault_size, ALL_QUOTA);
+            updatequotaOverrun(replica.hierarchy().data(), replica.size(), ALL_QUOTA);
         }
 
         return status;
-    } // finalize_destination_data_object_for_put_or_copy
+    } // finalize_data_object_for_put_or_copy
 
     auto finalize_replica_after_failed_operation(RsComm& _comm, const int _fd) -> int
     {
         auto& l1desc = L1desc[_fd];
 
-        if(l1desc.oprType == REPLICATE_OPR ||
-           l1desc.oprType == REPLICATE_DEST ||
-           l1desc.oprType == REPLICATE_SRC ) {
-            return l1desc.oprStatus;
+        auto replica = replica_proxy{*l1desc.dataObjInfo};
+
+        const auto accmode = l1desc.dataObjInp->openFlags & O_ACCMODE;
+        if (O_RDONLY != accmode) {
+            replica.replica_status(STALE_REPLICA);
+            //replica.mtime(SET_TIME_TO_NOW_KW);
+            replica.mtime(std::to_string((int)time(nullptr)));
         }
 
-        const rodsLong_t vault_size = getSizeInVault(&_comm, l1desc.dataObjInfo);
+        const rodsLong_t vault_size = getSizeInVault(&_comm, replica.get());
         if (vault_size < 0) {
             irods::log(LOG_ERROR, fmt::format(
                 "{} - getSizeInVault failed [{}]",
@@ -494,7 +482,6 @@ namespace
             return vault_size;
         }
 
-        auto replica = replica_proxy{*l1desc.dataObjInfo};
         replica.size(vault_size);
 
         auto cond_input = irods::experimental::make_key_value_proxy(l1desc.dataObjInp->condInput);
@@ -512,12 +499,12 @@ namespace
         mod_inp.regParam = reg_param.get();
         if (const int ec = rsModDataObjMeta(&_comm, &mod_inp); ec < 0) {
             irods::log(LOG_NOTICE, fmt::format(
-                    "{}: rsModDataObjMeta failed, dataSize [{}] status = {}",
-                    __FUNCTION__, replica.size(), ec));
+                "{}: rsModDataObjMeta failed, dataSize [{}] status = {}",
+                __FUNCTION__, replica.size(), ec));
             return ec;
         }
 
-        /* an error has occurred */
+        // return error code - this is a failure mode
         return L1desc[_fd].oprStatus;
     } // finalize_replica_after_failed_operation
 
@@ -540,20 +527,31 @@ namespace
             throw;
         }
 
-        if (PUT_OPR != l1desc.oprType || !l1desc.chksumFlag) {
-            // return success as the rest is put-specific...
-            return;
-        }
-
-        const std::string checksum = perform_checksum_operation_for_finalize(_comm, _fd);
-        if (checksum.empty()) {
+        // TODO: will need to restore original status for open-for-read replicas...
+        if (const auto accmode = l1desc.dataObjInp->openFlags & O_ACCMODE; O_RDONLY == accmode) {
             return;
         }
 
         auto replica = replica_proxy{*l1desc.dataObjInfo};
 
+        if (l1desc.dataObjInp->openFlags & O_CREAT) {
+            replica.replica_status(GOOD_REPLICA);
+        }
+        else {
+            if (const auto accmode = l1desc.dataObjInp->openFlags & O_ACCMODE; O_RDONLY != accmode) {
+                //replica.mtime(SET_TIME_TO_NOW_KW);
+                replica.mtime(std::to_string((int)time(nullptr)));
+            }
+        }
+
         auto [reg_param, lm] = irods::experimental::make_key_value_proxy({{OPEN_TYPE_KW, std::to_string(l1desc.openType)}});
-        reg_param[CHKSUM_KW] = checksum;
+
+        if (PUT_OPR == l1desc.oprType && l1desc.chksumFlag) {
+            if (const auto cs = perform_checksum_operation_for_finalize(_comm, _fd); !cs.empty()) {
+                replica.checksum(cs);
+                reg_param[CHKSUM_KW] = replica.checksum();
+            }
+        }
 
         modDataObjMeta_t mod_inp{};
         mod_inp.dataObjInfo = replica.get();
@@ -562,81 +560,6 @@ namespace
             irods::log(LOG_ERROR, fmt::format("[{}] - rsModDataObjMeta failed with [{}]", __FUNCTION__, ec));
         }
     } // finalize_replica_with_no_bytes_written
-
-    bool bytes_written_in_operation(const l1desc_t& l1desc)
-    {
-        return l1desc.bytesWritten >= 0 ||
-               REPLICATE_DEST == l1desc.oprType ||
-               PHYMV_DEST == l1desc.oprType ||
-               COPY_DEST == l1desc.oprType;
-    } // bytes_written_in_operation
-
-    auto cross_zone_write_operation(const openedDataObjInp_t& inp, const l1desc_t& l1desc) -> bool
-    {
-        return inp.bytesWritten > 0 && l1desc.bytesWritten <= 0;
-    } // cross_zone_write_operation
-
-    auto get_size_in_vault(RsComm& _comm, const int _fd) -> rodsLong_t
-    {
-        auto& l1desc = L1desc[_fd];
-
-        try {
-            rodsLong_t size_in_vault = getSizeInVault(&_comm, l1desc.dataObjInfo);
-
-            irods::log(LOG_DEBUG, fmt::format(
-                "[{}:{}] - l1desc.bytesWritten:[{}],l1desc.dataSize:[{}],l1desc.dataObjInfo->dataSize:[{}],size_in_vault:[{}]",
-                __FUNCTION__, __LINE__, l1desc.bytesWritten, l1desc.dataSize, l1desc.dataObjInfo->dataSize, size_in_vault));
-
-            // since we are not filtering out writes to archive resources, the
-            // archive plugins report UNKNOWN_FILE_SZ as their size since they may
-            // not be able to stat the file.  filter that out and trust the plugin
-            // in this instance
-            if (UNKNOWN_FILE_SZ == size_in_vault && l1desc.dataSize >= 0) {
-                return l1desc.dataSize;
-            }
-
-            if (size_in_vault < 0 && UNKNOWN_FILE_SZ != size_in_vault) {
-                THROW((int)size_in_vault,
-                    fmt::format("{}: getSizeInVault error for {}, status = {}",
-                    __FUNCTION__, l1desc.dataObjInfo->objPath, size_in_vault));
-            }
-
-            // check for consistency of the write operation
-            if (size_in_vault != l1desc.dataSize && l1desc.dataSize > 0 &&
-                !getValByKey(&l1desc.dataObjInp->condInput, NO_CHK_COPY_LEN_KW)) {
-                THROW(SYS_COPY_LEN_ERR,
-                    fmt::format("{}: size in vault {} != target size {}",
-                    __FUNCTION__, size_in_vault, l1desc.dataSize));
-            }
-
-            return size_in_vault;
-        }
-        catch (const irods::exception& e) {
-            l1desc.dataObjInfo->replStatus = STALE_REPLICA;
-
-            keyValPair_t regParam{};
-            auto kvp = irods::experimental::make_key_value_proxy(regParam);
-
-            kvp[IN_PDMO_KW] = l1desc.dataObjInfo->rescHier;
-            kvp[REPL_STATUS_KW] = std::to_string(l1desc.dataObjInfo->replStatus);
-
-            if (getValByKey(&L1desc[_fd].dataObjInp->condInput, ADMIN_KW)) {
-                kvp[ADMIN_KW] = "";
-            }
-
-            modDataObjMeta_t inp{};
-            inp.dataObjInfo = l1desc.dataObjInfo;
-            inp.regParam = kvp.get();
-
-            if (const int ec = rsModDataObjMeta(&_comm, &inp); ec < 0) {
-                irods::log(LOG_ERROR, fmt::format(
-                    "{} - rsModDataObjMeta failed [{}]",
-                    __FUNCTION__, ec));
-            }
-
-            throw;
-        }
-    } // get_size_in_vault
 
     auto close_physical_file(RsComm& _comm, const int _fd) -> void
     {
@@ -697,74 +620,85 @@ namespace
 
     int finalize_replica(RsComm& _comm, const int _fd, openedDataObjInp_t& _inp)
     {
+        auto& l1desc = L1desc[_fd];
+
+        auto opened_replica = replica_proxy{*l1desc.dataObjInfo};
+
+        if (l1desc.oprStatus < 0) {
+            return finalize_replica_after_failed_operation(_comm, _fd);
+        }
+
+        if (cross_zone_write_operation(_inp, l1desc)) {
+            l1desc.bytesWritten = _inp.bytesWritten;
+        }
+
+        if (!bytes_written_in_operation(l1desc)) {
+            finalize_replica_with_no_bytes_written(_comm, _fd);
+            return 0;
+        }
+
         try {
-            auto& l1desc = L1desc[_fd];
-
-            auto opened_replica = replica_proxy{*l1desc.dataObjInfo};
-
-            if (l1desc.oprStatus < 0) {
-                return finalize_replica_after_failed_operation(_comm, _fd);
-            }
-
-            if (cross_zone_write_operation(_inp, l1desc)) {
-                l1desc.bytesWritten = _inp.bytesWritten;
-            }
-
-            if (!bytes_written_in_operation(l1desc)) {
-                finalize_replica_with_no_bytes_written(_comm, _fd);
-                return 0;
-            }
-
-            const auto size_in_vault = get_size_in_vault(_comm, _fd);
-
-            const auto checksum = update_checksum_if_needed(_comm, _fd);
-            irods::experimental::key_value_proxy{l1desc.dataObjInp->condInput}[CHKSUM_KW] = checksum;
-
-            int status{};
-            if (REPLICATE_DEST == l1desc.oprType || PHYMV_DEST == l1desc.oprType) {
-                status = finalize_destination_replica_for_replication(_comm, _inp, _fd);
-            }
-            else if (!opened_replica.special_collection_info()) {
-                status = finalize_destination_data_object_for_put_or_copy(_comm, _inp, _fd, size_in_vault);
-            }
-
-            l1desc.bytesWritten = size_in_vault;
+            const bool verify_size = !getValByKey(&l1desc.dataObjInp->condInput, NO_CHK_COPY_LEN_KW);
+            const auto size_in_vault = irods::get_size_in_vault(_comm, *l1desc.dataObjInfo, verify_size, l1desc.dataSize);
             opened_replica.size(size_in_vault);
-
-            purge_cache(_comm, _fd);
-
-            return status;
         }
         catch (const irods::exception& e) {
-            irods::log(e);
-            return e.code();
+            l1desc.dataObjInfo->replStatus = STALE_REPLICA;
+
+            keyValPair_t regParam{};
+            auto kvp = irods::experimental::make_key_value_proxy(regParam);
+
+            kvp[IN_PDMO_KW] = l1desc.dataObjInfo->rescHier;
+            kvp[REPL_STATUS_KW] = std::to_string(l1desc.dataObjInfo->replStatus);
+
+            if (getValByKey(&L1desc[_fd].dataObjInp->condInput, ADMIN_KW)) {
+                kvp[ADMIN_KW] = "";
+            }
+
+            modDataObjMeta_t inp{};
+            inp.dataObjInfo = l1desc.dataObjInfo;
+            inp.regParam = kvp.get();
+
+            if (const int ec = rsModDataObjMeta(&_comm, &inp); ec < 0) {
+                irods::log(LOG_ERROR, fmt::format(
+                    "{} - rsModDataObjMeta failed [{}]",
+                    __FUNCTION__, ec));
+            }
+
+            throw;
+        }
+
+        const auto checksum = update_checksum_if_needed(_comm, _fd);
+        irods::experimental::key_value_proxy{l1desc.dataObjInp->condInput}[CHKSUM_KW] = checksum;
+
+        int status{};
+        if (REPLICATE_DEST == l1desc.oprType || PHYMV_DEST == l1desc.oprType) {
+            status = finalize_destination_replica_for_replication(_comm, _inp, _fd);
+        }
+        else if (!opened_replica.special_collection_info()) {
+            status = finalize_data_object_for_put_or_copy(_comm, _inp, _fd);
         }
 
         l1desc.bytesWritten = l1desc.dataObjInfo->dataSize;
         opened_replica.size(l1desc.dataObjInfo->dataSize); // no-op?
 
-        if (L1desc[_fd].purgeCacheFlag) {
-            irods::purge_cache(_comm, *l1desc.dataObjInfo);
-        }
+        purge_cache(_comm, _fd);
 
         return status;
     } // finalize_replica
 
-void unlock_file_descriptor(
-    rsComm_t* comm,
-    const int l1descInx)
-{
-    char fd_string[NAME_LEN]{};
-    snprintf(fd_string, sizeof( fd_string ), "%-d", L1desc[l1descInx].lockFd);
-    addKeyVal(&L1desc[l1descInx].dataObjInp->condInput, LOCK_FD_KW, fd_string);
-    irods::server_api_call(
-        DATA_OBJ_UNLOCK_AN,
-        comm,
-        L1desc[l1descInx].dataObjInp,
-        nullptr, (void**)nullptr, nullptr);
-    L1desc[l1descInx].lockFd = -1;
-} // unlock_file_descriptor
-
+    void unlock_file_descriptor(rsComm_t* comm, const int l1descInx)
+    {
+        char fd_string[NAME_LEN]{};
+        snprintf(fd_string, sizeof( fd_string ), "%-d", L1desc[l1descInx].lockFd);
+        addKeyVal(&L1desc[l1descInx].dataObjInp->condInput, LOCK_FD_KW, fd_string);
+        irods::server_api_call(
+            DATA_OBJ_UNLOCK_AN,
+            comm,
+            L1desc[l1descInx].dataObjInp,
+            nullptr, (void**)nullptr, nullptr);
+        L1desc[l1descInx].lockFd = -1;
+    } // unlock_file_descriptor
 } // anonymous namespace
 
 auto l3Close(RsComm* _comm, const int _fd) -> int
@@ -795,14 +729,34 @@ auto l3Close(RsComm* _comm, const int _fd) -> int
 
 int rsDataObjClose(rsComm_t* rsComm, openedDataObjInp_t* dataObjCloseInp)
 {
+    if (!rsComm) {
+        irods::log(LOG_ERROR, fmt::format("{}: rsComm is null", __FUNCTION__));
+        return USER__NULL_INPUT_ERR;
+    }
+
+    if (!dataObjCloseInp) {
+        irods::log(LOG_ERROR, fmt::format("{}: dataObjCloseInp is null", __FUNCTION__));
+        return USER__NULL_INPUT_ERR;
+    }
+
     const auto fd = dataObjCloseInp->l1descInx;
     if (fd < 3 || fd >= NUM_L1_DESC) {
-        rodsLog(LOG_NOTICE,
-            "rsDataObjClose: l1descInx %d out of range", fd);
+        irods::log(LOG_NOTICE, fmt::format("{}: l1descInx {} out of range", __FUNCTION__, fd));
         return SYS_FILE_DESC_OUT_OF_RANGE;
     }
 
     const auto& l1desc = L1desc[fd];
+
+    if(!l1desc.dataObjInp) {
+        irods::log(LOG_ERROR, fmt::format("{}: dataObjInp for index {} is null", __FUNCTION__, fd));
+        return SYS_INVALID_INPUT_PARAM;
+    }
+
+    if (!l1desc.dataObjInfo) {
+        irods::log(LOG_ERROR, fmt::format("[{}] - dataObjInfo for index {} is null", __FUNCTION__, fd));
+        return SYS_INTERNAL_NULL_INPUT_ERR;
+    }
+
     std::unique_ptr<irods::at_scope_exit<std::function<void()>>> restore_entry;
 
     int ec = 0;
@@ -859,20 +813,27 @@ int rsDataObjClose(rsComm_t* rsComm, openedDataObjInp_t* dataObjCloseInp)
     }
 
     try {
+        irods::at_scope_exit clean_up{[&fd, &rsComm]
+        {
+            auto& l1desc = L1desc[fd];
+
+            if (l1desc.lockFd > 0) {
+                unlock_file_descriptor(rsComm, fd);
+            }
+
+            freeL1desc(fd);
+        }};
+
         close_physical_file(*rsComm, fd);
 
         ec = finalize_replica(*rsComm, fd, *dataObjCloseInp);
-
-        if (l1desc.lockFd > 0) {
-            unlock_file_descriptor(rsComm, fd);
-        }
-
         if (ec < 0 || l1desc.oprStatus < 0) {
-            freeL1desc(fd);
             return ec;
         }
 
         apply_static_peps(*rsComm, *dataObjCloseInp, fd, ec);
+
+        return ec;
     }
     catch (const irods::exception& e) {
         irods::log(e);
@@ -880,14 +841,11 @@ int rsDataObjClose(rsComm_t* rsComm, openedDataObjInp_t* dataObjCloseInp)
     }
     catch (const std::exception& e) {
         irods::log(LOG_ERROR, e.what());
-        return ec = SYS_INTERNAL_ERR;
+        return ec = SYS_LIBRARY_ERROR;
     }
     catch (...) {
         irods::log(LOG_ERROR, fmt::format("an unknown error occurred in [{}]", __FUNCTION__));
         return ec = SYS_UNKNOWN_ERROR;
     }
-
-    freeL1desc(fd);
-    return ec;
 } // rsDataObjClose
 
