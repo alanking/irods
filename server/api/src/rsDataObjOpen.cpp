@@ -794,6 +794,8 @@ namespace
                 cond_input[RESC_HIER_STR_KW] = hierarchy;
             }
 
+            cond_input["selected_hierarchy"] = hierarchy;
+
             // TODO: remove lock fd
             if (cond_input.contains(LOCK_TYPE_KW) && cond_input.at(LOCK_TYPE_KW).value().data()) {
                 rodsLog(LOG_NOTICE, "[%s:%d] - locking file with type [%s]",

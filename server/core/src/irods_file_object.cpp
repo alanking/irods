@@ -121,8 +121,9 @@ namespace irods {
         repl_requested_ = _dataObjInfo->replNum;
         replicas_.clear();
         replKeyVal( &_dataObjInfo->condInput, &cond_input_ );
-        l1_desc_idx_ = getL1descIndexByDataObjInfo( _dataObjInfo );
         size_ = _dataObjInfo->dataSize;
+#if 0
+        l1_desc_idx_ = getL1descIndexByDataObjInfo( _dataObjInfo );
         if ( l1_desc_idx_ > 2 ) {
             int l3descInx = L1desc[ l1_desc_idx_ ].l3descInx;
             file_descriptor_ = FileDesc[ l3descInx ].fd;
@@ -130,6 +131,10 @@ namespace irods {
         else {
             file_descriptor_ = -1;
         }
+#else
+        l1_desc_idx_ = -1;
+        file_descriptor_ = -1;
+#endif
     }
 
 // =-=-=-=-=-=-=-

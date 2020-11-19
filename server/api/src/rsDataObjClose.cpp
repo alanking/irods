@@ -452,7 +452,6 @@ namespace
                 __FUNCTION__, status));
         }
 
-        //if (GOOD_REPLICA == l1desc.replStatus) {
         if (GOOD_REPLICA == replica.replica_status()) {
             /* update quota overrun */
             updatequotaOverrun(replica.hierarchy().data(), replica.size(), ALL_QUOTA);
