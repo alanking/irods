@@ -166,33 +166,26 @@ namespace
         }
     } // applyACLFromKVP
 
-    auto purge_cache(RsComm& _comm, const int _fd) -> int
+    bool bytes_written_in_operation(const l1desc_t& l1desc)
     {
-        auto& l1desc = L1desc[_fd];
+        return l1desc.bytesWritten >= 0 ||
+               REPLICATE_DEST == l1desc.oprType ||
+               PHYMV_DEST == l1desc.oprType ||
+               COPY_DEST == l1desc.oprType;
+    } // bytes_written_in_operation
 
-        if (l1desc.purgeCacheFlag <= 0) {
-            return 0;
-        }
+    auto cross_zone_write_operation(const openedDataObjInp_t& inp, const l1desc_t& l1desc) -> bool
+    {
+        return inp.bytesWritten > 0 && l1desc.bytesWritten <= 0;
+    } // cross_zone_write_operation
 
-        auto replica = replica_proxy{*l1desc.dataObjInfo};
-
-        dataObjInp_t inp{};
-        rstrcpy( inp.objPath, replica.logical_path().data(), MAX_NAME_LEN );
-
-        auto cond_input = irods::experimental::key_value_proxy{inp.condInput};
-        irods::at_scope_exit free_cond_input{[&cond_input] { clearKeyVal(cond_input.get()); }};
-        cond_input[COPIES_KW] = "1";
-        cond_input[REPL_NUM_KW] = std::to_string(replica.replica_number());
-        cond_input[RESC_HIER_STR_KW] = replica.hierarchy();
-
-        int status = rsDataObjTrim(&_comm, &inp);
-        if (status < 0) {
-            irods::log(LOG_ERROR, fmt::format(
-                "{}: error trimming replica on [{}] for [{}]",
-                __FUNCTION__, replica.hierarchy(), replica.logical_path()));
-        }
-        return status;
-    } // purge_cache
+    auto cross_zone_copy_operation(const l1desc_t& l1desc) -> bool
+    {
+        const auto cond_input = irods::experimental::make_key_value_proxy(l1desc.dataObjInp->condInput);
+        return l1desc.l3descInx < 3 &&
+               cond_input.contains(CROSS_ZONE_CREATE_KW) &&
+               INTERMEDIATE_REPLICA == l1desc.replStatus;
+    } // cross_zone_copy_operation
 
     auto perform_checksum_operation_for_finalize(RsComm& _comm, const int _fd) -> std::string
     {
@@ -248,33 +241,19 @@ namespace
         }
 
         if (!l1desc.chksumFlag) {
-            if (destination_replica.checksum().length() <= 0) {
+            if (destination_replica.checksum().empty()) {
                 return {};
             }
             l1desc.chksumFlag = VERIFY_CHKSUM;
         }
 
         if (VERIFY_CHKSUM == l1desc.chksumFlag) {
-            if (std::string_view{l1desc.chksum}.length() > 0) {
-                destination_replica.cond_input()[ORIG_CHKSUM_KW] = l1desc.chksum;
-                if (const int ec = _dataObjChksum(&_comm, destination_replica.get(), &checksum_string); ec < 0) {
-                    THROW(ec, "failed in _dataObjChksum");
-                }
-                destination_replica.cond_input().erase(ORIG_CHKSUM_KW);
-
-                // verify against the input value
-                if (std::string_view{checksum_string} != l1desc.chksum) {
-                    THROW(USER_CHKSUM_MISMATCH, fmt::format(
-                        "{}: mismatch chksum for {}.inp={},compute {}",
-                        __FUNCTION__, destination_replica.logical_path(),
-                        l1desc.chksum, checksum_string));
-                }
-
-                return {checksum_string};
+            if (!std::string_view{l1desc.chksum}.empty()) {
+                return irods::verify_checksum(_comm, *destination_replica.get(), l1desc.chksum);
             }
 
             if (REPLICATE_DEST == oprType) {
-                if (destination_replica.checksum().length() > 0) {
+                if (!destination_replica.checksum().empty()) {
                     destination_replica.cond_input()[ORIG_CHKSUM_KW] = destination_replica.checksum();
                 }
 
@@ -544,9 +523,11 @@ namespace
 
     auto finalize_replica_with_no_bytes_written(RsComm& _comm, const int _fd) -> void
     {
-        purge_cache(_comm, _fd);
-
         l1desc_t& l1desc = L1desc[_fd];
+
+        if (L1desc[_fd].purgeCacheFlag) {
+            irods::purge_cache(_comm, *l1desc.dataObjInfo);
+        }
 
         try {
             applyMetadataFromKVP(_comm, *l1desc.dataObjInp);
@@ -758,6 +739,15 @@ namespace
             irods::log(e);
             return e.code();
         }
+
+        l1desc.bytesWritten = l1desc.dataObjInfo->dataSize;
+        opened_replica.size(l1desc.dataObjInfo->dataSize); // no-op?
+
+        if (L1desc[_fd].purgeCacheFlag) {
+            irods::purge_cache(_comm, *l1desc.dataObjInfo);
+        }
+
+        return status;
     } // finalize_replica
 
 void unlock_file_descriptor(
