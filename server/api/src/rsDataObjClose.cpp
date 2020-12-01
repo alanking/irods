@@ -336,15 +336,13 @@ namespace
                 __FUNCTION__, srcL1descInx));
         }
 
-        auto source_replica = replica_proxy{*L1desc[srcL1descInx].dataObjInfo};
         auto destination_replica = replica_proxy{*l1desc.dataObjInfo};
 
         auto [reg_param, lm] = irods::experimental::make_key_value_proxy({{OPEN_TYPE_KW, std::to_string(l1desc.openType)}});
-        reg_param[REPL_STATUS_KW] = std::to_string(source_replica.replica_status());
-        reg_param[DATA_SIZE_KW] = std::to_string(source_replica.size());
+        reg_param[REPL_STATUS_KW] = std::to_string(GOOD_REPLICA);
+        reg_param[DATA_SIZE_KW] = std::to_string(destination_replica.size());
         reg_param[DATA_MODIFY_KW] = std::to_string((int)time(nullptr));
         reg_param[FILE_PATH_KW] = destination_replica.physical_path();
-        destination_replica.size(source_replica.size());
 
         const auto cond_input = irods::experimental::make_key_value_proxy(l1desc.dataObjInp->condInput);
         if (cond_input.contains(ADMIN_KW)) {
@@ -357,7 +355,7 @@ namespace
             reg_param[SYNC_OBJ_KW] = cond_input.at(SYNC_OBJ_KW);
         }
         if (PHYMV_DEST == l1desc.oprType) {
-            reg_param[REPL_NUM_KW] = std::to_string(source_replica.replica_number());
+            reg_param[REPL_NUM_KW] = std::to_string(destination_replica.replica_number());
         }
         if (cond_input.contains(CHKSUM_KW)) {
             reg_param[CHKSUM_KW] = cond_input.at(CHKSUM_KW);
