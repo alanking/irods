@@ -330,15 +330,12 @@ namespace
                 try {
                     irods::log(LOG_DEBUG8, fmt::format("[{}:{}] - finalizing replica", __FUNCTION__, __LINE__));
 
-                    // TODO: temporary...
-                    if (!irods::experimental::data_object::find_replica(final_object, hier)->special_collection_info()) {
-                        if (const auto ec = finalize_replica(_comm, *final_object.get(), l1desc_cache); ec < 0) {
-                            irods::log(LOG_ERROR, fmt::format(
-                                "[{}] - error finalizing replica; ec:[{}]",
-                                __FUNCTION__, ec));
+                    if (const auto ec = finalize_replica(_comm, *final_object.get(), l1desc_cache); ec < 0) {
+                        irods::log(LOG_ERROR, fmt::format(
+                            "[{}] - error finalizing replica; ec:[{}]",
+                            __FUNCTION__, ec));
 
-                            status = ec;
-                        }
+                        status = ec;
                     }
                 }
                 catch (const irods::exception& e) {

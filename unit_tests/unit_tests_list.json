@@ -13,6 +13,7 @@
     "irods_key_value_proxy",
     "irods_lifetime_manager",
     "irods_linked_list_iterator",
+    "irods_logical_locking",
     "irods_logical_paths_and_special_characters",
     "irods_metadata",
     "irods_parallel_transfer_engine",

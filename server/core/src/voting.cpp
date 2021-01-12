@@ -70,6 +70,11 @@ namespace {
                 return vote::zero;
             }
         }
+        else if (WRITE_LOCKED_REPLICA == r.replica_status()) {
+            // Write-locked replicas are closed to opening for any reason.
+            // TODO: There is an exception to this rule: replication/phymv.
+            return vote::zero;
+        }
 
         const int requested_repl_num = ctx.file_obj->repl_requested();
         if (requested_repl_num > -1) {
