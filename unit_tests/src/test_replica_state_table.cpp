@@ -74,6 +74,7 @@ TEST_CASE("replica state table", "[basic]")
     // create before entry for the data object
     REQUIRE_NOTHROW(rst.insert(*head));
     REQUIRE(rst.contains(LOGICAL_PATH_1));
+    REQUIRE(REPLICA_COUNT == rst.at(LOGICAL_PATH_1).size());
 
     SECTION("access by logical path (data object)")
     {
@@ -201,6 +202,23 @@ TEST_CASE("replica state table", "[basic]")
 
         CHECK_NOTHROW(rst.erase(LOGICAL_PATH_2));
         CHECK_FALSE(rst.contains(LOGICAL_PATH_2));
+    }
+
+    SECTION("insert replica")
+    {
+        constexpr int REPL_NUM = 7;
+
+        auto [proxy, lm] = irods::experimental::replica::make_replica_proxy();
+        proxy.logical_path(LOGICAL_PATH_1);
+        proxy.replica_number(REPL_NUM);
+
+        CHECK_FALSE(rst.contains(proxy.logical_path(), proxy.replica_number()));
+
+        REQUIRE_NOTHROW(rst.insert(proxy.logical_path(), *proxy.get()));
+
+        CHECK(rst.contains(proxy.logical_path(), proxy.replica_number()));
+        CHECK(REPLICA_COUNT + 1 == rst.at(proxy.logical_path()).size());
+        CHECK(REPL_NUM == std::stoi(rst.get_property(proxy.logical_path(), REPL_NUM, "data_repl_num")));
     }
 
     CHECK_NOTHROW(rst.erase(LOGICAL_PATH_1));

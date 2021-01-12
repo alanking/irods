@@ -6,6 +6,7 @@
 #include <string_view>
 
 struct DataObjInfo;
+struct RsComm;
 
 namespace irods
 {
@@ -53,6 +54,16 @@ namespace irods
         /// \since 4.2.9
         auto insert(const DataObjInfo& _obj) -> void;
 
+        /// \brief Create a new replica in an existing entry in the replica_state_table
+        ///
+        /// If the specified replica already exists for this entry in the replica state table, nothing happens.
+        ///
+        /// \param[in] _obj Initial data object state to serve as both "before" and "after" at the start
+        /// \throws irods::exception If entry does not exist
+        ///
+        /// \since 4.2.9
+        auto insert(const std::string_view _logical_path, const DataObjInfo& _obj) -> void;
+
         /// \brief Erase replica_state_table entry indicated by _logical_path
         ///
         /// \param[in] _logical_path
@@ -71,6 +82,30 @@ namespace irods
         ///
         /// \since 4.2.9
         auto contains(const std::string_view _logical_path) const -> bool;
+
+        /// \brief Returns whether or not a replica exists for an existing entry replica state table
+        ///
+        /// \param[in] _logical_path
+        /// \param[in] _leaf_resource_name
+        ///
+        /// \retval true if replica state table contains key _logical_path and a replica on the specified leaf resource
+        /// \retval false if replica state table does not contain key _logical_path or a replica on the specified leaf resource
+        ///
+        /// \since 4.2.9
+        auto contains(const std::string_view _logical_path,
+                      const std::string_view _leaf_resource_name) const -> bool;
+
+        /// \brief Returns whether or not a replica exists for an existing entry replica state table
+        ///
+        /// \param[in] _logical_path
+        /// \param[in] _replica_number
+        ///
+        /// \retval true if replica state table contains key _logical_path and a replica with the specified replica number
+        /// \retval false if replica state table does not contain key _logical_path or a replica with the specified replica number
+        ///
+        /// \since 4.2.9
+        auto contains(const std::string_view _logical_path,
+                      const int _replica_number) const -> bool;
 
         /// \brief return all information for all states of all replicas for a particular data object
         ///
@@ -341,6 +376,22 @@ namespace irods
                     const std::string_view _leaf_resource_name,
                     const nlohmann::json& _updates) -> void;
 
+        /// \brief Updates all columns of the specified replica
+        ///
+        /// \param[in] _logical_path
+        /// \param[in] _replica DataObjInfo which is converted to JSON format: \parblock
+        /// \code{.js}
+        ///     {
+        ///         <r_data_main_column>: <string>,
+        ///         ...
+        ///     }
+        /// \endcode
+        /// \endparblock
+        ///
+        /// \since 4.2.9
+        auto update(const std::string_view _logical_path,
+                    const DataObjInfo& _replica) -> void;
+
         /// \brief Returns the value of a given property of the given replica in the state table
         ///
         /// \param[in] _logical_path
@@ -372,6 +423,8 @@ namespace irods
             const std::string_view _leaf_resource_name,
             const std::string_view _property_name,
             const state_type _state = state_type::before) const -> std::string;
+
+        auto publish_to_catalog(RsComm& _comm, const std::string_view _logical_path) -> int;
 
     private:
         // Disallow construction of the replica_state_table outside of member functions
