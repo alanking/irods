@@ -477,6 +477,7 @@ _dataObjChksum(
 
         }
         break;
+
     default:
         rodsLog( LOG_NOTICE,
                  "_dataObjChksum: rescCat type %d is not recognized", category );

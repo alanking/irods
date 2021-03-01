@@ -383,9 +383,18 @@ namespace
                 return free_l1_descriptor(l1desc_index);
             }
 
-            const auto is_write_operation = (O_RDONLY != (l1desc.dataObjInp->openFlags & O_ACCMODE));
-
             const auto data_id = l1desc.dataObjInfo->dataId;
+
+            const irods::at_scope_exit remove_from_rst{[&json_input, &data_id] {
+                const char* const prop = "preserve_replica_state_table";
+                if (!json_input.contains(prop) || !json_input.at(prop).get<bool>()) {
+                    if (rst::contains(data_id)) {
+                        rst::erase(data_id);
+                    }
+                }
+            }};
+
+            const auto is_write_operation = (O_RDONLY != (l1desc.dataObjInp->openFlags & O_ACCMODE));
 
             // Allow updates to the replica's catalog information if the stream supports
             // write operations (i.e. the stream is opened in write-only or read-write mode).
@@ -393,15 +402,6 @@ namespace
                 const auto update_size = !json_input.contains("update_size") || json_input.at("update_size").get<bool>();
                 const auto update_status = !json_input.contains("update_status") || json_input.at("update_status").get<bool>();
                 const auto compute_checksum = json_input.contains("compute_checksum") && json_input.at("compute_checksum").get<bool>();
-                const auto update_catalog = update_size || update_status || compute_checksum || send_notifications;
-
-                const irods::at_scope_exit remove_from_rst{[&data_id, &update_catalog]
-                    {
-                        if (update_catalog && rst::contains(data_id)) {
-                            rst::erase(data_id);
-                        }
-                    }
-                };
 
                 // Update the replica's information in the catalog if requested.
                 if (update_size && update_status) {

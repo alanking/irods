@@ -116,12 +116,13 @@ namespace irods
     ///
     /// \param[in/out] _comm
     /// \param[in] _fd l1 descriptor index
+    /// \param[in] _preserve_replica_state_table
     ///
     /// \returns int
     /// \retval return code of rs_replica_close
     ///
     /// \since 4.2.9
-    auto close_replica_without_catalog_update(RsComm& _comm, const int _fd) -> int;
+    auto close_replica_without_catalog_update(RsComm& _comm, const int _fd, const bool _preserve_replica_state_table) -> int;
 } // namespace irods
 
 #endif // IRODS_FINALIZE_UTILITIES_HPP

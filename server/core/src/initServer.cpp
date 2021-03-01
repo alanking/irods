@@ -156,9 +156,10 @@ namespace
                 auto [replica, replica_lm] = irods::experimental::replica::duplicate_replica(*l1desc.dataObjInfo);
                 struct l1desc fd_cache = irods::duplicate_l1_descriptor(l1desc);
                 const irods::at_scope_exit free_fd{[&fd_cache] { freeL1desc_struct(fd_cache); }};
+                constexpr auto preserve_rst = true;
 
                 // close the replica, free L1 descriptor
-                if (const int ec = irods::close_replica_without_catalog_update(_comm, fd); ec < 0) {
+                if (const int ec = irods::close_replica_without_catalog_update(_comm, fd, preserve_rst); ec < 0) {
                     irods::log(LOG_ERROR, fmt::format(
                         "[{}:{}] - error closing replica; ec:[{}]",
                         __FUNCTION__, __LINE__, ec));

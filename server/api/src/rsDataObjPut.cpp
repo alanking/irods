@@ -280,33 +280,34 @@ namespace
         int status = 0;
         // special collections are special - just use the old close
         if (l1desc.dataObjInfo->specColl) {
-			OpenedDataObjInp close_inp{};
-			close_inp.l1descInx = fd;
-			l1desc.oprStatus = bytes_written;
-			l1desc.oprType = PUT_OPR;
-			const int status = rsDataObjClose(&_comm, &close_inp);
-			if (status < 0) {
+            OpenedDataObjInp close_inp{};
+            close_inp.l1descInx = fd;
+            l1desc.oprStatus = bytes_written;
+            l1desc.oprType = PUT_OPR;
+            const int status = rsDataObjClose(&_comm, &close_inp);
+            if (status < 0) {
                 irods::log(LOG_DEBUG, fmt::format(
-						"[{}:{}]: rsDataObjClose of [{}] error, status = [{}]",
-						__FUNCTION__, __LINE__, fd, status));
-			}
+                    "[{}:{}]: rsDataObjClose of [{}] error, status = [{}]",
+                    __FUNCTION__, __LINE__, fd, status));
+            }
 
-			if ( bytes_written < 0 ) {
-				return bytes_written;
-			}
+            if ( bytes_written < 0 ) {
+                return bytes_written;
+            }
 
-			if (status < 0) {
-				return status;
-			}
+            if (status < 0) {
+                return status;
+            }
         }
         else {
             auto [final_object, final_object_lm] = irods::experimental::data_object::duplicate_data_object(*l1desc.dataObjInfo);
 
             struct l1desc l1desc_cache = irods::duplicate_l1_descriptor(l1desc);
             const irods::at_scope_exit free_fd{[&l1desc_cache] { freeL1desc_struct(l1desc_cache); }};
+            constexpr auto preserve_rst = true;
 
             // close the replica, free L1 descriptor
-            if (const int ec = irods::close_replica_without_catalog_update(_comm, fd); ec < 0) {
+            if (const int ec = irods::close_replica_without_catalog_update(_comm, fd, preserve_rst); ec < 0) {
                 irods::log(LOG_ERROR, fmt::format(
                     "[{}:{}] - error closing replica; ec:[{}]",
                     __FUNCTION__, __LINE__, ec));

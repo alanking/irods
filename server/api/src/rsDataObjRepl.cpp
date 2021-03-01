@@ -433,7 +433,8 @@ namespace
         // Open destination replica
         int destination_l1descInx = open_destination_replica(_comm, _destination_inp, source_l1descInx);
         if (destination_l1descInx < 0) {
-            if (const int ec = irods::close_replica_without_catalog_update(_comm, source_l1descInx); ec < 0) {
+            constexpr auto preserve_rst = false;
+            if (const int ec = irods::close_replica_without_catalog_update(_comm, source_l1descInx, preserve_rst); ec < 0) {
                 irods::log(LOG_ERROR, fmt::format(
                     "[{}:{}] - failed to close source replica:[{}]",
                     __FUNCTION__, __LINE__, ec));
@@ -503,9 +504,10 @@ namespace
 
         auto [source_replica, source_replica_lm] = ir::duplicate_replica(source_data_obj_info);
         auto [destination_replica, destination_replica_lm] = ir::duplicate_replica(destination_data_obj_info);
+        constexpr auto preserve_rst = true;
 
         // Close source replica
-        if (const int ec = irods::close_replica_without_catalog_update(_comm, source_l1descInx); ec < 0) {
+        if (const int ec = irods::close_replica_without_catalog_update(_comm, source_l1descInx, preserve_rst); ec < 0) {
             irods::log(LOG_ERROR, fmt::format(
                 "[{}:{}] - closing source replica [{}] failed with [{}]",
                 __FUNCTION__, __LINE__, _source_inp.objPath, ec));
@@ -516,7 +518,7 @@ namespace
         }
 
         // Close destination replica
-        if (const int ec = irods::close_replica_without_catalog_update(_comm, destination_l1descInx); ec < 0) {
+        if (const int ec = irods::close_replica_without_catalog_update(_comm, destination_l1descInx, preserve_rst); ec < 0) {
             irods::log(LOG_ERROR, fmt::format(
                 "[{}:{}] - closing destination replica [{}] failed with [{}]",
                 __FUNCTION__, __LINE__, _destination_inp.objPath, ec));

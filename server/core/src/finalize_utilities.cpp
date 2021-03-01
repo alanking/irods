@@ -252,13 +252,14 @@ namespace irods
         return rei.status;
     } // apply_static_pep
 
-    auto close_replica_without_catalog_update(RsComm& _comm, const int _fd) -> int
+    auto close_replica_without_catalog_update(RsComm& _comm, const int _fd, const bool _preserve_replica_state_table) -> int
     {
         nlohmann::json in_json;
         in_json["fd"] = _fd;
         in_json["send_notifications"] = false;
         in_json["update_size"] = false;
         in_json["update_status"] = false;
+        in_json["preserve_replica_state_table"] = _preserve_replica_state_table;
 
         const int ec = rs_replica_close(&_comm, in_json.dump().data());
 
