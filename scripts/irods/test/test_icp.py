@@ -21,7 +21,6 @@ class Test_Icp(session.make_sessions_mixin([('otherrods', 'rods')], [('alice', '
     class_name = 'Test_Icp'
     def setUp(self):
         super(Test_Icp, self).setUp()
-        self.admin = self.admin_sessions[0]
         self.alice = self.user_sessions[0]
 
     def tearDown(self):
@@ -51,3 +50,26 @@ class Test_Icp(session.make_sessions_mixin([('otherrods', 'rods')], [('alice', '
         finally:
             shutil.rmtree(test_dir_path, ignore_errors=True)
 
+    def test_multithreaded_icp__issue_5478(self):
+        def do_test(size, threads):
+            file_name = 'test_multithreaded_icp__issue_5478'
+            local_file = os.path.join(self.alice.local_session_dir, file_name)
+            dest_path = os.path.join(self.alice.session_collection, file_name)
+            another_dest_path = os.path.join(self.alice.session_collection, file_name + '_copy')
+
+            try:
+                lib.make_file(local_file, size)
+
+                self.alice.assert_icommand(['iput', local_file, dest_path])
+
+                cp_thread_count = self.alice.run_icommand(['icp', '-v', dest_path, another_dest_path])[0].split('|')[2].split()[0]
+
+                self.assertGreaterEqual(int(cp_thread_count), threads)
+
+            finally:
+                self.alice.assert_icommand(['irm', '-f', dest_path])
+                self.alice.assert_icommand(['irm', '-f', another_dest_path])
+
+        do_test(0, 0)
+        do_test(31457280, 1) # 30MiB
+        do_test(52428800, 1) # 50MiB

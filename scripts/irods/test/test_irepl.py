@@ -13,13 +13,16 @@ from .. import lib
 from .. import test
 from ..configuration import IrodsConfig
 
-class Test_IRepl(session.make_sessions_mixin([('otherrods', 'rods')], [('alice', 'apass')]), unittest.TestCase):
+class Test_IRepl_Special(session.make_sessions_mixin([('otherrods', 'rods')], [('alice', 'apass')]), unittest.TestCase):
+    # In this suite:
+    #   - rodsadmin otherrods
+    #   - tests in this suite are responsible for their own storage resources
     def setUp(self):
-        super(Test_IRepl, self).setUp()
+        super(Test_IRepl_Special, self).setUp()
         self.admin = self.admin_sessions[0]
 
     def tearDown(self):
-        super(Test_IRepl, self).tearDown()
+        super(Test_IRepl_Special, self).tearDown()
 
     @unittest.skipIf(test.settings.RUN_IN_TOPOLOGY, "Skip for Topology Testing")
     def test_irepl_with_U_and_R_options__issue_3659(self):
@@ -220,52 +223,91 @@ class Test_IRepl(session.make_sessions_mixin([('otherrods', 'rods')], [('alice',
             self.admin.assert_icommand(['iadmin', 'rmresc', resource_1])
             self.admin.assert_icommand(['iadmin', 'rmresc', resource_2])
 
+class Test_iRepl(session.make_sessions_mixin([('otherrods', 'rods')], [('alice', 'apass')]), unittest.TestCase):
+    # In this suite:
+    #   - rodsadmin otherrods
+    #   - rodsuser alice
+    #   - 2 unixfilesystem resources
+    def setUp(self):
+        super(Test_iRepl, self).setUp()
+
+        self.admin = self.admin_sessions[0]
+
+        self.resource_1 = 'resource1'
+        resource_1_vault = os.path.join(self.admin.local_session_dir, self.resource_1 + 'vault')
+        self.resource_2 = 'resource2'
+        resource_2_vault = os.path.join(self.admin.local_session_dir, self.resource_2 + 'vault')
+
+        irods_config = IrodsConfig()
+        self.admin.assert_icommand(
+                ['iadmin', 'mkresc', self.resource_1, 'unixfilesystem', ':'.join([test.settings.HOSTNAME_1, resource_1_vault])],
+                'STDOUT_SINGLELINE', 'unixfilesystem')
+        self.admin.assert_icommand(
+                ['iadmin', 'mkresc', self.resource_2, 'unixfilesystem', ':'.join([test.settings.HOSTNAME_2, resource_2_vault])],
+                'STDOUT_SINGLELINE', 'unixfilesystem')
+
+    def tearDown(self):
+        self.admin.assert_icommand(['iadmin', 'rmresc', self.resource_1])
+        self.admin.assert_icommand(['iadmin', 'rmresc', self.resource_2])
+        super(Test_iRepl, self).tearDown()
+
+    def test_multithreaded_irepl__issue_5478(self):
+        user0 = self.user_sessions[0]
+
+        def do_test(size, threads):
+            file_name = 'test_multithreaded_irepl__issue_5478'
+            local_file = os.path.join(user0.local_session_dir, file_name)
+            dest_path = os.path.join(user0.session_collection, file_name)
+
+            try:
+                lib.make_file(local_file, size)
+
+                user0.assert_icommand(['iput', '-R', self.resource_1, local_file, dest_path])
+
+                repl_thread_count = user0.run_icommand(['irepl', '-v', '-R', self.resource_2, dest_path])[0].split('|')[2].split()[0]
+
+                self.assertGreaterEqual(int(repl_thread_count), threads)
+
+            finally:
+                user0.assert_icommand(['irm', '-f', dest_path])
+
+        do_test(0, 0)
+        do_test(31457280, 1) # 30MiB
+        do_test(52428800, 1) # 50MiB
+
     def test_irepl_to_existing_replica_with_checksum__5263(self):
         user0 = self.user_sessions[0]
-        resource_1 = 'resource1'
-        resource_1_vault = os.path.join(user0.local_session_dir, resource_1 + 'vault')
-        resource_2 = 'resource2'
-        resource_2_vault = os.path.join(user0.local_session_dir, resource_2 + 'vault')
 
         try:
-            self.admin.assert_icommand(
-                ['iadmin', 'mkresc', resource_1, 'unixfilesystem', ':'.join([test.settings.HOSTNAME_1, resource_1_vault])],
-                'STDOUT', 'unixfilesystem')
-            self.admin.assert_icommand(
-                ['iadmin', 'mkresc', resource_2, 'unixfilesystem', ':'.join([test.settings.HOSTNAME_2, resource_2_vault])],
-                'STDOUT', 'unixfilesystem')
-
             filename = 'test_irepl_to_existing_replica_with_checksum__5263'
             physical_path_1 = os.path.join(user0.local_session_dir, filename + '_1')
             lib.make_file(physical_path_1, 1024, contents='random')
             logical_path = os.path.join(user0.session_collection, filename)
 
             # Put data object to play with...
-            user0.assert_icommand(['iput', '-K', '-R', resource_1, physical_path_1, logical_path])
+            user0.assert_icommand(['iput', '-K', '-R', self.resource_1, physical_path_1, logical_path])
             user0.assert_icommand(['ils', '-L', logical_path], 'STDOUT', 'sha2')
 
             # Replicate to other resource...
-            user0.assert_icommand(['irepl', '-R', resource_2, logical_path])
-            user0.assert_icommand(['ils', '-L', logical_path], 'STDOUT_MULTILINE', ['1 {}'.format(resource_2), 'sha2'])
+            user0.assert_icommand(['irepl', '-R', self.resource_2, logical_path])
+            user0.assert_icommand(['ils', '-L', logical_path], 'STDOUT_MULTILINE', ['1 {}'.format(self.resource_2), 'sha2'])
 
             physical_path_2 = os.path.join(user0.local_session_dir, filename + '_2')
             lib.make_file(physical_path_2, 512, contents='random')
 
             # Force overwrite the replica so that replica 0 is good and replica 1 is stale
-            user0.assert_icommand(['iput', '-f', '-R', resource_1, physical_path_2, logical_path])
+            user0.assert_icommand(['iput', '-f', '-R', self.resource_1, physical_path_2, logical_path])
             user0.assert_icommand(['ils', '-L', logical_path], 'STDOUT', ['0', '&'])
             user0.assert_icommand(['ils', '-L', logical_path], 'STDOUT', ['1', 'X'])
 
             # Replicate to the other resource and ensure it was successful
-            user0.assert_icommand(['irepl', '-R', resource_2, logical_path])
+            user0.assert_icommand(['irepl', '-R', self.resource_2, logical_path])
             user0.assert_icommand(['ils', '-L', logical_path], 'STDOUT', ['0', '&'])
             user0.assert_icommand(['ils', '-L', logical_path], 'STDOUT', ['1', '&'])
-            user0.assert_icommand(['ils', '-L', logical_path], 'STDOUT_MULTILINE', ['1 {}'.format(resource_2), 'sha2'])
+            user0.assert_icommand(['ils', '-L', logical_path], 'STDOUT_MULTILINE', ['1 {}'.format(self.resource_2), 'sha2'])
 
         finally:
             user0.run_icommand(['irm', '-f', logical_path])
-            self.admin.assert_icommand(['iadmin', 'rmresc', resource_1])
-            self.admin.assert_icommand(['iadmin', 'rmresc', resource_2])
 
 class test_invalid_parameters(session.make_sessions_mixin([('otherrods', 'rods')], [('alice', 'apass')]), unittest.TestCase):
     def setUp(self):

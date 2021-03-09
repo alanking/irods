@@ -21,9 +21,6 @@ from .resource_suite import ResourceBase
 class Test_iPhymv(ResourceBase, unittest.TestCase):
     def setUp(self):
         super(Test_iPhymv, self).setUp()
-        self.testing_tmp_dir = '/tmp/irods-test-iphymv'
-        shutil.rmtree(self.testing_tmp_dir, ignore_errors=True)
-        os.mkdir(self.testing_tmp_dir)
 
         irods_config = IrodsConfig()
         self.admin.assert_icommand("iadmin mkresc randResc random", 'STDOUT_SINGLELINE', 'random')
@@ -36,13 +33,25 @@ class Test_iPhymv(ResourceBase, unittest.TestCase):
 
 
     def tearDown(self):
-        shutil.rmtree(self.testing_tmp_dir)
         self.admin.assert_icommand("iadmin rmchildfromresc randResc unix2Resc")
         self.admin.assert_icommand("iadmin rmchildfromresc randResc unix1Resc")
         self.admin.assert_icommand("iadmin rmresc unix2Resc")
         self.admin.assert_icommand("iadmin rmresc unix1Resc")
         self.admin.assert_icommand("iadmin rmresc randResc")
         super(Test_iPhymv, self).tearDown()
+
+    def get_source_resource(self, object_path):
+        return self.admin.run_icommand(['iquest', '%s',
+            '''"select RESC_NAME where COLL_NAME = '{0}' and DATA_NAME = '{1}'"'''.format(
+                os.path.dirname(object_path), os.path.basename(object_path))])[0].strip().strip()
+
+    def get_destination_resource(self, source_resc):
+        return 'unix2Resc' if source_resc == 'unix1Resc' else 'unix1Resc'
+
+    def get_source_and_destination_resources(self, object_path):
+        source_resource = self.get_source_resource(object_path)
+        destination_resource = self.get_destination_resource(source_resource)
+        return (source_resource, destination_resource)
 
     def test_iphymv_to_child_resource__2933(self):
         filepath = os.path.join(self.admin.local_session_dir, 'file')
@@ -52,10 +61,7 @@ class Test_iPhymv(ResourceBase, unittest.TestCase):
         self.admin.assert_icommand('iput -fR randResc ' + filepath + ' ' + dest_path)
 
         self.admin.assert_icommand('ils -L ' + dest_path, 'STDOUT_SINGLELINE', 'randResc')
-        source_resc = self.admin.run_icommand(['iquest', '%s',
-            '''"select RESC_NAME where COLL_NAME = '{0}' and DATA_NAME = '{1}'"'''.format(os.path.dirname(dest_path), os.path.basename(dest_path))])[0].strip()
-        source_resc = source_resc.strip()
-        dest_resc = 'unix2Resc' if source_resc == 'unix1Resc' else 'unix1Resc'
+        source_resc, dest_resc = self.get_source_and_destination_resources(dest_path)
         self.admin.assert_icommand(['iphymv', '-S', source_resc, '-R', dest_resc, dest_path])
 
         self.admin.assert_icommand('irm -f ' + dest_path)
@@ -68,9 +74,7 @@ class Test_iPhymv(ResourceBase, unittest.TestCase):
         self.admin.assert_icommand('iput -fR randResc ' + filepath + ' ' + dest_path)
 
         self.admin.assert_icommand('ils -l ' + dest_path, 'STDOUT_SINGLELINE', 'randResc')
-        source_resc = self.admin.run_icommand(['iquest', '%s',
-            '''"select RESC_NAME where COLL_NAME = '{0}' and DATA_NAME = '{1}'"'''.format(os.path.dirname(dest_path), os.path.basename(dest_path))])[0].strip()
-        dest_resc = 'unix2Resc' if source_resc == 'unix1Resc' else 'unix1Resc'
+        source_resc, dest_resc = self.get_source_and_destination_resources(dest_path)
         self.admin.assert_icommand(['iphymv', '-S', 'randResc;{}'.format(source_resc), '-R', 'randResc;{}'.format(dest_resc), dest_path])
 
         self.admin.assert_icommand('irm -f ' + dest_path)
@@ -188,6 +192,29 @@ class Test_iPhymv(ResourceBase, unittest.TestCase):
 
         finally:
             self.admin.assert_icommand(['irm', '-f', file_name])
+
+    def test_multithreaded_iphymv__issue_5478(self):
+        def do_test(size, threads):
+            file_name = 'test_multithreaded_iphymv__issue_5478'
+            local_file = os.path.join(self.user0.local_session_dir, file_name)
+            dest_path = os.path.join(self.user0.session_collection, file_name)
+
+            try:
+                lib.make_file(local_file, size)
+
+                self.user0.assert_icommand(['iput', '-R', 'randResc', local_file, dest_path])
+
+                source_resc, dest_resc = self.get_source_and_destination_resources(dest_path)
+
+                phymv_thread_count = self.user0.run_icommand(['iphymv', '-v', '-S', source_resc, '-R', dest_resc, dest_path])[0].split('|')[2].split()[0]
+                self.assertGreaterEqual(int(phymv_thread_count), threads)
+
+            finally:
+                self.user0.assert_icommand(['irm', '-f', dest_path])
+
+        do_test(0, 0)
+        do_test(31457280, 1) # 30MiB
+        do_test(52428800, 1) # 50MiB
 
 class test_invalid_parameters(session.make_sessions_mixin([('otherrods', 'rods')], [('alice', 'apass')]), unittest.TestCase):
     def setUp(self):
