@@ -18,11 +18,11 @@ class test_irepl_with_special_resource_configurations(session.make_sessions_mixi
     #   - rodsadmin otherrods
     #   - tests in this suite are responsible for their own storage resources
     def setUp(self):
-        super(Test_IRepl_Special, self).setUp()
+        super(test_irepl_with_special_resource_configurations, self).setUp()
         self.admin = self.admin_sessions[0]
 
     def tearDown(self):
-        super(Test_IRepl_Special, self).tearDown()
+        super(test_irepl_with_special_resource_configurations, self).tearDown()
 
     @unittest.skipIf(test.settings.RUN_IN_TOPOLOGY, "Skip for Topology Testing")
     def test_irepl_with_U_and_R_options__issue_3659(self):
