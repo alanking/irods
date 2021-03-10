@@ -313,33 +313,24 @@ getNumThreads( rsComm_t *rsComm, rodsLong_t dataSize, int inpNumThr,
     int numSrcThr = -1;
 
 
-    TRACE_LOG()
     if ( inpNumThr == NO_THREADING ) {
-    TRACE_LOG()
         return 0;
     }
 
-    TRACE_LOG()
     if ( dataSize < 0 ) {
-    TRACE_LOG()
         return 0;
     }
 
-    TRACE_LOG()
     if ( dataSize <= MIN_SZ_FOR_PARA_TRAN ) {
-    TRACE_LOG()
         if ( inpNumThr > 0 ) {
-    TRACE_LOG()
             inpNumThr = 1;
         }
         else {
-    TRACE_LOG()
             return 0;
         }
     }
 
     if ( getValByKey( condInput, NO_PARA_OP_KW ) != NULL ) {
-    TRACE_LOG()
         /* client specify no para opr */
         return 1;
     }
@@ -353,23 +344,19 @@ getNumThreads( rsComm_t *rsComm, rodsLong_t dataSize, int inpNumThr,
     initReiWithDataObjInp( &rei, rsComm, &doinp );
 
     if (destRescHier && strlen(destRescHier)) {
-    TRACE_LOG()
 
         // get resource (hierarchy) location
         std::string location;
         irods::error ret = irods::get_loc_for_hier_string( destRescHier, location );
         if ( !ret.ok() ) {
-    TRACE_LOG()
             irods::log( PASSMSG( "getNumThreads - failed in get_loc_for_hier_string", ret ) );
             clearKeyVal(rei.condInputData);
             free(rei.condInputData);
             return -1;
         }
 
-    TRACE_LOG()
         irods::error err = irods::is_hier_live( destRescHier );
         if ( err.ok() ) {
-    TRACE_LOG()
             // fill rei.condInputData with resource properties
             ret = irods::get_resc_properties_as_kvp(destRescHier, rei.condInputData);
             if ( !ret.ok() ) {
@@ -377,7 +364,6 @@ getNumThreads( rsComm_t *rsComm, rodsLong_t dataSize, int inpNumThr,
             }
 
             // PEP
-    TRACE_LOG()
             status = applyRule( "acSetNumThreads", NULL, &rei, NO_SAVE_REI );
 
             if ( status < 0 ) {
@@ -386,18 +372,15 @@ getNumThreads( rsComm_t *rsComm, rodsLong_t dataSize, int inpNumThr,
                          status );
             }
             else {
-    TRACE_LOG()
 
                 numDestThr = rei.status;
                 if ( numDestThr == 0 ) {
-    TRACE_LOG()
                     clearKeyVal(rei.condInputData);
                     free(rei.condInputData);
                     return 0;
                 }
                 else if ( numDestThr == 1 && srcRescHier == NULL &&
                           isLocalHost( location.c_str() ) ) {
-    TRACE_LOG()
                     /* one thread and resource on local host */
                     clearKeyVal(rei.condInputData);
                     free(rei.condInputData);
@@ -408,21 +391,17 @@ getNumThreads( rsComm_t *rsComm, rodsLong_t dataSize, int inpNumThr,
     }
 
     if (destRescHier && strlen(destRescHier) && srcRescHier && strlen(srcRescHier)) {
-    TRACE_LOG()
         if ( numDestThr > 0 && strcmp( destRescHier, srcRescHier ) == 0 ) {
-    TRACE_LOG()
             clearKeyVal(rei.condInputData);
             free(rei.condInputData);
 
             return numDestThr;
         }
 
-    TRACE_LOG()
         // get resource (hierarchy) location
         std::string location;
         irods::error ret = irods::get_loc_for_hier_string( destRescHier, location );
         if ( !ret.ok() ) {
-    TRACE_LOG()
             irods::log( PASSMSG( "getNumThreads - failed in get_loc_for_hier_string", ret ) );
             clearKeyVal(rei.condInputData);
             free(rei.condInputData);
@@ -430,17 +409,14 @@ getNumThreads( rsComm_t *rsComm, rodsLong_t dataSize, int inpNumThr,
             return -1;
         }
 
-    TRACE_LOG()
         irods::error err = irods::is_hier_live( srcRescHier );
         if ( err.ok() ) {
-    TRACE_LOG()
             // fill rei.condInputData with resource properties
             ret = irods::get_resc_properties_as_kvp(destRescHier, rei.condInputData);
             if ( !ret.ok() ) {
                 irods::log( PASSMSG( "getNumThreads - failed in get_resc_properties_as_kvp", ret ) );
             }
 
-    TRACE_LOG()
             // PEP
             status = applyRule( "acSetNumThreads", NULL, &rei, NO_SAVE_REI );
 
@@ -450,10 +426,8 @@ getNumThreads( rsComm_t *rsComm, rodsLong_t dataSize, int inpNumThr,
                          status );
             }
             else {
-    TRACE_LOG()
                 numSrcThr = rei.status;
                 if ( numSrcThr == 0 ) {
-    TRACE_LOG()
                     clearKeyVal(rei.condInputData);
                     free(rei.condInputData);
 
@@ -464,33 +438,26 @@ getNumThreads( rsComm_t *rsComm, rodsLong_t dataSize, int inpNumThr,
     }
 
     if ( numDestThr > 0 ) {
-    TRACE_LOG()
         clearKeyVal(rei.condInputData);
         free(rei.condInputData);
         if ( getValByKey( condInput, RBUDP_TRANSFER_KW ) != NULL ) {
-    TRACE_LOG()
             return 1;
         }
         else {
-    TRACE_LOG()
             return numDestThr;
         }
     }
     if ( numSrcThr > 0 ) {
-    TRACE_LOG()
         clearKeyVal(rei.condInputData);
         free(rei.condInputData);
         if ( getValByKey( condInput, RBUDP_TRANSFER_KW ) != NULL ) {
-    TRACE_LOG()
             return 1;
         }
         else {
-    TRACE_LOG()
             return numSrcThr;
         }
     }
     /* should not be here. do one with no resource */
-    TRACE_LOG()
     status = applyRule( "acSetNumThreads", NULL, &rei, NO_SAVE_REI );
     clearKeyVal(rei.condInputData);
     free(rei.condInputData);
@@ -501,17 +468,13 @@ getNumThreads( rsComm_t *rsComm, rodsLong_t dataSize, int inpNumThr,
         return 0;
     }
     else {
-    TRACE_LOG()
         if ( rei.status > 0 ) {
-    TRACE_LOG()
             return rei.status;
         }
         else {
-    TRACE_LOG()
             return 0;
         }
     }
-    TRACE_LOG()
 }
 
 int
@@ -528,7 +491,6 @@ initDataOprInp( dataOprInp_t *dataOprInp, int l1descInx, int oprType ) {
 
     dataOprInp->oprType = oprType;
     dataOprInp->numThreads = dataObjInp->numThreads;
-    irods::log(LOG_NOTICE, fmt::format("numThreads:[{}]", dataObjInp->numThreads));
     dataOprInp->offset = dataObjInp->offset;
     if ( oprType == PUT_OPR ) {
         if ( dataObjInp->dataSize > 0 ) {

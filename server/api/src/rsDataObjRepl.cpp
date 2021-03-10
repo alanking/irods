@@ -443,7 +443,7 @@ namespace
 
         auto& destination_data_obj_info = *L1desc[destination_l1descInx].dataObjInfo;
 
-        irods::log(LOG_NOTICE, fmt::format(
+        irods::log(LOG_DEBUG8, fmt::format(
             "[{}:{}] - destination:[{}]",
             __FUNCTION__, __LINE__, destination_data_obj_info.rescHier));
 
@@ -1028,8 +1028,6 @@ int dataObjCopy(rsComm_t* rsComm, int _destination_l1descInx)
             dataCopyInp.portalOprOut.numThreads = 1;
         }
     }
-
-    irods::log(LOG_NOTICE, fmt::format("portalOprOut.numThreads:[{}]", dataCopyInp.portalOprOut.numThreads));
 
     int status = rsDataCopy(rsComm, &dataCopyInp);
     if (status >= 0 && portalOprOut && L1desc[_destination_l1descInx].dataObjInp) {
