@@ -23,11 +23,26 @@ class Test_iPhymv(ResourceBase, unittest.TestCase):
         super(Test_iPhymv, self).setUp()
 
         irods_config = IrodsConfig()
+
+        self.resource_1 = 'unix1Resc'
+        self.resource_2 = 'unix2Resc'
+
         self.admin.assert_icommand("iadmin mkresc randResc random", 'STDOUT_SINGLELINE', 'random')
-        self.admin.assert_icommand("iadmin mkresc unix1Resc 'unixfilesystem' " + test.settings.HOSTNAME_1 + ":" +
-                                      irods_config.irods_directory + "/unix1RescVault", 'STDOUT_SINGLELINE', 'unixfilesystem')
-        self.admin.assert_icommand("iadmin mkresc unix2Resc 'unixfilesystem' " + test.settings.HOSTNAME_2 + ":" +
-                                      irods_config.irods_directory + "/unix2RescVault", 'STDOUT_SINGLELINE', 'unixfilesystem')
+
+        self.admin.assert_icommand(
+            ['iadmin', 'mkresc', self.resource_1, 'unixfilesystem',
+                ':'.join([
+                    test.settings.HOSTNAME_1, os.path.join(irods_config.irods_directory, 'unix1RescVault')
+                ])
+            ], 'STDOUT_SINGLELINE', 'unixfilesystem')
+
+        self.admin.assert_icommand(
+            ['iadmin', 'mkresc', self.resource_2, 'unixfilesystem',
+                ':'.join([
+                    test.settings.HOSTNAME_2, os.path.join(irods_config.irods_directory, 'unix2RescVault')
+                ])
+            ], 'STDOUT_SINGLELINE', 'unixfilesystem')
+
         self.admin.assert_icommand("iadmin addchildtoresc randResc unix1Resc")
         self.admin.assert_icommand("iadmin addchildtoresc randResc unix2Resc")
 
@@ -46,7 +61,7 @@ class Test_iPhymv(ResourceBase, unittest.TestCase):
                 os.path.dirname(object_path), os.path.basename(object_path))])[0].strip().strip()
 
     def get_destination_resource(self, source_resc):
-        return 'unix2Resc' if source_resc == 'unix1Resc' else 'unix1Resc'
+        return self.resource_2 if source_resc == self.resource_1 else self.resource_1
 
     def get_source_and_destination_resources(self, object_path):
         source_resource = self.get_source_resource(object_path)
@@ -201,9 +216,20 @@ class Test_iPhymv(ResourceBase, unittest.TestCase):
             finally:
                 self.user0.assert_icommand(['irm', '-f', dest_path])
 
-        do_test(0, 0)
-        do_test(31457280, 1) # 30MiB
-        do_test(52428800, 1) # 50MiB
+        default_buffer_size_in_bytes = 4 * (1024 ** 2)
+        cases = [
+            {
+                'size':     0,
+                'threads':  0
+            },
+            {
+                'size':     34603008,
+                'threads':  (34603008 / default_buffer_size_in_bytes) + 1
+            }
+        ]
+
+        for case in cases:
+            do_test(size=case['size'], threads=case['threads'])
 
 class test_invalid_parameters(session.make_sessions_mixin([('otherrods', 'rods')], [('alice', 'apass')]), unittest.TestCase):
     def setUp(self):

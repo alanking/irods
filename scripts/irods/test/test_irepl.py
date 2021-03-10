@@ -13,7 +13,7 @@ from .. import lib
 from .. import test
 from ..configuration import IrodsConfig
 
-class Test_IRepl_Special(session.make_sessions_mixin([('otherrods', 'rods')], [('alice', 'apass')]), unittest.TestCase):
+class test_irepl_with_special_resource_configurations(session.make_sessions_mixin([('otherrods', 'rods')], [('alice', 'apass')]), unittest.TestCase):
     # In this suite:
     #   - rodsadmin otherrods
     #   - tests in this suite are responsible for their own storage resources
@@ -171,65 +171,13 @@ class Test_IRepl_Special(session.make_sessions_mixin([('otherrods', 'rods')], [(
 
             self.admin.assert_icommand('iadmin rmresc comp_resc')
 
-    def test_irepl_data_object_with_no_permission__4479(self):
-        user0 = self.user_sessions[0]
-        resource_1 = 'resource1'
-        resource_1_vault = os.path.join(user0.local_session_dir, resource_1 + 'vault')
-        resource_2 = 'resource2'
-        resource_2_vault = os.path.join(user0.local_session_dir, resource_2 + 'vault')
-
-        try:
-            self.admin.assert_icommand(
-                ['iadmin', 'mkresc', resource_1, 'unixfilesystem', ':'.join([test.settings.HOSTNAME_1, resource_1_vault])],
-                'STDOUT', 'unixfilesystem')
-            self.admin.assert_icommand(
-                ['iadmin', 'mkresc', resource_2, 'unixfilesystem', ':'.join([test.settings.HOSTNAME_2, resource_2_vault])],
-                'STDOUT', 'unixfilesystem')
-
-            filename = 'test_irepl_data_object_with_no_permission__4479'
-            physical_path = os.path.join(user0.local_session_dir, filename)
-            lib.make_file(physical_path, 1024)
-            logical_path = os.path.join(user0.session_collection, filename)
-            #logical_path_sans_zone = os.sep.join(str(logical_path).split(os.sep)[2:])
-            #resource_1_repl_path = os.path.join(resource_1_vault, logical_path_sans_zone)
-            #resource_2_repl_path = os.path.join(resource_2_vault, logical_path_sans_zone)
-
-            # Put data object to play with...
-            user0.assert_icommand(
-                ['iput', '-R', resource_1, physical_path, logical_path])
-            self.admin.assert_icommand(
-                ['iadmin', 'ls', 'logical_path', logical_path, 'resource_hierarchy', resource_1],
-                'STDOUT', 'DATA_REPL_STATUS: 1')
-            self.admin.assert_icommand(['iscan', '-d', logical_path])
-
-            # Attempt to replicate data object for which admin has no permissions...
-            self.admin.assert_icommand(
-                ['irepl', '-R', resource_2, logical_path],
-                'STDERR', 'CAT_NO_ACCESS_PERMISSION')
-            self.admin.assert_icommand(
-                ['iadmin', 'ls', 'logical_path', logical_path, 'resource_hierarchy', resource_2],
-                'STDOUT', 'No results found.')
-            # TODO: #4770 Use test tool to assert that file was not created on resource_2 (i.e. iscan on remote physical file)
-
-            # Try again with admin flag (with success)
-            self.admin.assert_icommand(['irepl', '-M', '-R', resource_2, logical_path])
-            self.admin.assert_icommand(
-                ['iadmin', 'ls', 'logical_path', logical_path, 'resource_hierarchy', resource_2],
-                'STDOUT', 'DATA_REPL_STATUS: 1')
-            self.admin.assert_icommand(['iscan', '-d', logical_path])
-
-        finally:
-            user0.run_icommand(['irm', '-f', logical_path])
-            self.admin.assert_icommand(['iadmin', 'rmresc', resource_1])
-            self.admin.assert_icommand(['iadmin', 'rmresc', resource_2])
-
-class Test_iRepl(session.make_sessions_mixin([('otherrods', 'rods')], [('alice', 'apass')]), unittest.TestCase):
+class test_irepl_with_two_basic_ufs_resources(session.make_sessions_mixin([('otherrods', 'rods')], [('alice', 'apass')]), unittest.TestCase):
     # In this suite:
     #   - rodsadmin otherrods
     #   - rodsuser alice
     #   - 2 unixfilesystem resources
     def setUp(self):
-        super(Test_iRepl, self).setUp()
+        super(test_irepl_with_two_basic_ufs_resources, self).setUp()
 
         self.admin = self.admin_sessions[0]
 
@@ -249,7 +197,7 @@ class Test_iRepl(session.make_sessions_mixin([('otherrods', 'rods')], [('alice',
     def tearDown(self):
         self.admin.assert_icommand(['iadmin', 'rmresc', self.resource_1])
         self.admin.assert_icommand(['iadmin', 'rmresc', self.resource_2])
-        super(Test_iRepl, self).tearDown()
+        super(test_irepl_with_two_basic_ufs_resources, self).tearDown()
 
     def test_multithreaded_irepl__issue_5478(self):
         user0 = self.user_sessions[0]
@@ -266,14 +214,25 @@ class Test_iRepl(session.make_sessions_mixin([('otherrods', 'rods')], [('alice',
 
                 repl_thread_count = user0.run_icommand(['irepl', '-v', '-R', self.resource_2, dest_path])[0].split('|')[2].split()[0]
 
-                self.assertGreaterEqual(int(repl_thread_count), threads)
+                self.assertEqual(int(repl_thread_count), threads)
 
             finally:
                 user0.assert_icommand(['irm', '-f', dest_path])
 
-        do_test(0, 0)
-        do_test(31457280, 1) # 30MiB
-        do_test(52428800, 1) # 50MiB
+        default_buffer_size_in_bytes = 4 * (1024 ** 2)
+        cases = [
+            {
+                'size':     0,
+                'threads':  0
+            },
+            {
+                'size':     34603008,
+                'threads':  (34603008 / default_buffer_size_in_bytes) + 1
+            }
+        ]
+
+        for case in cases:
+            do_test(size=case['size'], threads=case['threads'])
 
     def test_irepl_to_existing_replica_with_checksum__5263(self):
         user0 = self.user_sessions[0]
@@ -305,6 +264,42 @@ class Test_iRepl(session.make_sessions_mixin([('otherrods', 'rods')], [('alice',
             user0.assert_icommand(['ils', '-L', logical_path], 'STDOUT', ['0', '&'])
             user0.assert_icommand(['ils', '-L', logical_path], 'STDOUT', ['1', '&'])
             user0.assert_icommand(['ils', '-L', logical_path], 'STDOUT_MULTILINE', ['1 {}'.format(self.resource_2), 'sha2'])
+
+        finally:
+            user0.run_icommand(['irm', '-f', logical_path])
+
+    def test_irepl_data_object_with_no_permission__4479(self):
+        user0 = self.user_sessions[0]
+
+        try:
+            filename = 'test_irepl_data_object_with_no_permission__4479'
+            physical_path = os.path.join(user0.local_session_dir, filename)
+            lib.make_file(physical_path, 1024)
+            logical_path = os.path.join(user0.session_collection, filename)
+
+            # Put data object to play with...
+            user0.assert_icommand(
+                ['iput', '-R', self.resource_1, physical_path, logical_path])
+            self.admin.assert_icommand(
+                ['iadmin', 'ls', 'logical_path', logical_path, 'resource_hierarchy', self.resource_1],
+                'STDOUT', 'DATA_REPL_STATUS: 1')
+            self.admin.assert_icommand(['iscan', '-d', logical_path])
+
+            # Attempt to replicate data object for which admin has no permissions...
+            self.admin.assert_icommand(
+                ['irepl', '-R', self.resource_2, logical_path],
+                'STDERR', 'CAT_NO_ACCESS_PERMISSION')
+            self.admin.assert_icommand(
+                ['iadmin', 'ls', 'logical_path', logical_path, 'resource_hierarchy', self.resource_2],
+                'STDOUT', 'No results found.')
+            # TODO: #4770 Use test tool to assert that file was not created on resource_2 (i.e. iscan on remote physical file)
+
+            # Try again with admin flag (with success)
+            self.admin.assert_icommand(['irepl', '-M', '-R', self.resource_2, logical_path])
+            self.admin.assert_icommand(
+                ['iadmin', 'ls', 'logical_path', logical_path, 'resource_hierarchy', self.resource_2],
+                'STDOUT', 'DATA_REPL_STATUS: 1')
+            self.admin.assert_icommand(['iscan', '-d', logical_path])
 
         finally:
             user0.run_icommand(['irm', '-f', logical_path])

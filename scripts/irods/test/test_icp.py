@@ -70,6 +70,18 @@ class Test_Icp(session.make_sessions_mixin([('otherrods', 'rods')], [('alice', '
                 self.alice.assert_icommand(['irm', '-f', dest_path])
                 self.alice.assert_icommand(['irm', '-f', another_dest_path])
 
-        do_test(0, 0)
-        do_test(31457280, 1) # 30MiB
-        do_test(52428800, 1) # 50MiB
+        default_buffer_size_in_bytes = 4 * (1024 ** 2)
+        cases = [
+            {
+                'size':     0,
+                'threads':  0
+            },
+            {
+                'size':     34603008,
+                'threads':  (34603008 / default_buffer_size_in_bytes) + 1
+            }
+        ]
+
+        for case in cases:
+            do_test(size=case['size'], threads=case['threads'])
+
