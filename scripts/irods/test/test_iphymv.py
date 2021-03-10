@@ -211,7 +211,7 @@ class Test_iPhymv(ResourceBase, unittest.TestCase):
                 source_resc, dest_resc = self.get_source_and_destination_resources(dest_path)
 
                 phymv_thread_count = self.user0.run_icommand(['iphymv', '-v', '-S', source_resc, '-R', dest_resc, dest_path])[0].split('|')[2].split()[0]
-                self.assertGreaterEqual(int(phymv_thread_count), threads)
+                self.assertEqual(int(phymv_thread_count), threads)
 
             finally:
                 self.user0.assert_icommand(['irm', '-f', dest_path])

@@ -64,7 +64,7 @@ class Test_Icp(session.make_sessions_mixin([('otherrods', 'rods')], [('alice', '
 
                 cp_thread_count = self.alice.run_icommand(['icp', '-v', dest_path, another_dest_path])[0].split('|')[2].split()[0]
 
-                self.assertGreaterEqual(int(cp_thread_count), threads)
+                self.assertEqual(int(cp_thread_count), threads)
 
             finally:
                 self.alice.assert_icommand(['irm', '-f', dest_path])
