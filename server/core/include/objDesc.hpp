@@ -113,4 +113,12 @@ isL1descInuse();
 
 }
 
+namespace irods
+{
+    auto populate_L1desc_with_inp(
+        DataObjInp& _inp,
+        DataObjInfo& _info,
+        const rodsLong_t dataSize) -> int;
+} // namespace irods
+
 #endif  /* OBJ_DESC_H */

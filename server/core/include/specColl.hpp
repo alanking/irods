@@ -1,11 +1,3 @@
-/*** Copyright (c), The Regents of the University of California            ***
- *** For more information please refer to files in the COPYRIGHT directory ***/
-
-/* specColl.h - header file for specColl.c
- */
-
-
-
 #ifndef SPEC_COLL_HPP
 #define SPEC_COLL_HPP
 
@@ -15,7 +7,6 @@
 #include "ruleExecSubmit.h"
 #include "rcGlobalExtern.h"
 #include "rsGlobalExtern.hpp"
-//#include "reIn2p3SysRule.hpp"
 
 extern "C" {
 
@@ -47,4 +38,13 @@ extern "C" {
 
 }
 
-#endif	/* SPEC_COLL_H */
+namespace irods
+{
+    auto get_special_collection_type_for_data_object(RsComm& _comm, DataObjInp& _inp) -> int;
+
+    auto data_object_create_in_special_collection(RsComm* rsComm, DataObjInp& dataObjInp) -> int;
+
+    auto create_sub_struct_file(RsComm *rsComm, const int l1descInx) -> int;
+} // namespace irods
+
+#endif	// SPEC_COLL_HPP

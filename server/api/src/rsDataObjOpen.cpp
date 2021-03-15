@@ -189,60 +189,6 @@ namespace
         irods::experimental::key_value_proxy{_comm.session_props}[REG_REPL_KW] = "";
     } // enable_creation_of_additional_replicas
 
-    auto populate_L1desc_with_inp(DataObjInp& _inp, replica_proxy& _replica, const rodsLong_t dataSize) -> int
-    {
-        int l1_index = allocL1desc();
-        if (l1_index < 0) {
-            THROW(l1_index, fmt::format("[{}] - failed to allocate l1 descriptor", __FUNCTION__));
-        }
-
-        auto& l1desc = L1desc[l1_index];
-
-        // Initialize the bytesWritten to -1 rather than 0.  If this is negative then we
-        // know no bytes have been written.  This is so that zero length files can be handled
-        // similarly to non-zero length files.
-        l1desc.bytesWritten = -1;
-
-        irods::experimental::key_value_proxy cond_input{_inp.condInput};
-
-        if (cond_input.contains(IN_PDMO_KW)) {
-            rstrcpy(l1desc.in_pdmo, cond_input.at(IN_PDMO_KW).value().data(), MAX_NAME_LEN );
-        }
-        else {
-            rstrcpy(l1desc.in_pdmo, "", MAX_NAME_LEN );
-        }
-
-        if (cond_input.contains(OPEN_TYPE_KW)) {
-            l1desc.openType = std::stoi(cond_input.at(OPEN_TYPE_KW).value().data());
-        }
-
-        l1desc.dataObjInp = static_cast<DataObjInp*>(std::malloc(sizeof(DataObjInp)));
-        std::memset(l1desc.dataObjInp, 0, sizeof(DataObjInp));
-        replDataObjInp(&_inp, l1desc.dataObjInp);
-
-        l1desc.dataObjInpReplFlag = 1;
-        l1desc.dataObjInfo = _replica.get();
-        l1desc.oprType = _inp.oprType;
-        l1desc.replStatus = _replica.replica_status();
-        l1desc.dataSize = dataSize;
-        l1desc.purgeCacheFlag = static_cast<int>(cond_input.contains(PURGE_CACHE_KW));
-
-        if (cond_input.contains(REG_CHKSUM_KW)) {
-            l1desc.chksumFlag = REG_CHKSUM;
-            std::snprintf(l1desc.chksum, sizeof(l1desc.chksum), "%s", cond_input.at(REG_CHKSUM_KW).value().data());
-        }
-        else if (cond_input.contains(VERIFY_CHKSUM_KW)) {
-            l1desc.chksumFlag = VERIFY_CHKSUM;
-            std::snprintf(l1desc.chksum, sizeof(l1desc.chksum), "%s", cond_input.at(VERIFY_CHKSUM_KW).value().data());
-        }
-
-        if (cond_input.contains(KEY_VALUE_PASSTHROUGH_KW)) {
-            _replica.cond_input()[KEY_VALUE_PASSTHROUGH_KW] = cond_input.at(KEY_VALUE_PASSTHROUGH_KW);
-        }
-
-        return l1_index;
-    } // populate_L1desc_with_inp
-
     int close_replica(rsComm_t& conn, int l1desc_index)
     {
         openedDataObjInp_t input{};
@@ -298,116 +244,28 @@ namespace
         return l3descInx;
     } // l3CreateByObjInfo
 
-    int create_sub_struct_file(rsComm_t *rsComm, const int l1descInx)
-    {
-        dataObjInfo_t *dataObjInfo = L1desc[l1descInx].dataObjInfo;
-        std::string location{};
-        irods::error ret = irods::get_loc_for_hier_string( dataObjInfo->rescHier, location );
-        if (!ret.ok()) {
-            irods::log(LOG_ERROR, fmt::format(
-                "{} - failed in get_loc_for_hier_string:[{}]; ec:[{}]",
-                __FUNCTION__, ret.result(), ret.code()));
-            return ret.code();
-        }
-
-        subFile_t subFile{};
-        rstrcpy( subFile.subFilePath, dataObjInfo->subPath, MAX_NAME_LEN );
-        rstrcpy( subFile.addr.hostAddr, location.c_str(), NAME_LEN );
-
-        subFile.specColl = dataObjInfo->specColl;
-        subFile.mode = getFileMode( L1desc[l1descInx].dataObjInp );
-        return rsSubStructFileCreate( rsComm, &subFile );
-    } // create_sub_struct_file
-
-    int create_physical_file(RsComm& _comm, const int _l1_index)
-    {
-        auto& l1desc = L1desc[_l1_index];
-
-        if (getStructFileType(l1desc.dataObjInfo->specColl) >= 0) {
-            return create_sub_struct_file(&_comm, _l1_index);
-        }
-
-        return l3CreateByObjInfo(&_comm, l1desc.dataObjInp, l1desc.dataObjInfo);
-    } // create_physical_file
-
-    int specCollSubCreate(rsComm_t* rsComm, dataObjInp_t& dataObjInp)
-    {
-        dataObjInfo_t* dataObjInfo{};
-        int status = resolvePathInSpecColl( rsComm, dataObjInp.objPath, WRITE_COLL_PERM, 0, &dataObjInfo );
-        if (!dataObjInfo) {
-            rodsLog(LOG_ERROR, "%s :: dataObjInfo is null", __FUNCTION__ );
-            return status;
-        }
-        if (status >= 0) {
-            irods::log(LOG_ERROR, fmt::format(
-                "{}: phyPath {} already exist",
-                __FUNCTION__, dataObjInfo->filePath));
-            freeDataObjInfo( dataObjInfo );
-            return SYS_COPY_ALREADY_IN_RESC;
-        }
-        else if (status != SYS_SPEC_COLL_OBJ_NOT_EXIST) {
-            freeDataObjInfo( dataObjInfo );
-            return status;
-        }
-
-        int l1_index = 0;
-        try {
-            auto replica = replica_proxy{*dataObjInfo};
-
-            // Objects in special collections are exempt from intermediate replicas and logical
-            // locking, so make sure the replica is good from creation as it has been historically.
-            replica.replica_status(GOOD_REPLICA);
-
-            l1_index = populate_L1desc_with_inp(dataObjInp, replica, dataObjInp.dataSize);
-
-            L1desc[l1_index].l3descInx = create_physical_file(*rsComm, l1_index);
-
-            return l1_index;
-        }
-        catch (const irods::exception& e) {
-            irods::log(LOG_NOTICE, fmt::format(
-                "{}: create_physical_file of {} failed, status = {}",
-                __FUNCTION__, L1desc[l1_index].dataObjInfo->filePath, e.code()));
-            freeL1desc(l1_index);
-            return e.code();
-        }
-    } // specCollSubCreate
-
     auto create_new_replica(rsComm_t& _comm, dataObjInp_t& _inp, DataObjInfo* _existing_replica_list) -> int
     {
+        const auto special_collection_type = irods::get_special_collection_type_for_data_object(_comm, _inp);
+        if (special_collection_type < 0) {
+            return special_collection_type;
+        }
+
+        switch (special_collection_type) {
+            case NO_SPEC_COLL:
+                // This is not a special collection - continue down the normal path
+                break;
+
+            case LINKED_COLL:
+                // Linked collection should have been translated by this point - return error.
+                return SYS_COLL_LINK_PATH_ERR;
+
+            default:
+                // This is a special collection so it has special creation logic
+                return irods::data_object_create_in_special_collection(&_comm, _inp);
+        }
+
         auto cond_input = irods::experimental::make_key_value_proxy(_inp.condInput);
-
-        rodsObjStat_t* stat{};
-        const irods::at_scope_exit free_obj_stat_out{
-            [&stat]() {
-                freeRodsObjStat(stat);
-            }
-        };
-
-        cond_input[SEL_OBJ_TYPE_KW] = "dataObj";
-        if (const int ec = rsObjStat(&_comm, &_inp, &stat); ec >= 0) {
-            if (stat) {
-                if (COLL_OBJ_T == stat->objType) {
-                    return USER_INPUT_PATH_ERR;
-                }
-
-                if (stat->specColl) {
-                    // Linked collection should have been translated by this point
-                    if (LINKED_COLL == stat->specColl->collClass) {
-                        return SYS_COLL_LINK_PATH_ERR;
-                    }
-
-                    if (UNKNOWN_OBJ_T == stat->objType) {
-                        return specCollSubCreate(&_comm, _inp );
-                    }
-                }
-            }
-        }
-        else {
-            irods::log(LOG_DEBUG, fmt::format(
-                "[{}:{}] - rsObjStat failed with [{}]",
-                __FUNCTION__, __LINE__, ec));
-        }
 
         std::string_view hierarchy = cond_input.at(RESC_HIER_STR_KW).value();
 
@@ -433,7 +291,7 @@ namespace
         }
 
         cond_input[OPEN_TYPE_KW] = std::to_string(CREATE_TYPE);
-        const int l1_index = populate_L1desc_with_inp(_inp, new_replica, _inp.dataSize);
+        const int l1_index = irods::populate_L1desc_with_inp(_inp, *new_replica.get(), _inp.dataSize);
         auto& l1desc = L1desc[l1_index];
 
         if (const int ec = getFilePathName(&_comm, new_replica.get(), l1desc.dataObjInp); ec < 0) {
@@ -505,7 +363,7 @@ namespace
             return l1_index;
         }
 
-        const auto l3_index = create_physical_file(_comm, l1_index);
+        const auto l3_index = l3CreateByObjInfo(&_comm, l1desc.dataObjInp, l1desc.dataObjInfo);
         if (l3_index < 0) {
             irods::log(LOG_NOTICE, fmt::format(
                 "[{}:{}] - l3Create of [{}] failed, status = [{}]",
@@ -651,7 +509,7 @@ namespace
         /* the size was set to -1 because we don't know the target size.
          * For copy and replicate, the calling routine should modify this
          * dataSize */
-        const int l1_index = populate_L1desc_with_inp(_inp, _replica, -1);
+        const int l1_index = irods::populate_L1desc_with_inp(_inp, *_replica.get(), -1);
 
         const auto open_for_write = getWriteFlag(_inp.openFlags);
         if (open_for_write) {
