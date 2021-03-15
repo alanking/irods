@@ -731,20 +731,19 @@ namespace
     } // open_replica
 
     auto get_data_object_info_for_open(RsComm& _comm, DataObjInp& _inp)
-        -> std::tuple<irods::error, irods::file_object_ptr, DataObjInfo*, std::string>
+        -> std::tuple<DataObjInfo*, std::string>
     {
-        irods::experimental::key_value_proxy kvp{_inp.condInput};
+        auto cond_input = irods::experimental::make_key_value_proxy(_inp.condInput);
 
-        std::string hier{};
-        if (kvp.contains(RESC_HIER_STR_KW)) {
-            hier = kvp.at(RESC_HIER_STR_KW).value().data();
+        std::string hierarchy_for_open{};
+        if (cond_input.contains(RESC_HIER_STR_KW)) {
+            hierarchy_for_open = cond_input.at(RESC_HIER_STR_KW).value().data();
         }
-
         // If the client specified a leaf resource, then discover the hierarchy and
         // store it in the keyValPair_t. This instructs the iRODS server to create
         // the replica at the specified resource if it does not exist.
-        if (kvp.contains(LEAF_RESOURCE_NAME_KW)) {
-            auto leaf = kvp[LEAF_RESOURCE_NAME_KW].value();
+        else if (cond_input.contains(LEAF_RESOURCE_NAME_KW)) {
+            auto leaf = cond_input.at(LEAF_RESOURCE_NAME_KW).value();
             bool is_coord_resc = false;
 
             if (const auto err = resc_mgr.is_coordinating_resource(leaf.data(), is_coord_resc); !err.ok()) {
@@ -757,7 +756,7 @@ namespace
                 THROW(USER_INVALID_RESC_INPUT, fmt::format("[{}] is not a leaf resource.", leaf));
             }
 
-            if (const auto err = resc_mgr.get_hier_to_root_for_resc(leaf.data(), hier); !err.ok()) {
+            if (const auto err = resc_mgr.get_hier_to_root_for_resc(leaf.data(), hierarchy_for_open); !err.ok()) {
                 THROW(err.code(), err.result());
             }
         }
@@ -765,11 +764,10 @@ namespace
         // Get replica information for data object, resolving hierarchy if necessary
         dataObjInfo_t* info_head{};
 
-        irods::file_object_ptr file_obj;
-
-        if (hier.empty()) {
+        if (hierarchy_for_open.empty()) {
             try {
-                std::tie(file_obj, hier) = irods::resolve_resource_hierarchy(
+                irods::file_object_ptr file_obj;
+                std::tie(file_obj, hierarchy_for_open) = irods::resolve_resource_hierarchy(
                     (_inp.openFlags & O_CREAT) ? irods::CREATE_OPERATION : irods::OPEN_OPERATION,
                     &_comm, _inp, &info_head);
             }
@@ -777,24 +775,29 @@ namespace
                 // If the data object does not exist, then the exception will contain
                 // an error code of CAT_NO_ROWS_FOUND.
                 if (e.code() == CAT_NO_ROWS_FOUND) {
-                    log::api::error("Data object or replica does not exist [error_code={}, path={}].", e.code(), _inp.objPath);
-                    return {ERROR(OBJ_PATH_DOES_NOT_EXIST, ""), nullptr, nullptr, {}};
+                    THROW(OBJ_PATH_DOES_NOT_EXIST, fmt::format(
+                        "Data object or replica does not exist [error_code={}, path={}].",
+                        e.code(), _inp.objPath));
                 }
 
-                irods::log(e);
-                return {irods::error{e}, nullptr, nullptr, {}};
+                throw;
             }
         }
         else {
-            irods::file_object_ptr tmp{new irods::file_object()};
-            irods::error fac_err = irods::file_object_factory(&_comm, &_inp, tmp, &info_head);
+            irods::file_object_ptr file_obj{new irods::file_object()};
+            irods::error fac_err = irods::file_object_factory(&_comm, &_inp, file_obj, &info_head);
             if (!fac_err.ok() && CAT_NO_ROWS_FOUND != fac_err.code()) {
                 irods::log(fac_err);
             }
-            std::swap(tmp, file_obj);
         }
 
-        return {SUCCESS(), file_obj, info_head, hier};
+        if (!cond_input.contains(RESC_HIER_STR_KW)) {
+            cond_input[RESC_HIER_STR_KW] = hierarchy_for_open;
+        }
+
+        cond_input[SELECTED_HIERARCHY_KW] = hierarchy_for_open;
+
+        return {info_head, hierarchy_for_open};
     } // get_data_object_info_for_open
 
     auto apply_static_pep_data_obj_open_pre(RsComm& _comm, DataObjInp& _inp, DataObjInfo** _info_head) -> void
@@ -928,44 +931,56 @@ namespace
         }};
         // end lock fd section
 
+        DataObjInfo* info_head{};
+        std::string hierarchy{};
+
         try {
-            auto [error, file_obj, info_head, hierarchy] = get_data_object_info_for_open(*rsComm, *dataObjInp);
+            std::tie(info_head, hierarchy) = get_data_object_info_for_open(*rsComm, *dataObjInp);
+        }
+        catch (const irods::exception& e) {
+            irods::log(LOG_ERROR, fmt::format("[{}:{}] - [{}]", __FUNCTION__, __LINE__, e.client_display_what()));
+            return e.code();
+        }
+        catch (const std::exception& e) {
+            irods::log(LOG_ERROR, fmt::format("[{}:{}] - [{}]", __FUNCTION__, __LINE__, e.what()));
+            return SYS_LIBRARY_ERROR;
+        }
+        catch (...) {
+            irods::log(LOG_ERROR, fmt::format("[{}] - unknown error has occurred.", __FUNCTION__));
+            return SYS_UNKNOWN_ERROR;
+        }
 
-            if (!error.ok()) {
-                return error.code();
+        // TODO: remove lock fd
+        if (cond_input.contains(LOCK_TYPE_KW) && cond_input.at(LOCK_TYPE_KW).value().data()) {
+            rodsLog(LOG_DEBUG, "[%s:%d] - locking file with type [%s]",
+                __FUNCTION__, __LINE__, getValByKey(&dataObjInp->condInput, LOCK_TYPE_KW));
+
+            lockFd = irods::server_api_call(
+                         DATA_OBJ_LOCK_AN,
+                         rsComm, dataObjInp,
+                         NULL, (void**)NULL, NULL);
+
+            if (lockFd <= 0) {
+                rodsLog(LOG_ERROR, "%s: lock error for %s. lockType = %s, lockFd: %d",
+                        __FUNCTION__, dataObjInp->objPath, cond_input.at(LOCK_TYPE_KW).value().data(), lockFd );
+                return lockFd;
             }
 
-            if (!cond_input.contains(RESC_HIER_STR_KW)) {
-                cond_input[RESC_HIER_STR_KW] = hierarchy;
-            }
+            /* rm it so it won't be done again causing deadlock */
+            cond_input.erase(LOCK_TYPE_KW);
+        }
+        // end lock fd section
 
-            cond_input[SELECTED_HIERARCHY_KW] = hierarchy;
-
-            // TODO: remove lock fd
-            if (cond_input.contains(LOCK_TYPE_KW) && cond_input.at(LOCK_TYPE_KW).value().data()) {
-                rodsLog(LOG_DEBUG, "[%s:%d] - locking file with type [%s]",
-                    __FUNCTION__, __LINE__, getValByKey(&dataObjInp->condInput, LOCK_TYPE_KW));
-
-                lockFd = irods::server_api_call(
-                             DATA_OBJ_LOCK_AN,
-                             rsComm, dataObjInp,
-                             NULL, (void**)NULL, NULL);
-
-                if (lockFd <= 0) {
-                    rodsLog(LOG_ERROR, "%s: lock error for %s. lockType = %s, lockFd: %d",
-                            __FUNCTION__, dataObjInp->objPath, cond_input.at(LOCK_TYPE_KW).value().data(), lockFd );
-                    return lockFd;
-                }
-
-                /* rm it so it won't be done again causing deadlock */
-                cond_input.erase(LOCK_TYPE_KW);
-            }
-            // end lock fd section
-
+        try {
             // determine if the replica described by the inputs exists
             if (dataObjInp->openFlags & O_CREAT) {
-                if (!irods::hierarchy_has_replica(file_obj, hierarchy)) {
-                    //const int l1descInx = create_new_replica(*rsComm, *dataObjInp, file_obj);
+                const auto creating_new_replica = [&info_head, &hierarchy]() -> bool
+                {
+                    return !info_head ||
+                           !id::find_replica(id::make_data_object_proxy(*info_head), hierarchy);
+                }();
+
+                if (creating_new_replica) {
                     const int l1descInx = create_new_replica(*rsComm, *dataObjInp, info_head);
 
                     if (lockFd > 0) {
