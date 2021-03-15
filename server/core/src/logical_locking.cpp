@@ -190,17 +190,38 @@ namespace
     auto unlock_impl(
         const std::uint64_t _data_id,
         const int           _replica_number,
-        const int           _replica_status) -> int
+        const int           _replica_status,
+        const int           _other_replica_statuses) -> int
     {
         try {
+            auto replica_status = _replica_status;
+
             if (ill::restore_status == _replica_status) {
+                if (const auto original_status = ill::get_original_replica_status(_data_id, _replica_number); -1 == original_status) {
+                    irods::log(LOG_ERROR, fmt::format(
+                        "[{}:{}] - failed to restore status for replica because no original status found in data_status column. "
+                        " Setting replica status to stale. "
+                        "[data_id:[{}], repl num:[{}]]",
+                        __FUNCTION__, __LINE__, _data_id, _replica_number));
+
+                    // TODO: Should this be stale or keep it locked for posterity?
+                    replica_status = STALE_REPLICA;
+                }
+                else {
+                    replica_status = original_status;
+                }
+            }
+
+            rst::update(_data_id, _replica_number,
+                json{{"data_is_dirty", std::to_string(replica_status)}});
+
+            if (ill::restore_status == _other_replica_statuses) {
                 restore_replica_statuses(_data_id, _replica_number);
             }
             else {
-                set_replica_statuses(_data_id, _replica_number, _replica_status);
+                set_replica_statuses(_data_id, _replica_number, _other_replica_statuses);
             }
 
-            // TODO: is this unlock's job? I guess so...
             remove_data_status(_data_id);
 
             return 0;
@@ -240,9 +261,10 @@ namespace irods::logical_locking
     auto unlock(
         const std::uint64_t  _data_id,
         const int            _replica_number,
-        const int            _replica_status) -> int
+        const int            _replica_status,
+        const int            _other_replica_statuses) -> int
     {
-        return unlock_impl(_data_id, _replica_number, _replica_status);
+        return unlock_impl(_data_id, _replica_number, _replica_status, _other_replica_statuses);
     } // unlock
 
     auto lock_and_publish(
@@ -260,15 +282,16 @@ namespace irods::logical_locking
         }
 
         return 0;
-    } // lock
+    } // lock_and_publish
 
     auto unlock_and_publish(
         RsComm&                  _comm,
         const std::uint64_t      _data_id,
         const int                _replica_number,
-        const int                _replica_status) -> int
+        const int                _replica_status,
+        const int                _other_replica_statuses) -> int
     {
-        if (const int ec = unlock_impl(_data_id, _replica_number, _replica_status); ec < 0) {
+        if (const int ec = unlock_impl(_data_id, _replica_number, _replica_status, _other_replica_statuses); ec < 0) {
             return ec;
         }
 
@@ -279,5 +302,5 @@ namespace irods::logical_locking
         //rst::erase(_data_id);
 
         return 0;
-    } // unlock
+    } // unlock_and_publish
 } // namespace irods::logical_locking

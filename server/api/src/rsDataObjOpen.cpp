@@ -948,9 +948,6 @@ namespace
 
             throw_if_data_object_is_locked(*dataObjInp, replica);
 
-            // Record the current replica status so that it can be restored later.
-            const auto old_replica_status = replica.replica_status();
-
             // Insert the data object information into the replica state table before the replica status is
             // updated because the "before" state is supposed to represent the state of the data object before
             // it is modified (in this particular case, before its replica status is modified).
@@ -962,16 +959,14 @@ namespace
 
                     irods::log(LOG_ERROR, fmt::format("failed to lock data object"));
 
-                    replica.replica_status(old_replica_status);
-
                     rst::update(replica.data_id(), replica.replica_number(),
-                        nlohmann::json{{"data_is_dirty", std::to_string(replica.replica_status())}});
+                        {{"data_is_dirty", rst::get_property(replica.data_id(), replica.replica_number(), "data_is_dirty")}});
 
                     if (const int ec = ill::unlock_and_publish(*rsComm, replica.data_id(), replica.replica_number(), ill::restore_status); ec < 0) {
                         irods::log(LOG_ERROR, fmt::format(
                             "Failed to unlock data object "
-                            "[error_code={}, path={}, hierarchy={}, original_replica_status={}]",
-                            ec, dataObjInp->objPath, hierarchy, old_replica_status));
+                            "[error_code={}, path={}, hierarchy={}]",
+                            ec, dataObjInp->objPath, hierarchy));
 
                         return ec;
                     }
@@ -1019,23 +1014,19 @@ namespace
                 }
             }
             catch (const irods::exception& e) {
-                log::api::error("Could not update replica access table for data object. "
-                                "Closing data object and setting replica status to its original value. "
-                                "[error_code={}, path={}, exception={}]",
-                                dataObjInp->objPath, e.code(), e.client_display_what());
+                const irods::at_scope_exit erase_rst_entry{[&replica] { rst::erase(replica.data_id()); }};
 
-                if (const auto ec = close_replica(*rsComm, l1descInx); ec < 0) {
-                    auto hier = irods::experimental::key_value_proxy{dataObjInp->condInput}[RESC_HIER_STR_KW].value();
-                    log::api::error("Failed to close replica [error_code={}, path={}, hierarchy={}]",
-                                    ec, dataObjInp->objPath, hier);
-                    return ec;
-                }
+                irods::log(LOG_ERROR, fmt::format(
+                           "Could not update replica access table for data object. "
+                           "Unlocking data object. "
+                           "[error_code={}, path={}, exception={}]",
+                           dataObjInp->objPath, e.code(), e.client_display_what()));
 
-                if (const auto ec = change_replica_status(*rsComm, *dataObjInp, old_replica_status); ec < 0) {
-                    auto hier = irods::experimental::key_value_proxy{dataObjInp->condInput}[RESC_HIER_STR_KW].value();
-                    log::api::error("Failed to restore the replica's replica status "
-                                    "[error_code={}, path={}, hierarchy={}, original_replica_status={}]",
-                                    ec, dataObjInp->objPath, hier, old_replica_status);
+                if (const int ec = ill::unlock_and_publish(*rsComm, replica.data_id(), replica.replica_number(), ill::restore_status); ec < 0) {
+                    irods::log(LOG_ERROR, fmt::format(
+                        "[{}:{}] - Failed to unlock data object "
+                        "[error_code=[{}], path=[{}], hierarchy=[{}]",
+                        __FUNCTION__, __LINE__, ec, dataObjInp->objPath, hierarchy));
                     return ec;
                 }
 

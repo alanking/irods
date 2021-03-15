@@ -41,7 +41,8 @@ namespace irods::logical_locking
     auto unlock(
         const std::uint64_t _data_id,
         const int           _replica_number,
-        const int           _replica_status) -> int;
+        const int           _replica_status,
+        const int           _other_replica_statuses = restore_status) -> int;
 
     auto lock_and_publish(
         RsComm&             _comm,
@@ -53,7 +54,8 @@ namespace irods::logical_locking
         RsComm&             _comm,
         const std::uint64_t _data_id,
         const int           _replica_number,
-        const int           _replica_status) -> int;
+        const int           _replica_status,
+        const int           _other_replica_statuses = restore_status) -> int;
 } // namespace irods::logical_locking
 
 #endif // #ifndef IRODS_LOGICAL_LOCKING_HPP
