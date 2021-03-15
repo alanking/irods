@@ -883,24 +883,28 @@ namespace
         }
     } // throw_if_data_object_is_locked
 
+    auto remote_open(rodsServerHost& _server_host, DataObjInp& _inp) -> int
+    {
+        OpenStat* stat{};
+        const auto free_stat = irods::at_scope_exit{[&stat] { if (stat) std::free(stat); }};
+
+        const int remoteL1descInx = rcDataObjOpenAndStat(_server_host.conn, &_inp, &stat);
+        if (remoteL1descInx < 0) {
+            return remoteL1descInx;
+        }
+
+        return allocAndSetL1descForZoneOpr(remoteL1descInx, &_inp, &_server_host, stat);
+    } // remote_open
+
     int rsDataObjOpen_impl(rsComm_t *rsComm, dataObjInp_t *dataObjInp)
     {
         rodsServerHost_t* rodsServerHost{};
-        int remoteFlag = getAndConnRemoteZone(rsComm, dataObjInp, &rodsServerHost, REMOTE_OPEN);
+        const int remoteFlag = getAndConnRemoteZone(rsComm, dataObjInp, &rodsServerHost, REMOTE_OPEN);
         if (remoteFlag < 0) {
             return remoteFlag;
         }
         else if (REMOTE_HOST == remoteFlag) {
-            openStat_t* stat{};
-            const int status = rcDataObjOpenAndStat(rodsServerHost->conn, dataObjInp, &stat);
-            if (status < 0) {
-                return status;
-            }
-            const int l1descInx = allocAndSetL1descForZoneOpr(status, dataObjInp, rodsServerHost, stat);
-            if (stat) {
-                free(stat);
-            }
-            return l1descInx;
+            return remote_open(*rodsServerHost, *dataObjInp);
         }
 
         enable_creation_of_additional_replicas(*rsComm);
