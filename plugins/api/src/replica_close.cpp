@@ -203,7 +203,8 @@ namespace
 
     auto update_replica_size_and_status(rsComm_t& _comm, const l1desc_t& _l1desc, const bool _send_notifications) -> int
     {
-        const auto size_on_disk = get_file_size(_comm, _l1desc);
+        constexpr auto verify_size = false;
+        const auto size_on_disk = irods::get_size_in_vault(_comm, *_l1desc.dataObjInfo, verify_size, _l1desc.dataSize);
 
         if (size_on_disk < 0) {
             log::api::error("Failed to retrieve the replica's size on disk [error_code={}].", size_on_disk);
@@ -254,7 +255,8 @@ namespace
 
     auto update_replica_size(rsComm_t& _comm, const l1desc_t& _l1desc, const bool _send_notifications) -> int
     {
-        const auto size_on_disk = get_file_size(_comm, _l1desc);
+        constexpr auto verify_size = false;
+        const auto size_on_disk = irods::get_size_in_vault(_comm, *_l1desc.dataObjInfo, verify_size, _l1desc.dataSize);
 
         if (size_on_disk < 0) {
             log::api::error("Failed to retrieve the replica's size on disk [error_code={}].", size_on_disk);
@@ -422,7 +424,8 @@ namespace
                     // Default to setting new status to good on the condition that things moved in an expected manner.
                     int new_status = GOOD_REPLICA;
 
-                    const auto size_on_disk = get_file_size(*_comm, l1desc);
+                    constexpr auto verify_size = false;
+                    const auto size_on_disk = irods::get_size_in_vault(*_comm, *l1desc.dataObjInfo, verify_size, l1desc.dataSize);
 
                     if (size_on_disk < 0) {
                         // Stale replica status on failure to verify size on disk.

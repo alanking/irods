@@ -104,7 +104,14 @@ namespace
         //  - Check size in vault
         try {
             constexpr bool verify_size = false;
-            replica.size(irods::get_size_in_vault(_comm, *replica.get(), verify_size, _l1desc.dataSize));
+            const auto size = irods::get_size_in_vault(_comm, *replica.get(), verify_size, _l1desc.dataSize);
+            if (size < 0) {
+                THROW(size, fmt::format(
+                    "[{}:{}] - failed to get size from vault; path:[{}],repl num:[{}],ec:[{}]",
+                    __FUNCTION__, __LINE__, replica.logical_path(), replica.replica_number(), size));
+            }
+
+            replica.size(size);
 
             //  - Compute checksum if flag is present
             if (!cond_input.contains(CHKSUM_KW) && !replica.checksum().empty()) {

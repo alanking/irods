@@ -153,6 +153,14 @@ namespace
         try {
             const bool verify_size = !cond_input.contains(NO_CHK_COPY_LEN_KW);
             const auto size_in_vault = irods::get_size_in_vault(_comm, _info, verify_size, _l1desc.dataSize);
+            if (size_in_vault < 0) {
+                THROW(size_in_vault, fmt::format(
+                    "[{}:{}] - failed to get size in vault; path:[{}] repl num:[{}],ec:[{}]",
+                    __FUNCTION__, __LINE__,
+                    replica.logical_path(),
+                    replica.replica_number(),
+                    size_in_vault));
+            }
             replica.size(size_in_vault);
 
             if (verify_size || !replica.checksum().empty()) {

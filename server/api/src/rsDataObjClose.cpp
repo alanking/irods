@@ -625,6 +625,14 @@ namespace
 
             const bool verify_size = !getValByKey(&l1desc.dataObjInp->condInput, NO_CHK_COPY_LEN_KW);
             const auto size_in_vault = irods::get_size_in_vault(_comm, *l1desc.dataObjInfo, verify_size, l1desc.dataSize);
+            if (size_in_vault < 0) {
+                THROW(size_in_vault, fmt::format(
+                    "[{}:{}] - failed to get size in vault; path:[{}] repl num:[{}],ec:[{}]",
+                    __FUNCTION__, __LINE__,
+                    opened_replica.logical_path(),
+                    opened_replica.replica_number(),
+                    size_in_vault));
+            }
             opened_replica.size(size_in_vault);
         }
         catch (const irods::exception& e) {

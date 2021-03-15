@@ -402,7 +402,17 @@ namespace
         auto cond_input = irods::experimental::make_key_value_proxy(_l1desc.dataObjInp->condInput);
         try {
             constexpr bool verify_size = true;
-            _destination_replica.size(irods::get_size_in_vault(_comm, *_destination_replica.get(), verify_size, _l1desc.dataSize));
+            const auto size_in_vault = irods::get_size_in_vault(_comm, *_destination_replica.get(), verify_size, _l1desc.dataSize);
+            if (size_in_vault < 0) {
+                THROW(size_in_vault, fmt::format(
+                    "[{}:{}] - failed to get size in vault; path:[{}] repl num:[{}],ec:[{}]",
+                    __FUNCTION__, __LINE__,
+                    _destination_replica.logical_path(),
+                    _destination_replica.replica_number(),
+                    size_in_vault));
+            }
+
+            _destination_replica.size(size_in_vault);
 
             if (!_destination_replica.checksum().empty()) {
                 const auto checksum = calculate_checksum(_comm, _l1desc, _source_replica, _destination_replica);

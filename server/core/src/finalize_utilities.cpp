@@ -144,16 +144,18 @@ namespace irods
 
         // an error occurred when getting size from storage
         if (size_in_vault < 0 && UNKNOWN_FILE_SZ != size_in_vault) {
-            THROW(static_cast<int>(size_in_vault), fmt::format(
+            irods::log(LOG_ERROR, fmt::format(
                 "{}: getSizeInVault error for {}, status = {}",
                 __FUNCTION__, _info.objPath, size_in_vault));
+            return size_in_vault;
         }
 
         // check for consistency of the write operation
         if (_verify_size && size_in_vault != _recorded_size && _recorded_size > 0) {
-            THROW(SYS_COPY_LEN_ERR, fmt::format(
+            irods::log(LOG_ERROR, fmt::format(
                 "{}: size in vault {} != target size {}",
                 __FUNCTION__, size_in_vault, _recorded_size));
+            return SYS_COPY_LEN_ERR;
         }
 
         return size_in_vault;
