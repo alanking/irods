@@ -800,7 +800,7 @@ namespace
         return {info_head, hierarchy_for_open};
     } // get_data_object_info_for_open
 
-    auto apply_static_pep_data_obj_open_pre(RsComm& _comm, DataObjInp& _inp, DataObjInfo** _info_head) -> void
+    auto apply_static_pep_data_obj_open_pre(RsComm& _comm, DataObjInp& _inp, DataObjInfo** _info_head) -> int
     {
         ruleExecInfo_t rei;
         initReiWithDataObjInp( &rei, &_comm, &_inp );
@@ -818,12 +818,15 @@ namespace
                 status = rei.status;
             }
 
-            THROW(status, fmt::format(
+            irods::log(LOG_ERROR, fmt::format(
                 "{}:acPreprocForDataObjOpen error for {},stat={}",
                 __FUNCTION__, _inp.objPath, status));
+
+            return status;
         }
 
         *_info_head = rei.doi;
+        return rei.status;
     } // apply_static_pep_data_obj_open_pre
 
     auto leaf_resource_is_bundleresc(const std::string_view _hierarchy)
@@ -1020,7 +1023,35 @@ namespace
                     return ec;
                 }
 
-                apply_static_pep_data_obj_open_pre(*rsComm, *dataObjInp, &info_head);
+                if (const int ec = apply_static_pep_data_obj_open_pre(*rsComm, *dataObjInp, &info_head); ec < 0) {
+                    THROW(ec, "failed in static pre-PEP for rsDataObjOpen");
+                }
+
+                auto replica = ir::make_replica_proxy(*info_head);
+
+                const int l1descInx = open_replica(*rsComm, *dataObjInp, replica);
+                if (l1descInx < 0) {
+                    THROW(l1descInx, fmt::format(
+                        "[{}] - failed to open replica:[{}]",
+                        __FUNCTION__, l1descInx));
+                }
+                else if (l1descInx < 3) {
+                    THROW(SYS_FILE_DESC_OUT_OF_RANGE, fmt::format(
+                        "[{}] - file descriptor out of range:[{}]",
+                        __FUNCTION__, l1descInx));
+                }
+
+                if ( lockFd >= 0 ) {
+                    L1desc[l1descInx].lockFd = lockFd;
+                }
+
+                return l1descInx;
+            }
+
+            if (info_head->specColl) {
+                if (const int ec = apply_static_pep_data_obj_open_pre(*rsComm, *dataObjInp, &info_head); ec < 0) {
+                    THROW(ec, "failed in static pre-PEP for rsDataObjOpen");
+                }
 
                 auto replica = ir::make_replica_proxy(*info_head);
 
@@ -1059,35 +1090,6 @@ namespace
 
             throw_if_data_object_is_locked(*dataObjInp, replica);
 
-            if (replica.special_collection_info()) {
-                apply_static_pep_data_obj_open_pre(*rsComm, *dataObjInp, &info_head);
-
-                irods::log(LOG_DEBUG, fmt::format(
-                    "[{}:{}] - attempting open for [{}], repl:[{}], hier:[{}]",
-                    __FUNCTION__, __LINE__,
-                    replica.logical_path(),
-                    replica.replica_number(),
-                    replica.hierarchy()));
-
-                const int l1descInx = open_replica(*rsComm, *dataObjInp, replica);
-                if (l1descInx < 0) {
-                    THROW(l1descInx, fmt::format(
-                        "[{}] - failed to open replica:[{}]",
-                        __FUNCTION__, l1descInx));
-                }
-                else if (l1descInx < 3) {
-                    THROW(SYS_FILE_DESC_OUT_OF_RANGE, fmt::format(
-                        "[{}] - file descriptor out of range:[{}]",
-                        __FUNCTION__, l1descInx));
-                }
-
-                if ( lockFd >= 0 ) {
-                    L1desc[l1descInx].lockFd = lockFd;
-                }
-
-                return l1descInx;
-            }
-
             // Record the current replica status so that it can be restored later.
             const auto old_replica_status = replica.replica_status();
 
@@ -1120,7 +1122,9 @@ namespace
                 }
             }
 
-            apply_static_pep_data_obj_open_pre(*rsComm, *dataObjInp, &info_head);
+            if (const auto ec = apply_static_pep_data_obj_open_pre(*rsComm, *dataObjInp, &info_head); ec < 0) {
+                THROW(ec, "failed in static pre-PEP for rsDataObjOpen");
+            }
 
             irods::log(LOG_DEBUG, fmt::format(
                 "[{}:{}] - attempting open for [{}], repl:[{}], hier:[{}]",
