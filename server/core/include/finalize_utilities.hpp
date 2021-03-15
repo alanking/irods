@@ -123,6 +123,8 @@ namespace irods
     ///
     /// \since 4.2.9
     auto close_replica_without_catalog_update(RsComm& _comm, const int _fd, const bool _preserve_replica_state_table) -> int;
+
+    auto stale_and_unlock_open_replica(RsComm& _comm, const int _fd) -> int;
 } // namespace irods
 
 #endif // IRODS_FINALIZE_UTILITIES_HPP

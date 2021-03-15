@@ -233,10 +233,6 @@ namespace irods::replica_state_table
     ///             "modify_ts": <string>,
     ///             "resc_id": <string>
     ///         }
-    ///         "file_modified": {
-    ///             <string>: <string>,
-    ///             ...
-    ///         }
     ///     },
     ///     ...
     /// ]
@@ -473,6 +469,28 @@ namespace irods::replica_state_table
     auto update(const key_type& _key,
                 const irods::experimental::replica::replica_proxy_t& _replica) -> void;
 
+    /// \brief Updates all columns of the specified replica
+    ///
+    /// \param[in] _logical_path
+    /// \param[in] _obj data_object_proxy which is converted to JSON format: \parblock
+    /// \code{.js}
+    ///     {
+    ///         "replicas": {
+    ///             <r_data_main_column>: <string>,
+    ///             ...
+    ///         },
+    ///         "file_modified": {
+    ///             <string>: <string>,
+    ///             ...
+    ///         }
+    ///     }
+    /// \endcode
+    /// \endparblock
+    ///
+    /// \since 4.2.9
+    //auto update(const std::string_view _logical_path,
+                //const irods::experimental::data_object::data_object_proxy_t& _obj) -> void;
+
     /// \brief Returns the value of a given property of the given replica in the state table
     ///
     /// \param[in] _key
@@ -488,6 +506,8 @@ namespace irods::replica_state_table
         const int _replica_number,
         const std::string_view _property_name,
         const state_type _state = state_type::before) -> std::string;
+
+    auto get_logical_path(const key_type& _key) -> std::string;
 
     /// \brief Prepares the specified data object as input to data_object_finalize and updates the catalog
     ///
@@ -541,7 +561,6 @@ namespace irods::replica_state_table
     auto publish_to_catalog(
         RsComm& _comm,
         const irods::experimental::replica::replica_proxy_t& _replica) -> int;
-
 } // namespace irods::replica_state_table
 
 #endif // IRODS_REPLICA_STATE_TABLE_HPP

@@ -11,6 +11,8 @@
 #include "rsModAVUMetadata.hpp"
 #include "rsModAccessControl.hpp"
 #include "rs_replica_close.hpp"
+#include "logical_locking.hpp"
+#include "replica_state_table.hpp"
 
 #define IRODS_REPLICA_ENABLE_SERVER_SIDE_API
 #include "data_object_proxy.hpp"
@@ -20,6 +22,10 @@
 #include <vector>
 
 #include "json.hpp"
+
+namespace rst = irods::replica_state_table;
+namespace ill = irods::logical_locking;
+using json = nlohmann::json;
 
 namespace irods
 {
@@ -214,24 +220,9 @@ namespace irods
 
     auto stale_replica(RsComm& _comm, const l1desc& _l1desc, DataObjInfo& _info) -> int
     {
-        _info.replStatus = STALE_REPLICA;
+        rst::update(_info.dataId, _info.replNum, json{{"data_is_dirty", std::to_string(STALE_REPLICA)}});
 
-        keyValPair_t regParam{};
-        auto kvp = irods::experimental::make_key_value_proxy(regParam);
-
-        kvp[IN_PDMO_KW] = _info.rescHier;
-        kvp[REPL_STATUS_KW] = std::to_string(_info.replStatus);
-
-        const auto cond_input = irods::experimental::make_key_value_proxy(_l1desc.dataObjInp->condInput);
-        if (cond_input.contains(ADMIN_KW)) {
-            kvp[ADMIN_KW] = "";
-        }
-
-        modDataObjMeta_t inp{};
-        inp.dataObjInfo = &_info;
-        inp.regParam = kvp.get();
-
-        return rsModDataObjMeta(&_comm, &inp);
+        return ill::unlock_and_publish(_comm, _info.dataId, _info.replNum, ill::restore_status);
     } // stale_replica
 
     auto apply_static_post_pep(RsComm& _comm, l1desc& _l1desc, const int _operation_status, std::string_view _pep_name) -> int
@@ -273,4 +264,27 @@ namespace irods
 
         return ec;
     } // close_replica_without_catalog_update
+
+    auto stale_and_unlock_open_replica(RsComm& _comm, const int _fd) -> int
+    {
+        // TODO: need checks on inputs
+        namespace rst = irods::replica_state_table;
+
+        const auto* open_replica = L1desc[_fd].dataObjInfo;
+
+        rst::update(open_replica->dataId, open_replica->replNum,
+            nlohmann::json{{"data_is_dirty", std::to_string(STALE_REPLICA)}});
+
+        if (const int ec = ill::unlock_and_publish(_comm, open_replica->dataId, open_replica->replNum, ill::restore_status); ec < 0) {
+            irods::log(LOG_ERROR, fmt::format(
+                "[{}:{}] - Failed to unlock data object for open replica "
+                "[error_code={}, path={}, hierarchy={}]",
+                __FUNCTION__, __LINE__, ec,
+                open_replica->objPath, open_replica->rescHier));
+
+            return ec;
+        }
+
+        return 0;
+    } // stale_replica_and_unlock_data_object
 } // namespace irods

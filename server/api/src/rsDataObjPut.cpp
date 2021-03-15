@@ -46,6 +46,7 @@
 #include "irods_resource_redirect.hpp"
 #include "irods_serialization.hpp"
 #include "irods_server_properties.hpp"
+#include "logical_locking.hpp"
 #include "scoped_privileged_client.hpp"
 #include "server_utilities.hpp"
 
@@ -62,6 +63,7 @@
 
 namespace
 {
+    namespace ill = irods::logical_locking;
     namespace rst = irods::replica_state_table;
 
     auto apply_static_peps(RsComm& _comm, l1desc& _l1desc, const int _operation_status) -> void
@@ -198,14 +200,7 @@ namespace
             replica.mtime(SET_TIME_TO_NOW_KW);
 
             // stale other replicas because the truth has moved
-            for (auto& rj : rst::at(replica.data_id())) {
-                const auto replica_number = std::stoi(std::string{rj.at("after").at("data_repl_num")});
-
-                if (replica.replica_number() != replica_number) {
-                    rst::update(replica.data_id(), replica_number,
-                        nlohmann::json{{"data_is_dirty", std::to_string(STALE_REPLICA)}});
-                }
-            }
+            ill::unlock(replica.data_id(), replica.replica_number(), STALE_REPLICA);
         }
         else {
             replica.replica_status(GOOD_REPLICA);
@@ -349,7 +344,7 @@ namespace
                 catch (const irods::exception& e) {
                     irods::log(LOG_ERROR, fmt::format(
                         "[{}:{}] - error finalizing replica; [{}]",
-                        __FUNCTION__, __LINE__, e.what()));
+                        __FUNCTION__, __LINE__, e.client_display_what()));
 
                     status = e.code();
                 }
@@ -515,7 +510,7 @@ namespace
                 irods::deserialize_acl(acl_string);
             }
             catch (const irods::exception& e) {
-                rodsLog(LOG_ERROR, "%s", e.what());
+                irods::log(LOG_ERROR, fmt::format("[{}:{}] - [{}]", __FUNCTION__, __LINE__, e.client_display_what()));
                 return e.code();
             }
         }
@@ -524,7 +519,7 @@ namespace
                 irods::deserialize_metadata( metadata_string );
             }
             catch (const irods::exception& e) {
-                rodsLog(LOG_ERROR, "%s", e.what());
+                irods::log(LOG_ERROR, fmt::format("[{}:{}] - [{}]", __FUNCTION__, __LINE__, e.client_display_what()));
                 return e.code();
             }
         }
@@ -583,7 +578,7 @@ namespace
             }
         }
         catch (const irods::exception& e) {
-            irods::log(LOG_ERROR, e.what());
+            irods::log(LOG_ERROR, fmt::format("[{}:{}] - [{}]", __FUNCTION__, __LINE__, e.client_display_what()));
             return e.code();
         }
 
@@ -602,7 +597,7 @@ namespace
             return parallel_transfer_put( rsComm, dataObjInp, portalOprOut );
         }
         catch (const irods::exception& e) {
-            irods::log(e);
+            irods::log(LOG_ERROR, fmt::format("[{}:{}] - [{}]", __FUNCTION__, __LINE__, e.client_display_what()));
             //addRErrorMsg(&rsComm->rError, e.code(), e.what());
             return e.code();
         }

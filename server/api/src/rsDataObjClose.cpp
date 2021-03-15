@@ -54,6 +54,7 @@
 #include "irods_at_scope_exit.hpp"
 #include "json_serialization.hpp"
 #include "key_value_proxy.hpp"
+#include "logical_locking.hpp"
 #include "replica_access_table.hpp"
 #include "replica_state_table.hpp"
 
@@ -70,6 +71,7 @@ namespace
 {
     namespace ir = irods::experimental::replica;
     namespace rst = irods::replica_state_table;
+    namespace ill = irods::logical_locking;
 
     auto apply_static_peps(RsComm& _comm, openedDataObjInp_t& _close_inp, const int _fd, const int _operation_status) -> void
     {
@@ -271,24 +273,13 @@ namespace
         const auto source_replica = ir::replica_proxy_t{*L1desc[srcL1descInx].dataObjInfo};
         auto destination_replica = ir::replica_proxy_t{*l1desc.dataObjInfo};
 
-        auto [reg_param, lm] = irods::experimental::make_key_value_proxy({{OPEN_TYPE_KW, std::to_string(l1desc.openType)}});
-        reg_param[REPL_STATUS_KW] = std::to_string(source_replica.replica_status());
-        reg_param[DATA_SIZE_KW] = std::to_string(source_replica.size());
-        reg_param[DATA_MODIFY_KW] = std::to_string((int)time(nullptr));
-        reg_param[FILE_PATH_KW] = destination_replica.physical_path();
+        destination_replica.replica_status(source_replica.replica_status());
+        destination_replica.size(source_replica.size());
+        destination_replica.mtime(SET_TIME_TO_NOW_KW);
 
         const auto cond_input = irods::experimental::make_key_value_proxy(l1desc.dataObjInp->condInput);
-        if (cond_input.contains(ADMIN_KW)) {
-            reg_param[ADMIN_KW] = cond_input.at(ADMIN_KW);
-        }
-        if (const char* pdmo_kw = getValByKey(&_inp.condInput, IN_PDMO_KW); pdmo_kw) {
-            reg_param[IN_PDMO_KW] = pdmo_kw;
-        }
-        if (cond_input.contains(SYNC_OBJ_KW)) {
-            reg_param[SYNC_OBJ_KW] = cond_input.at(SYNC_OBJ_KW);
-        }
         if (cond_input.contains(CHKSUM_KW)) {
-            reg_param[CHKSUM_KW] = cond_input.at(CHKSUM_KW);
+            destination_replica.checksum(cond_input.at(CHKSUM_KW).value());
         }
 
         irods::log(LOG_DEBUG8, fmt::format(
@@ -297,10 +288,11 @@ namespace
             destination_replica.logical_path(),
             destination_replica.hierarchy()));
 
-        modDataObjMeta_t mod_inp{};
-        mod_inp.dataObjInfo = destination_replica.get();
-        mod_inp.regParam = reg_param.get();
-        const int status = rsModDataObjMeta(&_comm, &mod_inp);
+        rst::update(destination_replica.data_id(), destination_replica);
+
+        ill::unlock(destination_replica.data_id(), destination_replica.replica_number(), ill::restore_status);
+
+        const int status = rst::publish_to_catalog(_comm, destination_replica.data_id(), destination_replica.replica_number(), irods::to_json(cond_input.get()));
 
         if (CREATE_TYPE == l1desc.openType) {
             updatequotaOverrun(destination_replica.hierarchy().data(), destination_replica.size(), ALL_QUOTA);
@@ -334,23 +326,13 @@ namespace
             }
         }
 
-        try {
-            irods::apply_metadata_from_cond_input(_comm, *l1desc.dataObjInp);
-            irods::apply_acl_from_cond_input(_comm, *l1desc.dataObjInp);
-        }
-        catch (const irods::exception& e) {
-            if (l1desc.dataObjInp->oprType == PUT_OPR ) {
-                rsDataObjUnlink(&_comm, l1desc.dataObjInp);
-            }
-            throw;
-        }
+        irods::apply_metadata_from_cond_input(_comm, *l1desc.dataObjInp);
+        irods::apply_acl_from_cond_input(_comm, *l1desc.dataObjInp);
 
         auto replica = ir::replica_proxy_t{*l1desc.dataObjInfo};
 
         auto cond_input = irods::experimental::make_key_value_proxy(l1desc.dataObjInp->condInput);
         cond_input[OPEN_TYPE_KW] = std::to_string(l1desc.openType);
-
-        // TODO: unlock in RST here (restore replica states)
 
         // Set target replica to the state it should be
         if (OPEN_FOR_WRITE_TYPE == l1desc.openType) {
@@ -358,19 +340,12 @@ namespace
             replica.mtime(SET_TIME_TO_NOW_KW);
 
             // stale other replicas because the truth has moved
-            for (auto& rj : rst::at(replica.data_id())) {
-                const auto replica_number = std::stoi(std::string{rj.at("after").at("data_repl_num")});
-
-                if (replica.replica_number() != replica_number) {
-                    const nlohmann::json update{{"data_is_dirty", std::to_string(STALE_REPLICA)}};
-
-                    rst::update(replica.data_id(), replica_number,
-                        nlohmann::json{{"replicas", update}});
-                }
-            }
+            ill::unlock(replica.data_id(), replica.replica_number(), STALE_REPLICA);
         }
         else {
             replica.replica_status(GOOD_REPLICA);
+
+            ill::unlock(replica.data_id(), replica.replica_number(), ill::restore_status);
         }
 
         if (cond_input.contains(CHKSUM_KW)) {
@@ -404,16 +379,8 @@ namespace
             }
         }
 
-        try {
-            irods::apply_metadata_from_cond_input(_comm, *l1desc.dataObjInp);
-            irods::apply_acl_from_cond_input(_comm, *l1desc.dataObjInp);
-        }
-        catch (const irods::exception& e) {
-            if (l1desc.dataObjInp->oprType == PUT_OPR ) {
-                rsDataObjUnlink(&_comm, l1desc.dataObjInp);
-            }
-            throw;
-        }
+        irods::apply_metadata_from_cond_input(_comm, *l1desc.dataObjInp);
+        irods::apply_acl_from_cond_input(_comm, *l1desc.dataObjInp);
 
         const auto replica = ir::replica_proxy_t{*l1desc.dataObjInfo};
         auto [reg_param, lm] = irods::experimental::make_key_value_proxy({{OPEN_TYPE_KW, std::to_string(l1desc.openType)}});
@@ -498,7 +465,7 @@ namespace
         return L1desc[_fd].oprStatus;
     } // finalize_replica_after_failed_operation
 
-    auto finalize_replica_with_no_bytes_written(RsComm& _comm, const int _fd) -> void
+    auto finalize_replica_with_no_bytes_written(RsComm& _comm, const int _fd) -> int
     {
         l1desc_t& l1desc = L1desc[_fd];
 
@@ -506,58 +473,45 @@ namespace
             irods::purge_cache(_comm, *l1desc.dataObjInfo);
         }
 
-        try {
-            irods::apply_metadata_from_cond_input(_comm, *l1desc.dataObjInp);
-            irods::apply_acl_from_cond_input(_comm, *l1desc.dataObjInp);
-        }
-        catch ( const irods::exception& e ) {
-            if ( l1desc.dataObjInp->oprType == PUT_OPR ) {
-                rsDataObjUnlink(&_comm, l1desc.dataObjInp );
-            }
-            throw;
-        }
+        irods::apply_metadata_from_cond_input(_comm, *l1desc.dataObjInp);
+        irods::apply_acl_from_cond_input(_comm, *l1desc.dataObjInp);
 
         // TODO: will need to restore original status for open-for-read replicas...
         if (const auto accmode = l1desc.dataObjInp->openFlags & O_ACCMODE; O_RDONLY == accmode) {
-            return;
+            return 0;
         }
+
+        auto cond_input = irods::experimental::make_key_value_proxy(l1desc.dataObjInp->condInput);
+        cond_input[OPEN_TYPE_KW] = std::to_string(l1desc.openType);
 
         auto replica = ir::replica_proxy_t{*l1desc.dataObjInfo};
 
-        auto [reg_param, lm] = irods::experimental::make_key_value_proxy({{OPEN_TYPE_KW, std::to_string(l1desc.openType)}});
-
         if (PUT_OPR == l1desc.oprType && l1desc.chksumFlag) {
             const std::string checksum = perform_checksum_operation_for_finalize(_comm, _fd);
-            if (checksum.empty()) {
-                return;
+            if (!checksum.empty()) {
+                replica.checksum(checksum);
             }
-
-            reg_param[CHKSUM_KW] = checksum;
-        }
-
-        if (l1desc.openType == CREATE_TYPE) {
-            replica.replica_status(GOOD_REPLICA);
-            reg_param[REPL_STATUS_KW] = std::to_string(replica.replica_status());
-        }
-        else if (l1desc.openType == OPEN_FOR_WRITE_TYPE) {
-            replica.replica_status(std::stoi(rst::get_property(replica.data_id(), replica.replica_number(), "data_is_dirty")));
-            reg_param[REPL_STATUS_KW] = std::to_string(replica.replica_status());
-            reg_param[DATA_MODIFY_KW] = std::to_string((int)time(nullptr));
         }
 
         if (CREATE_TYPE == l1desc.openType) {
-            // TODO: need to restore replica status for OPEN_FOR_WRITE
             // a newly created replica should be marked as good if no bytes were written
             // as it is created in the intermediate state.
-            reg_param[REPL_STATUS_KW] = std::to_string(GOOD_REPLICA);
+            replica.replica_status(GOOD_REPLICA);
+        }
+        else if (OPEN_FOR_WRITE_TYPE == l1desc.openType) {
+            replica.replica_status(std::stoi(rst::get_property(replica.data_id(), replica.replica_number(), "data_is_dirty")));
+            replica.mtime(SET_TIME_TO_NOW_KW);
         }
 
-        modDataObjMeta_t mod_inp{};
-        mod_inp.dataObjInfo = replica.get();
-        mod_inp.regParam = reg_param.get();
-        if (const int ec = rsModDataObjMeta(&_comm, &mod_inp); ec < 0) {
-            irods::log(LOG_ERROR, fmt::format("[{}] - rsModDataObjMeta failed with [{}]", __FUNCTION__, ec));
-        }
+        ill::unlock(replica.data_id(), replica.replica_number(), ill::restore_status);
+
+        rst::update(replica.data_id(), replica);
+
+        // Write it out to the catalog
+        //if (const int ec = rst.publish_to_catalog(_comm, replica.logical_path(), true); ec < 0) {
+            //THROW(ec, fmt::format("failed to publish to catalog:[{}]", ec));
+        //}
+        return rst::publish_to_catalog(_comm, replica.data_id(), replica.replica_number(), irods::to_json(cond_input.get()));
     } // finalize_replica_with_no_bytes_written
 
     auto close_physical_file(RsComm& _comm, const int _fd) -> void
@@ -593,7 +547,11 @@ namespace
             return perform_checksum_operation_for_finalize(_comm, _fd);
         }
         catch (const irods::exception& e) {
-            if (const int ec = irods::stale_replica(_comm, l1desc, *l1desc.dataObjInfo); ec < 0) {
+            auto replica = irods::experimental::replica::make_replica_proxy(*l1desc.dataObjInfo);
+
+            replica.replica_status(STALE_REPLICA);
+
+            if (const int ec = ill::unlock_and_publish(_comm, replica.data_id(), replica.replica_number(), ill::restore_status); ec < 0) {
                 irods::log(LOG_ERROR, fmt::format(
                     "{} - rsModDataObjMeta failed [{}]",
                     __FUNCTION__, ec));
@@ -619,8 +577,7 @@ namespace
 
         try {
             if (!bytes_written_in_operation(l1desc)) {
-                finalize_replica_with_no_bytes_written(_comm, _fd);
-                return 0;
+                return finalize_replica_with_no_bytes_written(_comm, _fd);
             }
 
             const bool verify_size = !getValByKey(&l1desc.dataObjInp->condInput, NO_CHK_COPY_LEN_KW);
@@ -636,10 +593,12 @@ namespace
             opened_replica.size(size_in_vault);
         }
         catch (const irods::exception& e) {
-            if (const int ec = irods::stale_replica(_comm, l1desc, *l1desc.dataObjInfo); ec < 0) {
+            opened_replica.replica_status(STALE_REPLICA);
+
+            if (const int ec = ill::unlock_and_publish(_comm, opened_replica.data_id(), opened_replica.replica_number(), ill::restore_status); ec < 0) {
                 irods::log(LOG_ERROR, fmt::format(
-                    "{} - rsModDataObjMeta failed [{}]",
-                    __FUNCTION__, ec));
+                    "{} - failed to finalize replica for [{}]; ec:[{}]",
+                    __FUNCTION__, opened_replica.logical_path(), ec));
             }
 
             throw;

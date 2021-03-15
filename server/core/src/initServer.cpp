@@ -32,6 +32,7 @@
 #include "irods_server_properties.hpp"
 #include "irods_threads.hpp"
 #include "key_value_proxy.hpp"
+#include "logical_locking.hpp"
 #include "replica_state_table.hpp"
 
 #define IRODS_REPLICA_ENABLE_SERVER_SIDE_API
@@ -54,6 +55,7 @@ static int BrokenPipeCnt = 0;
 
 namespace
 {
+    namespace ill = irods::logical_locking;
     namespace rst = irods::replica_state_table;
 
     auto calculate_checksum(RsComm& _comm, l1desc& _l1desc, DataObjInfo& _info) -> std::string
@@ -135,6 +137,8 @@ namespace
         }
 
         rst::update(replica.data_id(), replica);
+
+        ill::unlock(replica.data_id(), replica.replica_number(), ill::restore_status);
 
         if (const int ec = rst::publish_to_catalog(_comm, replica.data_id(), replica.replica_number(), nlohmann::json{}); ec < 0) {
             irods::log(LOG_ERROR, fmt::format(

@@ -54,6 +54,7 @@
 #include "irods_string_tokenize.hpp"
 #include "json_serialization.hpp"
 #include "key_value_proxy.hpp"
+#include "logical_locking.hpp"
 #include "replica_access_table.hpp"
 #include "replication_utilities.hpp"
 #include "voting.hpp"
@@ -74,6 +75,7 @@
 
 namespace
 {
+    namespace ill = irods::logical_locking;
     namespace ir = irods::experimental::replica;
     namespace irv = irods::experimental::resource::voting;
     namespace rst = irods::replica_state_table;
@@ -224,7 +226,14 @@ namespace
 
         cond_input[OPEN_TYPE_KW] = std::to_string(_l1desc.openType);
 
-        _destination_replica.replica_status(_source_replica.replica_status());
+        _destination_replica.replica_status(
+            std::stoi(rst::get_property(
+                _source_replica.data_id(),
+                _source_replica.replica_number(),
+                "data_is_dirty")
+            )
+        );
+
         _destination_replica.mtime(SET_TIME_TO_NOW_KW);
 
         // This allows fileModified to trigger, but the resource plugins need to make sure the
@@ -234,6 +243,8 @@ namespace
 
         // Write it out to the catalog
         rst::update(_destination_replica.data_id(), _destination_replica);
+
+        ill::unlock(_destination_replica.data_id(), _destination_replica.replica_number(), ill::restore_status);
 
         const int ec = rst::publish_to_catalog(_comm,
                                                _destination_replica.data_id(),
