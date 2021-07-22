@@ -12,6 +12,7 @@ from .resource_suite import ResourceBase
 from ..configuration import IrodsConfig
 from .rule_texts_for_tests import rule_texts
 from .. import lib
+from .. import test
 from . import session
 
 class Test_ImetaSet(ResourceBase, unittest.TestCase):
@@ -419,6 +420,7 @@ class Test_ImetaQu(ResourceBase, unittest.TestCase):
                 use_regex=True)
 
 # See issue #5111
+@unittest.skipIf(test.settings.TOPOLOGY_FROM_RESOURCE_SERVER, 'These tests fail when run in topology on the catalog service consumer')
 class Test_ImetaLsLongmode(session.make_sessions_mixin([('otherrods', 'rods')], []), unittest.TestCase):
 
     def setUp(self):

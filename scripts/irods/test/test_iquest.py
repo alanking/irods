@@ -10,7 +10,7 @@ else:
 
 from ..configuration import IrodsConfig
 from .resource_suite import ResourceBase
-from .. import lib
+from .. import lib, test
 
 def create_large_hierarchy(self, count, hostname, directory):
     self.admin.assert_icommand("iadmin mkresc repRescPrime replication", 'STDOUT_SINGLELINE', 'replication')
@@ -106,6 +106,7 @@ class Test_Iquest(ResourceBase, unittest.TestCase):
         self.admin.assert_icommand("irm -f " + filename)
         remove_large_hierarchy(self, LEAF_COUNT, directory)
 
+    @unittest.skipIf(test.settings.TOPOLOGY_FROM_RESOURCE_SERVER, 'Fails on topology running on catalog service consumer')
     def test_iquest_matches_names_containing_apostrophes_via_the_equals_operator__issue_4887(self):
         data_object = "data' object"
         self.admin.assert_icommand(['istream', 'write', data_object], input='hello, world')
