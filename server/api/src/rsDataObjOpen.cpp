@@ -406,26 +406,26 @@ namespace
                 const auto p = fs::path{registered_replica.logical_path().data()};
                 const auto sql = fmt::format(
                     "select DATA_OWNER_NAME, DATA_OWNER_ZONE, DATA_CREATE_TIME, DATA_MODIFY_TIME, DATA_EXPIRY, DATA_ID "
-                    "where COLL_NAME = '{}' and DATA_NAME = '{}' and DATA_RESC_HIER = '{}'",
-                    p.parent_path().c_str(), p.object_name().c_str(), hierarchy);
+                    "where COLL_NAME = '{}' and DATA_RESC_HIER = '{}' and DATA_NAME = '{}'",
+                    p.parent_path().c_str(), p.object_name().c_str(), registered_replica.hierarchy());
 
-                    irods::experimental::query_builder qb;
-                    const auto results = qb.build(_comm, sql);
-                    if (1 != results.size()) {
-                        irods::log(LOG_NOTICE, fmt::format(
-                            "[{}:{}] - no replica found [path=[{}], hier=[{}]]",
-                            __FUNCTION__, __LINE__, registered_replica.logical_path(), hierarchy));
+                irods::experimental::query_builder qb;
+                const auto results = qb.build(_comm, sql);
+                if (1 != results.size()) {
+                    irods::log(LOG_NOTICE, fmt::format(
+                        "[{}:{}] - no replica found [path=[{}], hier=[{}]]",
+                        __FUNCTION__, __LINE__, registered_replica.logical_path(), hierarchy));
 
-                        return ec = SYS_REPLICA_DOES_NOT_EXIST;
-                    }
+                    return ec = SYS_REPLICA_DOES_NOT_EXIST;
+                }
 
-                    const auto& result = results.front();
-                    registered_replica.owner_user_name(result.at(0));
-                    registered_replica.owner_zone_name(result.at(1));
-                    registered_replica.ctime(result.at(2));
-                    registered_replica.mtime(result.at(3));
-                    registered_replica.data_expiry(result.at(4));
-                    registered_replica.data_id(std::stoll(result.at(5)));
+                const auto& result = results.front();
+                registered_replica.owner_user_name(result.at(0));
+                registered_replica.owner_zone_name(result.at(1));
+                registered_replica.ctime(result.at(2));
+                registered_replica.mtime(result.at(3));
+                registered_replica.data_expiry(result.at(4));
+                registered_replica.data_id(std::stoll(result.at(5)));
             }
 
             // Insert the newly registered replica into the RST with the other replicas which were inserted and locked before
