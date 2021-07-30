@@ -513,6 +513,48 @@ class Test_Iput(session.make_sessions_mixin(rodsadmins, rodsusers), unittest.Tes
         self.assertEqual(len(err), 0)
         self.assertEqual(len(checksum.strip()), 0)
 
+    def test_iput_with_apostrophe_logical_path__issue_5759(self):
+        '''Tests iput with apostrophes in different places in the data object name
+
+        Each item is a combination of apostrophes at the beginning, in the middle, and at the end of the data object name.
+        Each of these is put to a collection with apostrophes at the beginning, in the middle, and at the end of the data object name.
+        '''
+
+        local_file = os.path.join(self.user.local_session_dir, 'test_iput_with_apostrophe_logical_path__issue_5759')
+        lib.make_file(local_file, 1024, 'arbitrary')
+
+        collection_names = ["collection",
+                            "collection'",
+                            "collect'ion",
+                            "collect'ion'",
+                            "'collection",
+                            "'collection'",
+                            "'collect'ion",
+                            "'collect'ion'"]
+
+        data_names = ["data_object",
+                      "data_object'",
+                      "data'_object",
+                      "data'_object'",
+                      "'data_object",
+                      "'data_object'",
+                      "'data'_object",
+                      "'data'_object'"]
+
+        for coll in collection_names:
+            collection_path = os.path.join(self.user.session_collection, coll)
+
+            self.user.assert_icommand(['imkdir', collection_path])
+
+            for name in data_names:
+                logical_path = os.path.join(collection_path, name)
+
+                self.user.assert_icommand(['iput', local_file, logical_path])
+
+                self.user.assert_icommand(['ils', '-l', logical_path], 'STDOUT', name)
+
+            self.user.assert_icommand(['ils', '-l', collection_path], 'STDOUT', coll)
+
 class test_iput_with_checksums(session.make_sessions_mixin(rodsadmins, rodsusers), unittest.TestCase):
 
     def setUp(self):
