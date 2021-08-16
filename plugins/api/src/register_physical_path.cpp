@@ -499,7 +499,7 @@ namespace
         }
 
         while ( ( status = rsFileReaddir( _comm, &fileReaddirInp, &rodsDirent ) ) >= 0 ) {
-            if (!rodsDirent || is_empty_string(rodsDirent->d_name, sizeof(rodsDirent->d_name)) {
+            if (!rodsDirent || is_empty_string(rodsDirent->d_name, sizeof(rodsDirent->d_name))) {
                 std::free(rodsDirent);
                 break;
             }
@@ -1014,8 +1014,8 @@ namespace
             return SYS_COLL_LINK_PATH_ERR;
         }
 
-        len = strnlen(linkPath, sizeof(linkPath));
-        if ( strncmp( _inp->objPath, linkPath, len ) == 0 &&
+        len = linkPath.size();
+        if ( strncmp( _inp->objPath, linkPath.data(), len ) == 0 &&
                 _inp->objPath[len] == '/' ) {
             rodsLog( LOG_ERROR,
                      "linkCollReg: collection %s inside linkPath %s",
