@@ -359,6 +359,9 @@ namespace
                         irods::log(LOG_ERROR, fmt::format("[{}:{}] - failed to unlock data object [error_code={}]", __FUNCTION__, __LINE__, unlock_ec));
                     }
 
+                    // Remove the RST entry because the unlock interface does not automatically remove the RST entries.
+                    // This is important because the agent for this connection may be re-used for another open operation
+                    // which would expect the RST to be cleaned up.
                     if (rst::contains(_existing_replica_list->dataId)) {
                         rst::erase(_existing_replica_list->dataId);
                     }
