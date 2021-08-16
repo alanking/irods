@@ -514,32 +514,19 @@ class Test_Iput(session.make_sessions_mixin(rodsadmins, rodsusers), unittest.Tes
         self.assertEqual(len(checksum.strip()), 0)
 
     def test_iput_with_apostrophe_logical_path__issue_5759(self):
-        '''Tests iput with apostrophes in different places in the data object name
+        """Test iput with apostrophes in the logical path.
 
-        Each item is a combination of apostrophes at the beginning, in the middle, and at the end of the data object name.
-        Each of these is put to a collection with apostrophes at the beginning, in the middle, and at the end of the data object name.
-        '''
+        For each iput, the logical path will contain an apostrophe in either the collection
+        name, data object name, both, or neither.
+        """
+
 
         local_file = os.path.join(self.user.local_session_dir, 'test_iput_with_apostrophe_logical_path__issue_5759')
         lib.make_file(local_file, 1024, 'arbitrary')
 
-        collection_names = ["collection",
-                            "collection'",
-                            "collect'ion",
-                            "collect'ion'",
-                            "'collection",
-                            "'collection'",
-                            "'collect'ion",
-                            "'collect'ion'"]
+        collection_names = ["collection", "collect'ion"]
 
-        data_names = ["data_object",
-                      "data_object'",
-                      "data'_object",
-                      "data'_object'",
-                      "'data_object",
-                      "'data_object'",
-                      "'data'_object",
-                      "'data'_object'"]
+        data_names = ["data_object", "data'_object"]
 
         for coll in collection_names:
             collection_path = os.path.join(self.user.session_collection, coll)
