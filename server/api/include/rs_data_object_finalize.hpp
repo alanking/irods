@@ -15,8 +15,10 @@ extern "C" {
 ///
 /// \parblock
 /// The replicas field is a complete set of the columns in their current state as well as the
-/// desired modifications is required in the form of a JSON structure. Each replica can also
-/// have "file_modified" key which holds a set of key-value pairs for the file_modified plugin operation.
+/// desired modifications in the form of a JSON structure. A replica can also have a
+/// "file_modified" key which holds a set of key-value pairs for the file_modified plugin operation.
+/// Note that only one file_modified key is recognized by the API plugin so only the replica which
+/// was modified should contain this key.
 ///
 /// The trigger_file_modified field is a boolean indicating whether the file_modified plugin operation
 /// should be called after the data object has been finalized.

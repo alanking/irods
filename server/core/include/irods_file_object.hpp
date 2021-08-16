@@ -206,7 +206,7 @@ namespace irods {
     /// data_object_proxy_t has been generated.
     /// \endparblock
     ///
-    /// \param[in] _comm
+    /// \param[in] _comm Handle to server connection structure.
     /// \param[in] _logical_path Full logical path of the data object being described.
     /// \param[in] _replicas A JSON array of replicas conforming to irods::experimental::replica::to_json.
     ///
