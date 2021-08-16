@@ -53,6 +53,7 @@
 #include "rsSyncMountedColl.hpp"
 #include "server_utilities.hpp"
 #include "specColl.hpp"
+#include "stringOpr.h"
 
 #define IRODS_FILESYSTEM_ENABLE_SERVER_SIDE_API
 #include "filesystem.hpp"
@@ -498,9 +499,8 @@ namespace
         }
 
         while ( ( status = rsFileReaddir( _comm, &fileReaddirInp, &rodsDirent ) ) >= 0 ) {
-
-            if ( NULL == rodsDirent || strlen( rodsDirent->d_name ) == 0 ) {
-                free( rodsDirent );
+            if (!rodsDirent || is_empty_string(rodsDirent->d_name, sizeof(rodsDirent->d_name)) {
+                std::free(rodsDirent);
                 break;
             }
 
@@ -530,9 +530,9 @@ namespace
             // would most probably take care of this issue, and the code segment
             // below would/should then be removed.
 
-            char tmpStr[MAX_NAME_LEN];
+            char tmpStr[MAX_NAME_LEN]{};
             rstrcpy( tmpStr, filePath, MAX_NAME_LEN );
-            size_t len = strlen(tmpStr);
+            const size_t len = strnlen(tmpStr, sizeof(tmpStr));
 
             for (size_t i = len-1; i > 0 && tmpStr[i] == '/'; i--) {
                 tmpStr[i] = '\0';
@@ -721,26 +721,23 @@ namespace
             rodsLog( LOG_NOTICE, "mountFileDir rsModColl > 0." );
 
             char outLogPath[MAX_NAME_LEN];
-            int status1;
             /* see if the phyPath is mapped into a real collection */
             if ( getLogPathFromPhyPath( filePath, rescVaultPath, outLogPath ) >= 0 &&
                     strcmp( outLogPath, _inp->objPath ) != 0 ) {
                 /* log path not the same as input objPath */
                 if ( isColl( _comm, outLogPath, NULL ) >= 0 ) {
-                    modAccessControlInp_t modAccessControl;
                     /* it is a real collection. better set the collection
                      * to read-only mode because any modification to files
                      * through this mounted collection can be trouble */
-                    bzero( &modAccessControl, sizeof( modAccessControl ) );
+                    modAccessControlInp_t modAccessControl{};
                     modAccessControl.accessLevel = "read";
                     modAccessControl.userName = _comm->clientUser.userName;
                     modAccessControl.zone = _comm->clientUser.rodsZone;
                     modAccessControl.path = _inp->objPath;
-                    status1 = rsModAccessControl( _comm, &modAccessControl );
-                    if ( status1 < 0 ) {
+                    if (const auto mod_acl_ec = rsModAccessControl(_comm, &modAccessControl); mod_acl_ec < 0) {
                         rodsLog( LOG_NOTICE,
                                  "mountFileDir: rsModAccessControl err for %s, stat = %d",
-                                 _inp->objPath, status1 );
+                                 _inp->objPath, mod_acl_ec );
                     }
                 }
             }
@@ -801,7 +798,6 @@ namespace
         dataObjInp_t     dataObjInp;
         collInp_t        collCreateInp;
         int              status         = 0;
-        int              len            = 0;
         char*            collType       = NULL;
         char*            structFilePath = NULL;
         DataObjInfo*     dataObjInfo    = NULL;
@@ -824,7 +820,7 @@ namespace
             return SYS_INTERNAL_NULL_INPUT_ERR;
         }
 
-        len = strlen( _inp->objPath );
+        const auto len = strnlen(_inp->objPath, sizeof(_inp->objPath));
         if ( strncmp( structFilePath, _inp->objPath, len ) == 0 &&
                 ( structFilePath[len] == '\0' || structFilePath[len] == '/' ) ) {
             rodsLog( LOG_ERROR,
@@ -983,70 +979,66 @@ namespace
         rsComm_t *_comm,
         dataObjInp_t *_inp)
     {
-        collInp_t collCreateInp;
-        int status;
-        char *linkPath = NULL;
-        char *collType;
-        int len;
-        rodsObjStat_t *rodsObjStatOut = NULL;
-        specCollCache_t *specCollCache = NULL;
+        const auto cond_input = irods::experimental::make_key_value_proxy(_inp->condInput);
 
-        if ( ( linkPath = getValByKey( &_inp->condInput, FILE_PATH_KW ) )
-                == NULL ) {
+        if (!cond_input.contains(FILE_PATH_KW)) {
             rodsLog( LOG_ERROR,
                      "linkCollReg: No linkPath input for %s",
                      _inp->objPath );
             return SYS_INVALID_FILE_PATH;
         }
 
-        collType = getValByKey( &_inp->condInput, COLLECTION_TYPE_KW );
-        if ( collType == NULL || strcmp( collType, LINK_POINT_STR ) != 0 ) {
+        const auto linkPath = cond_input.at(FILE_PATH_KW).value();
+
+        if (!cond_input.contains(COLLECTION_TYPE_KW) || cond_input.at(COLLECTION_TYPE_KW).value() == LINK_POINT_STR) {
             rodsLog( LOG_ERROR,
                      "linkCollReg: Bad COLLECTION_TYPE_KW for linkPath %s",
                      _inp->objPath );
             return SYS_INTERNAL_NULL_INPUT_ERR;
         }
 
+        const auto collType = cond_input.at(FILE_PATH_KW).value();
+
         if ( _inp->objPath[0] != '/' || linkPath[0] != '/' ) {
             rodsLog( LOG_ERROR,
                      "linkCollReg: linkPath %s or collection %s not absolute path",
-                     linkPath, _inp->objPath );
+                     linkPath.data(), _inp->objPath );
             return SYS_COLL_LINK_PATH_ERR;
         }
 
-        len = strlen( _inp->objPath );
-        if ( strncmp( linkPath, _inp->objPath, len ) == 0 &&
-                linkPath[len] == '/' ) {
+        auto len = strnlen(_inp->objPath, sizeof(_inp->objPath));
+        if (!strncmp(linkPath.data(), _inp->objPath, len) && linkPath[len] == '/') {
             rodsLog( LOG_ERROR,
                      "linkCollReg: linkPath %s inside collection %s",
-                     linkPath, _inp->objPath );
+                     linkPath.data(), _inp->objPath );
             return SYS_COLL_LINK_PATH_ERR;
         }
 
-        len = strlen( linkPath );
+        len = strnlen(linkPath, sizeof(linkPath));
         if ( strncmp( _inp->objPath, linkPath, len ) == 0 &&
                 _inp->objPath[len] == '/' ) {
             rodsLog( LOG_ERROR,
                      "linkCollReg: collection %s inside linkPath %s",
-                     linkPath, _inp->objPath );
+                     linkPath.data(), _inp->objPath );
             return SYS_COLL_LINK_PATH_ERR;
         }
 
-        if ( getSpecCollCache( _comm, linkPath, 0,  &specCollCache ) >= 0 &&
+        specCollCache_t *specCollCache = NULL;
+        if ( getSpecCollCache( _comm, linkPath.data(), 0,  &specCollCache ) >= 0 &&
                 specCollCache->specColl.collClass != LINKED_COLL ) {
             rodsLog( LOG_ERROR,
                      "linkCollReg: linkPath %s is in a spec coll path",
-                     linkPath );
+                     linkPath.data() );
             return SYS_COLL_LINK_PATH_ERR;
         }
 
-        status = collStat( _comm, _inp, &rodsObjStatOut );
+        rodsObjStat_t *rodsObjStatOut = NULL;
+        int status = collStat( _comm, _inp, &rodsObjStatOut );
         if ( status < 0 ) {
             freeRodsObjStat( rodsObjStatOut );
             rodsObjStatOut = NULL;
             /* does not exist. make one */
-            collInp_t collCreateInp;
-            memset( &collCreateInp, 0, sizeof( collCreateInp ) );
+            collInp_t collCreateInp{};
             rstrcpy( collCreateInp.collName, _inp->objPath, MAX_NAME_LEN );
             status = rsRegColl( _comm, &collCreateInp );
             if ( status < 0 ) {
@@ -1084,13 +1076,13 @@ namespace
 
         /* mk the collection */
 
-        memset( &collCreateInp, 0, sizeof( collCreateInp ) );
+        collInp_t collCreateInp{};
         rstrcpy( collCreateInp.collName, _inp->objPath, MAX_NAME_LEN );
-        addKeyVal( &collCreateInp.condInput, COLLECTION_TYPE_KW, collType );
+        addKeyVal( &collCreateInp.condInput, COLLECTION_TYPE_KW, collType.data() );
 
         /* have to use dataObjInp.objPath because structFile path was removed */
         addKeyVal( &collCreateInp.condInput, COLLECTION_INFO1_KW,
-                   linkPath );
+                   linkPath.data() );
 
         /* try to mod the coll first */
         status = rsModColl( _comm, &collCreateInp );
