@@ -28,5 +28,5 @@ auto rs_register_physical_path(RsComm* _comm, DataObjInp* _in, char** _json_outp
     out = nullptr;
 
     return rc;
-} // rs_data_object_finalize
+} // rs_register_physical_path
 
