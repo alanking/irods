@@ -520,7 +520,6 @@ class Test_Iput(session.make_sessions_mixin(rodsadmins, rodsusers), unittest.Tes
         name, data object name, both, or neither.
         """
 
-
         local_file = os.path.join(self.user.local_session_dir, 'test_iput_with_apostrophe_logical_path__issue_5759')
         lib.make_file(local_file, 1024, 'arbitrary')
 
