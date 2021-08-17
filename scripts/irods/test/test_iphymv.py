@@ -1,6 +1,5 @@
 import copy
 import os
-import re
 import sys
 
 if sys.version_info < (2, 7):
@@ -8,12 +7,10 @@ if sys.version_info < (2, 7):
 else:
     import unittest
 import json
-import shutil
 import time
 
 import replica_status_test
 from . import session
-from . import settings
 from .. import lib
 from .. import paths
 from .. import test
@@ -416,7 +413,6 @@ class test_iphymv_with_two_basic_ufs_resources(session.make_sessions_mixin([('ot
         self.resource_2 = 'resource2'
         resource_2_vault = os.path.join(self.admin.local_session_dir, self.resource_2 + 'vault')
 
-        irods_config = IrodsConfig()
         self.admin.assert_icommand(
                 ['iadmin', 'mkresc', self.resource_1, 'unixfilesystem', ':'.join([test.settings.HOSTNAME_1, resource_1_vault])],
                 'STDOUT_SINGLELINE', 'unixfilesystem')
