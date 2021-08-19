@@ -990,14 +990,14 @@ namespace
 
         const auto linkPath = cond_input.at(FILE_PATH_KW).value();
 
-        if (!cond_input.contains(COLLECTION_TYPE_KW) || cond_input.at(COLLECTION_TYPE_KW).value() == LINK_POINT_STR) {
+        if (!cond_input.contains(COLLECTION_TYPE_KW) || cond_input.at(COLLECTION_TYPE_KW).value() != LINK_POINT_STR) {
             rodsLog( LOG_ERROR,
                      "linkCollReg: Bad COLLECTION_TYPE_KW for linkPath %s",
                      _inp->objPath );
             return SYS_INTERNAL_NULL_INPUT_ERR;
         }
 
-        const auto collType = cond_input.at(FILE_PATH_KW).value();
+        const auto collType = cond_input.at(COLLECTION_TYPE_KW).value();
 
         if ( _inp->objPath[0] != '/' || linkPath[0] != '/' ) {
             rodsLog( LOG_ERROR,
@@ -1007,7 +1007,7 @@ namespace
         }
 
         auto len = strnlen(_inp->objPath, sizeof(_inp->objPath));
-        if (!strncmp(linkPath.data(), _inp->objPath, len) && linkPath[len] == '/') {
+        if (strncmp(linkPath.data(), _inp->objPath, len) == 0 && linkPath[len] == '/') {
             rodsLog( LOG_ERROR,
                      "linkCollReg: linkPath %s inside collection %s",
                      linkPath.data(), _inp->objPath );
@@ -1015,8 +1015,7 @@ namespace
         }
 
         len = linkPath.size();
-        if ( strncmp( _inp->objPath, linkPath.data(), len ) == 0 &&
-                _inp->objPath[len] == '/' ) {
+        if (strncmp(_inp->objPath, linkPath.data(), len) == 0 && _inp->objPath[len] == '/') {
             rodsLog( LOG_ERROR,
                      "linkCollReg: collection %s inside linkPath %s",
                      linkPath.data(), _inp->objPath );
@@ -1081,8 +1080,7 @@ namespace
         addKeyVal( &collCreateInp.condInput, COLLECTION_TYPE_KW, collType.data() );
 
         /* have to use dataObjInp.objPath because structFile path was removed */
-        addKeyVal( &collCreateInp.condInput, COLLECTION_INFO1_KW,
-                   linkPath.data() );
+        addKeyVal( &collCreateInp.condInput, COLLECTION_INFO1_KW, linkPath.data() );
 
         /* try to mod the coll first */
         status = rsModColl( _comm, &collCreateInp );
