@@ -18,6 +18,10 @@
 
 #include "fmt/format.h"
 
+namespace {
+    namespace id = irods::experimental::data_object;
+} // anonymous namespace
+
 namespace irods {
 // =-=-=-=-=-=-=-
 // public - ctor
@@ -407,8 +411,6 @@ namespace irods {
 
     auto file_object_factory(RsComm& _comm, const rodsLong_t _data_id) -> irods::file_object_ptr
     {
-        namespace id = irods::experimental::data_object;
-
         auto [data_obj, obj_lm] = id::make_data_object_proxy(_comm, _data_id);
 
         irods::file_object_ptr obj{new irods::file_object{&_comm, data_obj.get()}};
@@ -427,10 +429,8 @@ namespace irods {
     auto file_object_factory(
         RsComm& _comm,
         const std::string_view _logical_path,
-        const nlohmann::json& _replicas) -> irods::file_object_ptr
+        const id::json_repr_t& _replicas) -> irods::file_object_ptr
     {
-        namespace id = irods::experimental::data_object;
-
         auto [data_obj, obj_lm] = id::make_data_object_proxy(_logical_path, _replicas);
 
         irods::file_object_ptr obj{new irods::file_object{&_comm, data_obj.get()}};

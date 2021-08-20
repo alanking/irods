@@ -12,8 +12,6 @@
 
 #include "json.hpp"
 
-struct DataObjInfo;
-
 namespace irods::experimental::data_object
 {
     /// \brief Presents a data object-level interface to a DataObjInfo legacy iRODS struct.
@@ -225,6 +223,11 @@ namespace irods::experimental::data_object
     /// \since 4.2.9
     using data_object_proxy_t = data_object_proxy<DataObjInfo>;
 
+    /// \brief Helper type for a JSON representation of a data object.
+    ///
+    /// \since 4.2.11
+    using json_repr_t = std::vector<const nlohmann::json*>;
+
     /// \brief Wraps an existing doi_type with a proxy object.
     /// \param[in] _doi - Pre-existing doi_type which will be wrapped by the returned proxy.
     /// \return data_object_proxy
@@ -335,7 +338,7 @@ namespace irods::experimental::data_object
     /// \returns data_object_proxy and lifetime_manager for underlying struct
     ///
     /// \since 4.2.11
-    static auto make_data_object_proxy(const std::string_view _logical_path, const nlohmann::json& _replicas)
+    static auto make_data_object_proxy(const std::string_view _logical_path, const json_repr_t& _replicas)
         -> std::pair<data_object_proxy_t, lifetime_manager<DataObjInfo>>
     {
         namespace ir = irods::experimental::replica;
@@ -347,9 +350,13 @@ namespace irods::experimental::data_object
         DataObjInfo* head{};
         DataObjInfo* prev{};
 
-        for (const auto& replica_json : _replicas) {
+        for (const auto* replica_json : _replicas) {
+            if (!replica_json) {
+                THROW(SYS_INTERNAL_NULL_INPUT_ERR, "json pointer is null");
+            }
+
             // Populate the new struct
-            auto [curr, curr_lm] = ir::make_replica_proxy(_logical_path.data(), replica_json);
+            auto [curr, curr_lm] = ir::make_replica_proxy(_logical_path.data(), *replica_json);
 
             // Make sure the structure used for the head is populated
             if (!head) {

@@ -61,10 +61,9 @@ extern irods::resource_manager resc_mgr;
 namespace
 {
     // clang-format off
-    namespace fs          = irods::experimental::filesystem;
-    namespace ic          = irods::experimental::catalog;
-    namespace replica     = irods::experimental::replica;
-    namespace data_object = irods::experimental::data_object;
+    namespace fs      = irods::experimental::filesystem;
+    namespace ic      = irods::experimental::catalog;
+    namespace id      = irods::experimental::data_object;
 
     using json      = nlohmann::json;
     using operation = std::function<int(RsComm*, BytesBuf*, BytesBuf**)>;
@@ -89,14 +88,16 @@ namespace
         return _api->call_handler<BytesBuf*, BytesBuf**>(_comm, _input, _output);
     } // call_data_object_finalize
 
-    auto split_before_and_after_info(const json& _json_list) -> std::tuple<json, json>
+    auto split_before_and_after_info(const json& _json_list) -> std::tuple<id::json_repr_t, id::json_repr_t>
     {
-        json before;
-        json after;
+        id::json_repr_t before;
+        id::json_repr_t after;
 
         for (const auto& i : _json_list) {
-            before.push_back(i.at("before"));
-            after.push_back(i.at("after"));
+            const auto* b = &i.at("before");
+            const auto* a = &i.at("after");
+            before.push_back(b);
+            after.push_back(a);
         }
 
         return {before, after};

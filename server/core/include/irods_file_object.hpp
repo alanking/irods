@@ -213,7 +213,7 @@ namespace irods {
     /// \since 4.2.11
     auto file_object_factory(RsComm& _comm,
                              const std::string_view _logical_path,
-                             const nlohmann::json& _replicas) -> irods::file_object_ptr;
+                             const std::vector<const nlohmann::json*>& _replicas) -> irods::file_object_ptr;
 
     /// \param[in] _obj File object to search
     /// \param[in] _hierarchy
