@@ -50,7 +50,7 @@ namespace irods
         const auto buf_size = _s.length() + 1;
 
         auto* buf = static_cast<char*>(allocate(sizeof(char) * buf_size));
-        std::snprintf(buf, buf_size, "%s", _s.data());
+        std::memcpy(buf, _s.data(), buf_size);
 
         auto* bbp = static_cast<BytesBuf*>(allocate(sizeof(BytesBuf)));
         bbp->len = buf_size;
