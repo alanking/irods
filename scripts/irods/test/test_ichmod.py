@@ -72,21 +72,3 @@ class test_collection_acl_inheritance(session.make_sessions_mixin([('otherrods',
         self.admin.assert_icommand(['icp', source_logical_path, destination_logical_path])
         self.admin.assert_icommand(['ils', '-LA', self.collection], 'STDOUT', 'icp_file')
         self.user.assert_icommand(['iget', destination_logical_path, os.path.join(self.user.local_session_dir, '')])
-
-    def test_collection_acl_inheritance_for_imv__issue_3032(self):
-        source_logical_path = os.path.join(self.admin.session_collection, 'file')
-        destination_logical_path = os.path.join(self.collection, 'imv_file')
-        filepath = os.path.join(self.admin.local_session_dir, 'file')
-        lib.make_file(filepath, 1)
-
-        # Move from a data object outside of the inheritance structure to ensure that the ACL
-        # inheritance is not applied to the original object.
-        self.admin.assert_icommand(['iput', filepath, source_logical_path])
-        self.admin.assert_icommand(['ils', '-LA', source_logical_path], 'STDOUT', 'file')
-
-        # Move the data object into the inheritance structure and ensure that the user given
-        # permission to read is able to get the data object.
-        self.admin.assert_icommand(['icp', source_logical_path, destination_logical_path])
-        self.admin.assert_icommand(['ils', '-LA', self.collection], 'STDOUT', 'imv_file')
-        self.user.assert_icommand(['iget', destination_logical_path, os.path.join(self.user.local_session_dir, '')])
-
