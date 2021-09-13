@@ -115,3 +115,15 @@ class Test_Iquest(ResourceBase, unittest.TestCase):
         self.admin.assert_icommand(['imkdir', collection])
         self.admin.assert_icommand(['iquest', "select COLL_NAME where COLL_NAME = '{0}'".format(collection)], 'STDOUT', ['COLL_NAME = ' + collection])
 
+    def test_iquest_totaldatasize(self):
+        self.admin.assert_icommand("iquest \"select sum(DATA_SIZE) where COLL_NAME like '/" +
+                                   self.admin.zone_name + "/home/%'\"", 'STDOUT_SINGLELINE', "DATA_SIZE")  # selects total data size
+
+    def test_iquest_bad_format(self):
+        self.admin.assert_icommand("iquest \"bad formatting\"", 'STDERR_SINGLELINE',
+                                   "INPUT_ARG_NOT_WELL_FORMED_ERR")  # bad request
+
+    def test_iquest_incorrect_format_count(self):
+        self.admin.assert_icommand("iquest \"%s %s\" \"select COLL_NAME where COLL_NAME like '%home%'\"",
+                                   'STDERR_SINGLELINE', 'boost::too_few_args: format-string referred to more arguments than were passed')
+

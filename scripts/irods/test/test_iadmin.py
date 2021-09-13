@@ -89,22 +89,6 @@ class Test_Iadmin(resource_suite.ResourceBase, unittest.TestCase):
             self.admin.assert_icommand(['iadmin', 'rmresc', ptresc])
             self.admin.assert_icommand(['iadmin', 'rmresc', newresc])
 
-    def test_ibun__issue_3571(self):
-        test_file = "ibun_test_file"
-        lib.make_file(test_file, 1000)
-
-        tar_path = self.admin.session_collection + '/somefile.tar'
-        dir_path = self.admin.session_collection + '/somedir'
-
-        self.admin.assert_icommand("imkdir " + dir_path)
-        for i in range(257):
-            self.admin.assert_icommand("iput %s %s/foo%d" % (test_file, dir_path, i))
-
-        self.admin.assert_icommand("ibun -cD tar " + tar_path + " " + dir_path)
-
-        self.admin.assert_icommand("irm -rf " + dir_path)
-        self.admin.assert_icommand("irm -rf " + tar_path)
-
     def test_tokens(self):
         self.admin.assert_icommand(['iadmin', 'at', 'user_type', 'rodstest', self.admin.username])
         self.admin.assert_icommand(['iadmin', 'lt', 'user_type'], 'STDOUT_SINGLELINE', 'rodstest')
@@ -925,26 +909,6 @@ class Test_Iadmin(resource_suite.ResourceBase, unittest.TestCase):
         self.admin.assert_icommand("iput %s foo" % test_file)
         self.admin.assert_icommand(['iexecmd', '-p', self.admin.session_collection + '/foo', 'hello'], 'STDOUT_SINGLELINE', "Hello world  from irods")
         self.admin.assert_icommand("irm -f foo")
-
-    def test_ibun(self):
-        test_file = "ibun_test_file"
-        lib.make_file(test_file, 1000)
-        cmd = "tar cf somefile.tar " + test_file
-        lib.execute_command(['tar', 'cf', 'somefile.tar', test_file])
-
-        tar_path = self.admin.session_collection + '/somefile.tar'
-        dir_path = self.admin.session_collection + '/somedir'
-
-        self.admin.assert_icommand("iput somefile.tar")
-        self.admin.assert_icommand("imkdir " + dir_path)
-        self.admin.assert_icommand("iput %s %s/foo0" % (test_file, dir_path))
-        self.admin.assert_icommand("iput %s %s/foo1" % (test_file, dir_path))
-
-        self.admin.assert_icommand("ibun -cD tar " + tar_path + " " +
-                                   dir_path, 'STDERR_SINGLELINE', "OVERWRITE_WITHOUT_FORCE_FLAG")
-
-        self.admin.assert_icommand("irm -rf " + dir_path)
-        self.admin.assert_icommand("irm -rf " + tar_path)
 
     @unittest.skip( "configuration requires sudo to create the environment")
     def test_rebalance_for_repl_node_with_different_users_with_write_failure__issue_3674(self):
