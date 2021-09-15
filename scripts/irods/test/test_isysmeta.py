@@ -14,17 +14,26 @@ class Test_isysmeta(session.make_sessions_mixin([('otherrods', 'rods')], [('alic
         super(Test_isysmeta, self).setUp()
         self.admin = self.admin_sessions[0]
 
+        self.filename = 'testfile.txt'
+        self.local_file = os.path.join(self.admin.local_session_dir, self.filename)
+        self.testfile = os.path.join(self.admin.session_collection, self.filename)
+
+        with open(self.local_file, 'wt') as f:
+            print('I AM A TESTFILE -- [' + self.filename + ']', file=f, end='')
+
+        self.admin.assert_icommand(['iput', self.local_file, self.testfile])
+
     def tearDown(self):
         super(Test_isysmeta, self).tearDown()
 
     def test_isysmeta_no_resc_group__2819(self):
-        self.admin.assert_icommand("ils -L", 'STDOUT_SINGLELINE', self.testfile)  # basic listing
+        self.admin.assert_icommand("ils -L", 'STDOUT_SINGLELINE', self.filename)  # basic listing
         self.admin.assert_icommand_fail("isysmeta ls -l "+self.testfile, 'STDOUT_SINGLELINE',
                                    "resc_group_name:")  # should not exist
 
     def test_isysmeta_init_set_and_reset(self):
-        self.admin.assert_icommand("ils -L", 'STDOUT_SINGLELINE', "testfile.txt")  # basic listing
-        self.admin.assert_icommand("isysmeta ls testfile.txt", 'STDOUT_SINGLELINE',
+        self.admin.assert_icommand(['ils', '-L'], 'STDOUT_SINGLELINE', self.filename)  # basic listing
+        self.admin.assert_icommand(['isysmeta', 'ls', self.testfile], 'STDOUT_SINGLELINE',
                                    "data_expiry_ts (expire time): 00000000000: None")  # initialized with zeros
         offset_seconds = 1
         expected_time_string = time.strftime('%Y-%m-%d.%H:%M:%S', time.localtime(offset_seconds))

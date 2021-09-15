@@ -1,3 +1,4 @@
+import os
 import sys
 
 if sys.version_info >= (2, 7):
@@ -11,6 +12,8 @@ class Test_icd(session.make_sessions_mixin([('otherrods', 'rods')], [('alice', '
     def setUp(self):
         super(Test_icd, self).setUp()
         self.admin = self.admin_sessions[0]
+        self.testdir = os.path.join(self.admin.session_collection, 'testdir')
+        self.admin.assert_icommand(['imkdir', self.testdir])
 
     def tearDown(self):
         super(Test_icd, self).tearDown()
