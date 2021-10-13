@@ -504,7 +504,6 @@ runIrodsAgentFactory( sockaddr_un agent_addr ) {
         std::string neg_results;
         ret = irods::client_server_negotiation_for_server( net_obj, neg_results );
         if ( !ret.ok() || neg_results == irods::CS_NEG_FAILURE ) {
-            irods::log( PASS( ret ) );
             // =-=-=-=-=-=-=-
             // send a 'we failed to negotiate' message here??
             // or use the error stack rule engine thingie

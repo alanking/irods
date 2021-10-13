@@ -26,10 +26,20 @@
 #include <map>
 #include <vector>
 
+#include "fmt/format.h"
+
 extern const packInstruct_t RodsPackTable[];
 
 namespace irods
 {
+    auto negotiation_key_is_valid(const std::string_view _key) -> bool
+    {
+        // TODO: check for too short (32 bytes)
+        // TODO: check for too long (32 bytes)
+        // TODO: check for characters (alphanumeric + underscores?)
+        return !_key.empty();
+    } // negotiation_key_is_valid
+
     /// =-=-=-=-=-=-=-
     /// @brief given a property map and the target host name decide between a federated key and a local key
     const std::string& determine_negotiation_key( const std::string& _host_name )
@@ -228,7 +238,7 @@ namespace irods
 
         // =-=-=-=-=-=-=-
         // if it is set then check for our magic token which requests
-        // the negotiation, if its not there then return success
+        // the negotiation, if it is not the magic token, move on
         std::string opt_str( opt_ptr );
         if ( std::string::npos == opt_str.find( REQ_SVR_NEG ) ) {
             return false;
@@ -346,6 +356,14 @@ namespace irods
                 }
                 try {
                     const std::string& neg_key = determine_negotiation_key(_host_name);
+                    if (!negotiation_key_is_valid(neg_key)) {
+                        irods::log(LOG_WARNING, fmt::format(
+                            "[{}:{}] - negotiation_key is invalid [{}]",
+                            __func__, __LINE__, neg_key));
+
+                        // Note: This will be caught and continue below
+                        THROW(SYS_CONFIG_FILE_ERR, "invalid negotiation_key");
+                    }
                     // =-=-=-=-=-=-=-
                     // sign the SID
                     std::string signed_sid;

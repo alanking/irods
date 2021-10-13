@@ -11,7 +11,10 @@
 
 #include <list>
 
-namespace irods {
+#include "fmt/format.h"
+
+namespace irods
+{
 /// =-=-=-=-=-=-=-
 /// @brief check the incoming signed SID against all locals SIDs
     error check_sent_sid(
@@ -28,6 +31,11 @@ namespace irods {
             // =-=-=-=-=-=-=-
             // get the agent key
             const auto& encr_key = irods::get_server_property<const std::string>(CFG_NEGOTIATION_KEY_KW);
+            if (!negotiation_key_is_valid(encr_key)) {
+                THROW(SYS_CONFIG_FILE_ERR, fmt::format(
+                    "[{}:{}] - negotiation_key in server_config is invalid",
+                    __func__, __LINE__));
+            }
 
             // =-=-=-=-=-=-=-
             // start with local SID
@@ -47,6 +55,9 @@ namespace irods {
             // =-=-=-=-=-=-=-
             // if it is a match, were good
             if ( _in_sid == signed_sid ) {
+                irods::log(LOG_DEBUG8, fmt::format(
+                    "[{}:{}] - signed SID/zone_key matches input SID/zone_key",
+                    __func__, __LINE__));
                 return SUCCESS();
             }
         } catch ( const irods::exception& e ) {
@@ -125,7 +136,7 @@ namespace irods {
             }
             else {
                 // =-=-=-=-=-=-=-
-                // a negotiation was not requested, bail
+                // a negotiation was not requested and we do not require SSL - we good
                 return SUCCESS();
             }
 
@@ -164,34 +175,34 @@ namespace irods {
                 // extract the signed SID
                 if ( kvp.find( CS_NEG_SID_KW ) != kvp.end() ) {
                     std::string svr_sid = kvp[ CS_NEG_SID_KW ];
-                    if ( !svr_sid.empty() ) {
-                        // =-=-=-=-=-=-=-
-                        // check SID against our SIDs
-                        err = check_sent_sid(
-                                  svr_sid );
-                        if ( !err.ok() ) {
-                            rodsLog(
-                                LOG_DEBUG,
-                                "CS_NEG\n%s",
-                                PASS( err ).result().c_str() );
-                        }
-                        else {
-                            // =-=-=-=-=-=-=-
-                            // store property that states this is an
-                            // Agent-Agent connection
-                            try {
-                                irods::set_server_property<std::string>(AGENT_CONN_KW, svr_sid);
-                            } catch ( const irods::exception& e ) {
-                                return irods::error(e);
-                            }
-                        }
+                    if ( svr_sid.empty() ) {
+                        //std::unique_ptr<RcComm> comm;
+                        //_ptr->to_client(comm);
+                        //const auto* remote_host = comm->host;
+                        const std::string remote_host = "client";
+                        return ERROR(REMOTE_SERVER_SID_NOT_DEFINED, fmt::format(
+                            "[{}:{}] - received empty zone_key from [{}]", __func__, __LINE__, remote_host));
+                    }
 
-                    } // if sid is not empty
-                    else {
+                    // =-=-=-=-=-=-=-
+                    // check SID against our SIDs
+                    err = check_sent_sid( svr_sid );
+                    if ( !err.ok() ) {
                         rodsLog(
                             LOG_WARNING,
-                            "CS_NEG :: %s - sent SID is empty",
-                            __FUNCTION__ );
+                            "CS_NEG\n%s",
+                            PASS( err ).result().c_str() );
+
+                        return err;
+                    }
+
+                    // =-=-=-=-=-=-=-
+                    // store property that states this is an
+                    // Agent-Agent connection
+                    try {
+                        irods::set_server_property<std::string>(AGENT_CONN_KW, svr_sid);
+                    } catch ( const irods::exception& e ) {
+                        return irods::error(e);
                     }
                 }
 

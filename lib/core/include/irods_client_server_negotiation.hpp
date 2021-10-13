@@ -17,6 +17,7 @@
 // =-=-=-=-=-=-=-
 // stl includes
 #include <string>
+#include <string_view>
 
 namespace irods
 {
@@ -96,6 +97,14 @@ namespace irods
     /// @brief check the incoming signed SID against all locals SIDs
     error check_sent_sid(
         const std::string );  // incoming signed SID
+
+    /// \brief Return whether the configured negotiation_key meets a set of requirements.
+    ///
+    /// \retval true If the negotiation_key has exactly 32 valid characters.
+    /// \retval false If the negotiation_key does not have exactly 32 valid characters.
+    ///
+    /// \since 4.2.11
+    auto negotiation_key_is_valid(const std::string_view _key) -> bool;
 } // namespace irods
 
 #endif // __IRODS_CLIENT_SERVER_NEGOTIATION_HPP__
