@@ -147,6 +147,7 @@ set(
   ${CMAKE_SOURCE_DIR}/lib/core/include/rodsUser.h
   ${CMAKE_SOURCE_DIR}/lib/core/include/rodsXmsg.h
   ${CMAKE_SOURCE_DIR}/lib/core/include/rsyncUtil.h
+  ${CMAKE_SOURCE_DIR}/lib/core/include/safe_string.hpp
   ${CMAKE_SOURCE_DIR}/lib/core/include/scanUtil.h
   ${CMAKE_SOURCE_DIR}/lib/core/include/shared_memory_object.hpp
   ${CMAKE_SOURCE_DIR}/lib/core/include/sockComm.h
