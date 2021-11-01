@@ -707,3 +707,22 @@ def add_child_resource(parent_resource_name, child_resource_name, user):
 
 def remove_child_resource(parent_resource_name, child_resource_name, user):
     user.assert_icommand(['iadmin', 'rmchildfromresc', parent_resource_name, child_resource_name])
+
+def get_user_type(session, username):
+    gql = "select USER_TYPE where USER_NAME = '{}'"
+    return session.assert_icommand(['iquest', '%s', gql.format(username)], 'STDOUT')[1].strip()
+
+
+def get_user_zone(session, username):
+    gql = "select USER_ZONE where USER_NAME = '{}'"
+    return session.assert_icommand(['iquest', '%s', gql.format(username)], 'STDOUT')[1].strip()
+
+
+def get_user_comment(session, username):
+    gql = "select USER_COMMENT where USER_NAME = '{}'"
+    return session.assert_icommand(['iquest', '%s', gql.format(username)], 'STDOUT')[1].strip()
+
+
+def get_user_info(session, username):
+    gql = "select USER_INFO where USER_NAME = '{}'"
+    return session.assert_icommand(['iquest', '%s', gql.format(username)], 'STDOUT')[1].strip()
