@@ -4,7 +4,6 @@
 #include "icatHighLevelRoutines.hpp"
 #include "miscServerFunct.hpp"
 #include "irods_socket_information.hpp"
-#include "irods_dynamic_cast.hpp"
 #include "irods_signal.hpp"
 #include "irods_client_server_negotiation.hpp"
 #include "irods_network_factory.hpp"
@@ -615,11 +614,6 @@ int agentMain(rsComm_t *rsComm)
     }
 
     int status = 0;
-
-    // =-=-=-=-=-=-=-
-    // compiler backwards compatibility hack
-    // see header file for more details
-    irods::dynamic_cast_hack();
 
     irods::error result = SUCCESS();
     while ( result.ok() && status >= 0 ) {
