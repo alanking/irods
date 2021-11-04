@@ -506,7 +506,6 @@ set(
   ${CMAKE_CURRENT_SOURCE_DIR}/server/core/include/irods_database_object.hpp
   ${CMAKE_CURRENT_SOURCE_DIR}/server/core/include/irods_database_plugin.hpp
   ${CMAKE_CURRENT_SOURCE_DIR}/server/core/include/irods_database_types.hpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/server/core/include/irods_dynamic_cast.hpp
   ${CMAKE_CURRENT_SOURCE_DIR}/server/core/include/irods_file_object.hpp
   ${CMAKE_CURRENT_SOURCE_DIR}/server/core/include/irods_generic_database_object.hpp
   ${CMAKE_CURRENT_SOURCE_DIR}/server/core/include/irods_get_l1desc.hpp
