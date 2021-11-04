@@ -219,7 +219,6 @@ class Test_AllRules(resource_suite.ResourceBase, unittest.TestCase):
                 "rulemsiSetPublicUserOpr",
                 "rulemsiSetRandomScheme",
                 "rulemsiSetRescQuotaPolicy",
-                "rulemsiSetRescSortScheme",
                 "rulemsiSetReServerNumProc",
                 "rulemsiSetResource",
                 "rulemsiSortDataObj",
