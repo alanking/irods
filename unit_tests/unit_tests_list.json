@@ -1,6 +1,7 @@
 [
     "irods_atomic_apply_acl_operations",
     "irods_atomic_apply_metadata_operations",
+    "irods_c_general_user_admin",
     "irods_client_connection",
     "irods_client_server_negotiation",
     "irods_connection_pool",
