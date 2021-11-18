@@ -16,8 +16,9 @@
     struct RcComm;
 #endif // IRODS_USER_ADMINISTRATION_ENABLE_SERVER_SIDE_API
 
-#include "user.hpp"
 #include "group.hpp"
+#include "user.hpp"
+#include "zone.hpp"
 
 #include <vector>
 #include <string>
@@ -41,18 +42,9 @@ namespace irods::experimental::administration
         enum class user_type
         {
             rodsuser,   ///< Identifies users that do not have administrative privileges.
-            groupadmin, ///< Identifies users that have limited administrative privileges. 
+            groupadmin, ///< Identifies users that have limited administrative privileges.
             rodsadmin   ///< Identifies users that have full administrative privileges.
         }; // enum class user_type
-
-        /// \since 4.2.8
-        ///
-        /// \brief Defines the zone types.
-        enum class zone_type
-        {
-            local,  ///< Identifies the zone in which an operation originates.
-            remote  ///< Identifies a foreign zone.
-        }; // enum class zone_type
 
         /// \since 4.2.8
         ///

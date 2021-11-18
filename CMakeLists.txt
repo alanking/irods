@@ -397,6 +397,42 @@ target_compile_options(irods_user_administration_server PRIVATE -fPIC -Wno-write
 target_compile_definitions(irods_user_administration_server PRIVATE ${IRODS_COMPILE_DEFINITIONS} IRODS_USER_ADMINISTRATION_ENABLE_SERVER_SIDE_API)
 
 add_library(
+  irods_zone_administration_client
+  OBJECT
+  ${CMAKE_SOURCE_DIR}/lib/core/src/zone_administration.cpp
+  )
+target_include_directories(
+  irods_zone_administration_client
+  PRIVATE
+  ${CMAKE_BINARY_DIR}/lib/core/include
+  ${CMAKE_SOURCE_DIR}/lib/core/include
+  ${CMAKE_SOURCE_DIR}/lib/api/include
+  ${IRODS_EXTERNALS_FULLPATH_BOOST}/include
+  ${IRODS_EXTERNALS_FULLPATH_FMT}/include
+  )
+target_compile_options(irods_zone_administration_client PRIVATE -fPIC -Wno-write-strings)
+target_compile_definitions(irods_zone_administration_client PRIVATE ${IRODS_COMPILE_DEFINITIONS})
+
+add_library(
+  irods_zone_administration_server
+  OBJECT
+  ${CMAKE_SOURCE_DIR}/lib/core/src/zone_administration.cpp
+  )
+target_include_directories(
+  irods_zone_administration_server
+  PRIVATE
+  ${CMAKE_BINARY_DIR}/lib/core/include
+  ${CMAKE_SOURCE_DIR}/lib/core/include
+  ${CMAKE_SOURCE_DIR}/lib/api/include
+  ${CMAKE_SOURCE_DIR}/server/core/include
+  ${CMAKE_SOURCE_DIR}/server/api/include
+  ${IRODS_EXTERNALS_FULLPATH_BOOST}/include
+  ${IRODS_EXTERNALS_FULLPATH_FMT}/include
+  )
+target_compile_options(irods_zone_administration_server PRIVATE -fPIC -Wno-write-strings)
+target_compile_definitions(irods_zone_administration_server PRIVATE ${IRODS_COMPILE_DEFINITIONS} IRODS_USER_ADMINISTRATION_ENABLE_SERVER_SIDE_API)
+
+add_library(
   irods_resource_administration_client
   OBJECT
   ${CMAKE_SOURCE_DIR}/lib/core/src/resource_administration.cpp
@@ -653,6 +689,7 @@ set(
   $<TARGET_OBJECTS:irods_filesystem_client>
   $<TARGET_OBJECTS:irods_user_administration_client>
   $<TARGET_OBJECTS:irods_resource_administration_client>
+  $<TARGET_OBJECTS:irods_zone_administration_client>
   )
 add_library(
   irods_client
@@ -934,6 +971,7 @@ set(
   $<TARGET_OBJECTS:irods_filesystem_server>
   $<TARGET_OBJECTS:irods_user_administration_server>
   $<TARGET_OBJECTS:irods_resource_administration_server>
+  $<TARGET_OBJECTS:irods_zone_administration_client>
   )
 add_library(
   irods_server
@@ -947,6 +985,7 @@ add_library(
   $<TARGET_OBJECTS:irods_filesystem_client>
   $<TARGET_OBJECTS:irods_user_administration_client>
   $<TARGET_OBJECTS:irods_resource_administration_client>
+  $<TARGET_OBJECTS:irods_zone_administration_client>
   )
 target_link_libraries(
   irods_server
@@ -1251,6 +1290,8 @@ add_library(
   $<TARGET_OBJECTS:irods_user_administration_server>
   $<TARGET_OBJECTS:irods_resource_administration_client>
   $<TARGET_OBJECTS:irods_resource_administration_server>
+  $<TARGET_OBJECTS:irods_zone_administration_client>
+  $<TARGET_OBJECTS:irods_zone_administration_server>
   $<TARGET_OBJECTS:irods_plugin_dependencies_functions>
   )
 target_link_libraries(

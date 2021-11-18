@@ -10,7 +10,7 @@ namespace irods::experimental::administration
     {
         user::user(std::string name, std::optional<std::string> zone)
             : name{std::move(name)}
-            , zone{zone ? *zone : ""}
+            , zone{zone ? std::move(*zone) : ""}
         {
         }
 

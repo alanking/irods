@@ -1,5 +1,5 @@
-#ifndef IRODS_USER_ADMINISTRTION_USER_HPP
-#define IRODS_USER_ADMINISTRTION_USER_HPP
+#ifndef IRODS_USER_ADMINISTRATION_USER_HPP
+#define IRODS_USER_ADMINISTRATION_USER_HPP
 
 #include <string>
 #include <optional>
@@ -25,4 +25,4 @@ namespace irods::experimental::administration
     } // namespace v1
 } // namespace irods::experimental::administration
 
-#endif // IRODS_USER_ADMINISTRTION_USER_HPP
+#endif // IRODS_USER_ADMINISTRATION_USER_HPP

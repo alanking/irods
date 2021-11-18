@@ -162,6 +162,8 @@ set(
   ${CMAKE_SOURCE_DIR}/lib/core/include/user_administration.hpp
   ${CMAKE_SOURCE_DIR}/lib/core/include/version.hpp
   ${CMAKE_SOURCE_DIR}/lib/core/include/with_durability.hpp
+  ${CMAKE_SOURCE_DIR}/lib/core/include/zone.hpp
+  ${CMAKE_SOURCE_DIR}/lib/core/include/zone_administration.hpp
   )
 
 set(
