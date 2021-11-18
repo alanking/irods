@@ -62,46 +62,53 @@ namespace irods::experimental::administration
             ///
             /// \brief Adds a new zone to the system.
             ///
-            /// \throws user_management_error If the user type cannot be converted to a string.
+            /// \throws zone_management_error If the zone type cannot be converted to a string.
             ///
-            /// \param[in] conn      The communication object.
-            /// \param[in] user      The user to add.
-            /// \param[in] user_type The type of the user.
-            /// \param[in] zone_type The zone that is responsible for the user.
-            ///
-            /// \return An error code.
-            auto add_zone(rxComm& conn, const zone& _zone) -> std::error_code;
-
-            /// \since 4.2.8
-            ///
-            /// \brief Removes a user from the system.
-            ///
-            /// \param[in] conn The communication object.
-            /// \param[in] user The user to remove.
+            /// \param[in/out] _comm    The communication object.
+            /// \param[in] _name        The zone to add.
+            /// \param[in] _host        The host used to connect to the zone.
+            /// \param[in] _port        The port used to connect to the zone.
+            /// \param[in] _comment     The zone comment.
+            /// \param[in] _type        The type of the zone.
             ///
             /// \return An error code.
-            auto remove_zone(rxComm& conn, const user& user) -> std::error_code;
+            auto add_zone(rxComm&                _comm,
+                          const std::string_view _name,
+                          const std::string_view _host = "",
+                          const std::string_view _port = "",
+                          const zone_type        _type = zone_type::remote,
+                          const std::string_view _comment = "") -> std::error_code;
 
-            /// \since 4.2.8
+            /// \since 4.2.11
             ///
-            /// \brief Changes the password of a user.
+            /// \brief Removes a zone from the system.
             ///
-            /// \param[in] conn         The communication object.
-            /// \param[in] user         The user to update.
-            /// \param[in] new_password The new password of the user.
+            /// \param[in/out] _comm The communication object.
+            /// \param[in] _name The zone to remove.
             ///
             /// \return An error code.
-            auto set_zone_name(rxComm& conn, const user& user, std::string_view new_password) -> std::error_code;
+            auto remove_zone(rxComm& _comm, const std::string_view _zone) -> std::error_code;
 
-            /// \since 4.2.8
+            /// \since 4.2.11
             ///
-            /// \brief Changes the type of a user.
+            /// \brief Changes the name of a zone.
             ///
-            /// \throws user_management_error If the new user type cannot be converted to a string.
+            /// \param[in/out] _comm The communication object.
+            /// \param[in] _name     The zone to update.
+            /// \param[in] _new_name The new name of the zone.
             ///
-            /// \param[in] conn          The communication object.
-            /// \param[in] user          The user to update.
-            /// \param[in] new_user_type The new type of the user.
+            /// \return An error code.
+            auto set_zone_name(rxComm& conn,
+                               const std::string_view _name,
+                               const std::string_view _new_name) -> std::error_code;
+
+            /// \since 4.2.11
+            ///
+            /// \brief Changes the connection information of a zone.
+            ///
+            /// \param[in] _comm          The communication object.
+            /// \param[in] _name          The user to update.
+            /// \param[in] _host The new type of the user.
             ///
             /// \return An error code.
             auto set_zone_connection_info(rxComm& conn, const user& user, user_type new_user_type) -> std::error_code;
