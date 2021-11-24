@@ -209,9 +209,8 @@ replBytesBuf( const bytesBuf_t* in) {
     }
     bytesBuf_t* out = (bytesBuf_t*)malloc(sizeof(bytesBuf_t));
     out->len = in->len;
-    //TODO: this is horrible. check if it is necessary
-    out->buf = malloc( out->len + 100 );
-    memcpy( out->buf, in->buf, out->len );
+    out->buf = malloc(out->len);
+    memcpy(out->buf, in->buf, out->len);
     return out;
 }
 

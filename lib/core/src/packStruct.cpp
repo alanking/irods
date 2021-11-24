@@ -3515,7 +3515,11 @@ int unpack_struct(const void *inPackedStr,
         return status;
     }
 
-    *outStruct = unpackedOutput.bBuf.buf;
+    // TODO: This is a copy, but prevents leaks.
+    auto* b = replBytesBuf(&unpackedOutput.bBuf);
+    *outStruct = b ? b->buf : nullptr;
+    free(unpackedOutput.bBuf.buf);
+    free(b);
 
     return 0;
 }
