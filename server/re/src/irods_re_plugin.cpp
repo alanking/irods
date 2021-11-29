@@ -102,23 +102,16 @@ namespace irods
 
         const unsigned int arg_count = l.size();
 
-        struct all_resources {
-            all_resources() {
-                //rNew = make_region(0, NULL);
-                memset(msParams,0 ,sizeof(msParam_t[10]));
-            }
-            ~all_resources() {
-                // Free msParams which came from the list
+        std::vector<msParam_t *> myArgv;
+        const auto clear_params = irods::at_scope_exit{[&myArgv]
+            {
                 for (auto* msp : myArgv) {
                     clearMsParam(msp, 1);
                 }
-                //region_free(rNew);
             }
+        };
 
-            std::vector<msParam_t *> myArgv;
-            //Region *rNew; // TODO: documentation!!
-            msParam_t msParams[10];
-        } ar;
+        msParam_t msParams[10]{};
 
         irods::ms_table_entry ms_entry;
         if (const auto index = actionTableLookUp(ms_entry, msName.c_str()); index < 0) {
@@ -129,15 +122,11 @@ namespace irods
 
         int i = 0;
         for (auto& in : l) {
-            auto* out = &(ar.msParams[i]);
-            // Copy bufs from list into msParams
-            // out = 0xA
-            // ar.msParams[i] = 0xA
+            auto* out = &msParams[i];
             if (const auto err = convertToMsParam(in, out); !err.ok()) {
                 return err;
             }
-            // ar.myArgv.at(i) = 0xA
-            ar.myArgv.push_back(out);
+            myArgv.push_back(out);
             i++;
         }
 
@@ -148,7 +137,7 @@ namespace irods
                          __func__, __LINE__, arg_count, expected_arg_count));
         }
 
-        if (const auto ec = ms_entry.call(rei, ar.myArgv); ec < 0) {
+        if (const auto ec = ms_entry.call(rei, myArgv); ec < 0) {
             return ERROR(ec, fmt::format(
                          "[{}:{}] - microservice execution failed; ec=[{}]",
                          __func__, __LINE__, ec));
@@ -156,10 +145,7 @@ namespace irods
 
         i = 0;
         for (auto& out : l) {
-            auto* in = ar.myArgv[i];
-            // Copy bufs from msParams into list
-            // TODO: ...which still has its items from the beginning
-            // TODO: does boost::any free memory? I doubt it
+            auto* in = myArgv[i];
             if (const auto err = convertFromMsParam(out, in); !err.ok()) {
                 return err;
             }
