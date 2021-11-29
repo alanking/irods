@@ -4,14 +4,18 @@
 #include "irods_server_properties.hpp"
 #include "irods_exception.hpp"
 #include "irods_ms_plugin.hpp"
+#include "irods_at_scope_exit.hpp"
 
 #include <vector>
 
 #include <boost/any.hpp>
-int actionTableLookUp( irods::ms_table_entry& _entry, char* _action );
 
-namespace irods{
+#include "fmt/format.h"
 
+int actionTableLookUp( irods::ms_table_entry& _entry, const char* _action );
+
+namespace irods
+{
     // extern variable for the re plugin globals
     std::unique_ptr<struct global_re_plugin_mgr> re_plugin_globals;
 
@@ -44,104 +48,131 @@ namespace irods{
 
     template class pluggable_rule_engine<default_re_ctx>;
 
-    error convertToMsParam(boost::any &itr, msParam_t *t) {
-        if(itr.type() == typeid(std::string)) {
-            fillStrInMsParam( t, const_cast<char*>( boost::any_cast<std::string>(itr).c_str() ));
-        } else if(itr.type() == typeid(std::string *)) {
-            fillStrInMsParam( t, const_cast<char*>( (*(boost::any_cast<std::string *>(itr))).c_str() ));
-        } else if(itr.type() == typeid(msParam_t*)) {
-            memset(t, 0, sizeof(*t));
-            replMsParam(boost::any_cast<msParam_t*>(itr), t);
-        } else {
-            return ERROR(-1, "cannot convert parameter");
+    error convertToMsParam(boost::any& _in, msParam_t* _out)
+    {
+        if (_in.type() == typeid(std::string)) {
+            fillStrInMsParam(_out, boost::any_cast<std::string>(_in).c_str());
+        }
+        else if (_in.type() == typeid(std::string*)) {
+            delete boost::any_cast<std::string*>(_out);
+            fillStrInMsParam(_out, boost::any_cast<std::string*>(_in)->c_str());
+        }
+        else if (_in.type() == typeid(msParam_t*)) {
+            clearMsParam(_out, 1);
+            // _out = 0xA
+            replMsParam(boost::any_cast<msParam_t*>(_in), _out);
+        }
+        else {
+            return ERROR(MICRO_SERVICE_OBJECT_TYPE_UNDEFINED, "cannot convert parameter");
         }
 
         return SUCCESS();
-    }
+    } // convertToMsParam
 
-    error convertFromMsParam(boost::any& itr, msParam_t *t) {
-        if(std::string(t->type).compare(STR_MS_T) == 0) {
-            if(itr.type() == typeid(std::string *)) {
-                *(boost::any_cast<std::string *>(itr)) = std::string(reinterpret_cast<char*>( t->inOutStruct) );
+    error convertFromMsParam(boost::any& _out, msParam_t* _in)
+    {
+        if (!_in->type) {
+            return ERROR(MICRO_SERVICE_OBJECT_TYPE_UNDEFINED,
+                         "type was null, cannot convert type");
+        }
+
+        if (std::string(_in->type).compare(STR_MS_T) == 0) {
+            if (_out.type() == typeid(std::string*)) {
+                delete boost::any_cast<std::string*>(_out);
+                *(boost::any_cast<std::string*>(_out)) = std::string{reinterpret_cast<char*>(_in->inOutStruct)};
             }
-        } else if (t->type) {
-            replMsParam(t, boost::any_cast<msParam_t*>(itr));
-        } else {
-            return ERROR(-1, "type was null, cannot convert type");
+            // TODO: what about std::string?
+
+            return SUCCESS();
         }
 
-        return SUCCESS();
-    }
+        msParam_t* msp = boost::any_cast<msParam_t*>(_out);
+        clearMsParam(msp, 1);
 
-    error default_microservice_manager<default_ms_ctx>:: exec_microservice_adapter( std::string msName, default_ms_ctx rei, std::list<boost::any> &l ) {
-        if(msName == std::string("unsafe_ms_ctx")) {
-            default_ms_ctx *p;
-            error err;
-            if(!(err = list_to_var_arg(l, p)).ok()) {
+        replMsParam(_in, msp);
+
+        return SUCCESS();
+    } // convertFromMsParam
+
+    error default_microservice_manager<default_ms_ctx>::exec_microservice_adapter(std::string msName,
+                                                                                  default_ms_ctx rei,
+                                                                                  std::list<boost::any>& l)
+    {
+        if(msName == "unsafe_ms_ctx") {
+            default_ms_ctx* p;
+            if(const auto err = list_to_var_arg(l, p); !err.ok()) {
                 return err;
             }
             *p = rei;
             return SUCCESS();
         }
 
-        unsigned int nargs = l.size();
+        const unsigned int arg_count = l.size();
 
-        error err;
         struct all_resources {
             all_resources() {
-                rNew = make_region(0, NULL);
+                //rNew = make_region(0, NULL);
                 memset(msParams,0 ,sizeof(msParam_t[10]));
             }
             ~all_resources() {
-                for(auto itr= begin(myArgv);itr != end(myArgv); ++itr) {
-                    clearMsParam(*itr, 1);
+                // Free msParams which came from the list
+                for (auto* msp : myArgv) {
+                    clearMsParam(msp, 1);
                 }
-                region_free(rNew);
+                //region_free(rNew);
             }
 
             std::vector<msParam_t *> myArgv;
-            Region *rNew;
+            //Region *rNew; // TODO: documentation!!
             msParam_t msParams[10];
         } ar;
 
         irods::ms_table_entry ms_entry;
-        int actionInx;
-        actionInx = actionTableLookUp( ms_entry,const_cast<char*>( msName .c_str()));
-        if ( actionInx < 0 ) {
-            return ERROR( NO_MICROSERVICE_FOUND_ERR, "default_microservice_manager: no microservice found " + msName);
+        if (const auto index = actionTableLookUp(ms_entry, msName.c_str()); index < 0) {
+            return ERROR(NO_MICROSERVICE_FOUND_ERR, fmt::format(
+                         "[{}:{}] - no microservice found [name=[{}], ec=[{}]]",
+                         __func__, __LINE__, msName, index));
         }
 
         int i = 0;
-        for(auto itr = begin(l); itr != end(l); ++itr) {
-            msParam_t* p = &(ar.msParams[i]);
-            if(!(err = convertToMsParam(*itr, p)).ok()) {
+        for (auto& in : l) {
+            auto* out = &(ar.msParams[i]);
+            // Copy bufs from list into msParams
+            // out = 0xA
+            // ar.msParams[i] = 0xA
+            if (const auto err = convertToMsParam(in, out); !err.ok()) {
                 return err;
             }
-            ar.myArgv.push_back(p);
+            // ar.myArgv.at(i) = 0xA
+            ar.myArgv.push_back(out);
             i++;
         }
 
-        unsigned int numOfStrArgs = ms_entry.num_args();
-        if ( nargs != numOfStrArgs ) {
-            return ERROR( ACTION_ARG_COUNT_MISMATCH, "execMicroService3: wrong number of arguments");
+        const unsigned int expected_arg_count = ms_entry.num_args();
+        if (arg_count != expected_arg_count) {
+            return ERROR(ACTION_ARG_COUNT_MISMATCH, fmt::format(
+                         "[{}:{}] - arguments in: [{}]; arguments expected: [{}]",
+                         __func__, __LINE__, arg_count, expected_arg_count));
         }
 
-        std::vector<msParam_t *> &myArgv = ar.myArgv;
-        int status = ms_entry.call( rei, myArgv );
-        if ( status < 0 ) {
-            return ERROR(status,"exec_microservice_adapter failed");
+        if (const auto ec = ms_entry.call(rei, ar.myArgv); ec < 0) {
+            return ERROR(ec, fmt::format(
+                         "[{}:{}] - microservice execution failed; ec=[{}]",
+                         __func__, __LINE__, ec));
         }
-    
+
         i = 0;
-        for(auto itr = begin(l); itr != end(l); ++itr) {
-            if(!(err = convertFromMsParam(*itr, ar.myArgv[i])).ok()) {
+        for (auto& out : l) {
+            auto* in = ar.myArgv[i];
+            // Copy bufs from msParams into list
+            // TODO: ...which still has its items from the beginning
+            // TODO: does boost::any free memory? I doubt it
+            if (const auto err = convertFromMsParam(out, in); !err.ok()) {
                 return err;
             }
             i++;
         }
 
-        return  SUCCESS();
-
-    }
-
-}
+        return SUCCESS();
+    } // default_microservice_manager<default_ms_ctx>::exec_microservice_adapter
+} // namespace irods

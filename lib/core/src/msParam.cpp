@@ -4,6 +4,7 @@
 #include "modDataObjMeta.h"
 #include "rcGlobalExtern.h"
 #include "rodsErrorTable.h"
+#include "irods_at_scope_exit.hpp"
 
 #include <cstring>
 
@@ -156,6 +157,7 @@ replMsParam( msParam_t *in, msParam_t *out ) {
         return SYS_INTERNAL_NULL_INPUT_ERR;
     }
 
+    // out->inOutStruct = 0xA
     int status = replInOutStruct(in->inOutStruct, &out->inOutStruct, in->type);
     if ( status < 0 ) {
         rodsLogError( LOG_ERROR, status, "Error when calling replInOutStruct in %s", __PRETTY_FUNCTION__ );
@@ -167,40 +169,51 @@ replMsParam( msParam_t *in, msParam_t *out ) {
     return 0;
 }
 
-int
-replInOutStruct( void *inStruct, void **outStruct, const char *type ) {
-    if (outStruct == NULL) {
-        rodsLogError( LOG_ERROR, SYS_INTERNAL_NULL_INPUT_ERR, "replInOutStruct was called with a null pointer in outStruct");
+int replInOutStruct(void* _in, void** _out, const char* _type)
+{
+    if (!_out) {
+        rodsLogError(LOG_ERROR, SYS_INTERNAL_NULL_INPUT_ERR,
+                     "replInOutStruct was called with a null pointer in outStruct");
         return SYS_INTERNAL_NULL_INPUT_ERR;
     }
-    if (inStruct == NULL) {
-        *outStruct = NULL;
+
+    if (!_in) {
+        *_out = nullptr;
         return 0;
     }
-    if (type == NULL) {
-        rodsLogError( LOG_ERROR, SYS_INTERNAL_NULL_INPUT_ERR, "replInOutStruct was called with a null pointer in type");
+
+    if (!_type) {
+        rodsLogError(LOG_ERROR, SYS_INTERNAL_NULL_INPUT_ERR,
+                     "replInOutStruct was called with a null pointer in type");
         return SYS_INTERNAL_NULL_INPUT_ERR;
     }
-    if ( strcmp( type, STR_MS_T ) == 0 ) {
-        *outStruct = strdup( ( char * )inStruct );
+
+    if (strcmp(_type, STR_MS_T) == 0) {
+        *_out = strdup(static_cast<char*>(_in));
         return 0;
     }
-    bytesBuf_t *packedResult;
-    int status = pack_struct( inStruct, &packedResult, type,
-                            NULL, 0, NATIVE_PROT, nullptr);
-    if ( status < 0 ) {
-        rodsLogError( LOG_ERROR, status, "replInOutStruct: packStruct error for type %s", type );
-        return status;
+
+    bytesBuf_t* packed_struct;
+    const auto free_packed_struct = irods::at_scope_exit{[&packed_struct] {
+        freeBBuf(packed_struct);
+    }};
+
+    if (const auto ec = pack_struct(_in, &packed_struct, _type, nullptr, 0, NATIVE_PROT, nullptr); ec < 0) {
+        rodsLogError(LOG_ERROR, ec,
+                     "replInOutStruct: packStruct error for type %s", _type);
+        return ec;
     }
-    status = unpack_struct( packedResult->buf,
-                            outStruct, type, NULL, NATIVE_PROT, nullptr);
-    freeBBuf( packedResult );
-    if ( status < 0 ) {
-        rodsLogError( LOG_ERROR, status, "replInOutStruct: unpackStruct error for type %s", type );
-        return status;
+
+    // _out holding packed_struct.bBuf.buf (16384 bytes)
+    // _out = 0xA
+    if (const auto ec = unpack_struct(packed_struct->buf, _out, _type, nullptr, NATIVE_PROT, nullptr); ec < 0) {
+        rodsLogError(LOG_ERROR, ec,
+                     "replInOutStruct: unpackStruct error for type %s", _type);
+        return ec;
     }
+
     return 0;
-}
+} // replInOutStruct
 
 bytesBuf_t*
 replBytesBuf( const bytesBuf_t* in) {
@@ -210,7 +223,8 @@ replBytesBuf( const bytesBuf_t* in) {
     bytesBuf_t* out = (bytesBuf_t*)malloc(sizeof(bytesBuf_t));
     out->len = in->len;
     //TODO: this is horrible. check if it is necessary
-    out->buf = malloc( out->len + 100 );
+    //out->buf = malloc( out->len + 100 );
+    out->buf = std::malloc(out->len);
     memcpy( out->buf, in->buf, out->len );
     return out;
 }
@@ -474,6 +488,9 @@ clearMsParam( msParam_t *msParam, int freeStruct ) {
     if ( msParam->inOutStruct != NULL && ( freeStruct > 0 ||
                                            ( msParam->type != NULL && strcmp( msParam->type, STR_MS_T ) == 0 ) ) ) {
         free( msParam->inOutStruct );
+    }
+    if (msParam->inpOutBuf) {
+        freeBBuf(msParam->inpOutBuf);
     }
     if ( msParam->type != NULL ) {
         free( msParam->type );

@@ -32,7 +32,7 @@ irods::ms_table& get_microservice_table();
 
 // =-=-=-=-=-=-=-
 // function to look up and / or load a microservice for execution
-int actionTableLookUp( irods::ms_table_entry& _entry, char* _action ) {
+int actionTableLookUp( irods::ms_table_entry& _entry, const char* _action ) {
     irods::ms_table& MicrosTable = get_microservice_table();
 
     std::string str_act( _action );

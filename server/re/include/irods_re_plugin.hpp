@@ -590,6 +590,7 @@ namespace irods {
 
             for (auto&& re_pack : this->re_mgr_.re_packs_) {
                 if (_instance_name == re_pack.instance_name_) {
+                    // 2. JAK - Jump to PREP here
                     return re_pack.re_->exec_rule_text(re_pack.re_ctx_, _rt, _ms_params, _out_desc, callback(*this));
                 }
             }

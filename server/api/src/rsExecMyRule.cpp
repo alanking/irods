@@ -11,6 +11,8 @@ int rsExecMyRule(
     execMyRuleInp_t* _exec_inp,
     msParamArray_t** _out_arr ) {
 
+    // 0. JAK - start of irule call
+
     if ( _exec_inp == NULL ) {
         rodsLog( LOG_NOTICE,
                  "rsExecMyRule error. NULL input" );
@@ -82,6 +84,7 @@ int rsExecMyRule(
         irods::AUDIT_RULE> re_ctx_mgr(
                                irods::re_plugin_globals->global_re_mgr,
                                &rei);
+    // 1. JAK - calls into here...
     irods::error err = re_ctx_mgr.exec_rule_text(
                            inst_name,
                            my_rule_text,
@@ -115,7 +118,7 @@ int rsExecMyRule(
     }
 
     return err.code();
-}
+} // rsExecMyRule
 
 int
 remoteExecMyRule( rsComm_t *_comm, execMyRuleInp_t *_exec_inp,

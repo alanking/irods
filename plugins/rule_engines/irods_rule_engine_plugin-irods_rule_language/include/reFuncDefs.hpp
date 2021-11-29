@@ -38,7 +38,7 @@ int parseAction( char *inAction, char *action, char *args[], int *argc );
 
 int executeRuleAction( char *inAction, ruleExecInfo_t *rei, int reiSaveFlag );
 #include "irods_ms_plugin.hpp"
-int actionTableLookUp( irods::ms_table_entry&, char *action );
+int actionTableLookUp( irods::ms_table_entry&, const char *action );
 
 int applyRuleArgPA( const char *action, const char *args[MAX_NUM_OF_ARGS_IN_ACTION], int argc,
                     msParamArray_t *inMsParamArray, ruleExecInfo_t *rei, int reiSaveFlag );

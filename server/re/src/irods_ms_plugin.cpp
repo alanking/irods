@@ -66,9 +66,11 @@ namespace irods {
 
         int status = 0;
         if ( _params.size() == 0 ) {
+            TRACE_LOG()
             status = call_handler<ruleExecInfo_t*>( _rei );
         }
         else if ( _params.size() == 1 ) {
+            TRACE_LOG()
             status = call_handler<
                 msParam_t*,
                 ruleExecInfo_t*>(
@@ -76,15 +78,17 @@ namespace irods {
                         _rei );
         }
         else if ( _params.size() == 2 ) {
+            TRACE_LOG()
             status = call_handler<
                 msParam_t*,
                 msParam_t*,
                 ruleExecInfo_t*>(
-                        _params[0],
-                        _params[1],
+                        _params[0], // 0xA
+                        _params[1], // 0xB
                         _rei );
         }
         else if ( _params.size() == 3 ) {
+            TRACE_LOG()
             status = call_handler<
                 msParam_t*,
                 msParam_t*,
@@ -96,6 +100,7 @@ namespace irods {
                         _rei );
         }
         else if ( _params.size() == 4 ) {
+            TRACE_LOG()
             status = call_handler<
                 msParam_t*,
                 msParam_t*,
@@ -110,6 +115,7 @@ namespace irods {
 
         }
         else if ( _params.size() == 5 ) {
+            TRACE_LOG()
             status = call_handler<
                 msParam_t*,
                 msParam_t*,
@@ -125,6 +131,7 @@ namespace irods {
                         _rei );
         }
         else if ( _params.size() == 6 ) {
+            TRACE_LOG()
             status = call_handler<
                 msParam_t*,
                 msParam_t*,
@@ -142,6 +149,7 @@ namespace irods {
                         _rei );
         }
         else if ( _params.size() == 7 ) {
+            TRACE_LOG()
             status = call_handler<
                 msParam_t*,
                 msParam_t*,
@@ -162,6 +170,7 @@ namespace irods {
 
         }
         else if ( _params.size() == 8 ) {
+            TRACE_LOG()
             status = call_handler<
                 msParam_t*,
                 msParam_t*,
@@ -183,6 +192,7 @@ namespace irods {
                         _rei );
         }
         else if ( _params.size() == 9 ) {
+            TRACE_LOG()
             status = call_handler<
                 msParam_t*,
                 msParam_t*,
@@ -206,6 +216,7 @@ namespace irods {
                         _rei );
         }
         else if ( _params.size() == 10 ) {
+            TRACE_LOG()
             status = call_handler<
                 msParam_t*,
                 msParam_t*,
