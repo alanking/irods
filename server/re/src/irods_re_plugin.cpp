@@ -54,12 +54,10 @@ namespace irods
             fillStrInMsParam(_out, boost::any_cast<std::string>(_in).c_str());
         }
         else if (_in.type() == typeid(std::string*)) {
-            delete boost::any_cast<std::string*>(_out);
             fillStrInMsParam(_out, boost::any_cast<std::string*>(_in)->c_str());
         }
         else if (_in.type() == typeid(msParam_t*)) {
             clearMsParam(_out, 1);
-            // _out = 0xA
             replMsParam(boost::any_cast<msParam_t*>(_in), _out);
         }
         else {
@@ -78,18 +76,13 @@ namespace irods
 
         if (std::string(_in->type).compare(STR_MS_T) == 0) {
             if (_out.type() == typeid(std::string*)) {
-                delete boost::any_cast<std::string*>(_out);
                 *(boost::any_cast<std::string*>(_out)) = std::string{reinterpret_cast<char*>(_in->inOutStruct)};
             }
-            // TODO: what about std::string?
 
             return SUCCESS();
         }
 
-        msParam_t* msp = boost::any_cast<msParam_t*>(_out);
-        clearMsParam(msp, 1);
-
-        replMsParam(_in, msp);
+        replMsParam(_in, boost::any_cast<msParam_t*>(_out));
 
         return SUCCESS();
     } // convertFromMsParam

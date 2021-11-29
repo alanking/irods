@@ -8,6 +8,8 @@
 
 #include <cstring>
 
+#include "fmt/format.h"
+
 /* addMsParam - This is for backward compatibility only.
  *  addMsParamToArray should be used for all new functions
  */

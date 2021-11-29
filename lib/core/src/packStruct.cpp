@@ -3504,8 +3504,6 @@ int unpack_struct(const void *inPackedStr,
     /* Initialize the unpackedOutput */
     packedOutput_t unpackedOutput = initPackedOutput(PACKED_OUT_ALLOC_SZ);
 
-    // unpackedOutput.bBuf.buf malloc'd PACKED_OUT_ALLOC_SZ bytes (16 * 1024 == 16384)
-
     packItem_t rootPackedItem{};
     rootPackedItem.name = strdup(packInstName);
     int status = unpackChildStruct(inPackedStr, unpackedOutput, rootPackedItem, myPackTable,
@@ -3517,26 +3515,7 @@ int unpack_struct(const void *inPackedStr,
         return status;
     }
 
-#if 1
-    // bBuf.buf pointed to by *outStruct
-    // Not sure where *outStruct is being free'd
-    // 0xA
     *outStruct = unpackedOutput.bBuf.buf;
-#else
-    // This is a copy, but may prevent a leak
-    auto* b = replBytesBuf(&unpackedOutput.bBuf);
-    *outStruct = b ? b->buf : nullptr;
-    free(unpackedOutput.bBuf.buf);
-    free(b);
-#endif
-    // TODO: Do we need to free this?
-    //if (unpackedOutput.nopackBufArray.numBuf > 0 &&
-        //unpackedOutput.nopackBufArray.bBufArray) {
-        //auto* ptr = unpackedOutput.nopackBufArray.bBufArray;
-        //for (int i = 0; i < unpackedOutput.nopackBufArray.numBuf; ++i) {
-            //freeBBuf(ptr + sizeof(*ptr));
-        //}
-    //}
 
     return 0;
 } // unpack_struct
