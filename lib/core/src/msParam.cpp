@@ -255,7 +255,16 @@ fillMsParam( msParam_t *msParam, const char *label,
 void
 fillIntInMsParam( msParam_t *msParam, const int val ) {
     if ( msParam != NULL ) {
+        if (msParam->inOutStruct) {
+            free(msParam->inOutStruct);
+        }
+
+        if (msParam->type) {
+            free(msParam->type);
+        }
+
         msParam->inOutStruct = malloc( sizeof( int ) );
+        memset(msParam->inOutStruct, 0, sizeof(int));
         *(int*)(msParam->inOutStruct) = val;
         msParam->type = strdup( INT_MS_T );
     }
