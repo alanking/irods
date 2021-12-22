@@ -15,6 +15,10 @@ def parse_options():
 
 #wrapper to set up ld_library_path
 def wrap_if_necessary():
+    # /etc/irods/server_config.json will not exist on a fresh installation, so make sure it
+    # does before attempting to open it a few lines below or face an Exception being raised.
+    if os.path.exists(irods.paths.server_config_path()) == False:
+        return
 
     (options, _) = parse_options()
 
