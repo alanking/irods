@@ -708,7 +708,7 @@ namespace
 
     int move_replica(RsComm& _comm, DataObjInp& _inp, TransferStat** _stat)
     {
-        const auto cond_input = irods::experimental::make_key_value_proxy(_inp.condInput);
+        auto cond_input = irods::experimental::make_key_value_proxy(_inp.condInput);
         const auto log_errors = cond_input.contains(RECURSIVE_OPR__KW) ? irods::replication::log_errors::no : irods::replication::log_errors::yes;
 
         try {
@@ -758,6 +758,16 @@ namespace
                     return SYS_NOT_ALLOWED;
                 }
             }
+
+            // The DataObjInp provided by the caller may be expecting the information gathered
+            // in the API to be available later. In particular, the source and destination
+            // replica resource hierarchies are expected to be present in some configured
+            // policy in order to have certainty about precisely where the new replica was
+            // created (in addition to avoiding extra queries). We copy the source and
+            // destination replica resource hierarchies into the input provided by the caller
+            // here so that it will be available beyond this API.
+            cond_input[RESC_HIER_STR_KW] = source_replica.resc_hier();
+            cond_input[DEST_RESC_HIER_STR_KW] = destination_hierarchy;
 
             return replicate_data(_comm, source_inp, destination_inp, _stat);
         }

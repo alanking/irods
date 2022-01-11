@@ -665,7 +665,7 @@ namespace
 
     int replicate_data_object(RsComm& _comm, DataObjInp& _inp, transferStat_t** _stat)
     {
-        const auto cond_input = irods::experimental::make_key_value_proxy(_inp.condInput);
+        auto cond_input = irods::experimental::make_key_value_proxy(_inp.condInput);
 
         // get information about source replica
         auto source_inp = init_source_replica_input(_comm, _inp);
@@ -732,6 +732,16 @@ namespace
                 throw;
             }
         }
+
+        // The DataObjInp provided by the caller may be expecting the information gathered in
+        // the API to be available later. In particular, the source and destination replica
+        // resource hierarchies are expected to be present in some configured policy in order to
+        // have certainty about precisely where the new replica was created (in addition to
+        // avoiding extra queries). We copy the source and destination replica resource
+        // hierarchies into the input provided by the caller here so that it will be available
+        // beyond this API.
+        cond_input[RESC_HIER_STR_KW] = source_cond_input.at(RESC_HIER_STR_KW);
+        cond_input[DEST_RESC_HIER_STR_KW] = destination_cond_input.at(DEST_RESC_HIER_STR_KW);
 
         irods::log(LOG_DEBUG8, fmt::format(
             "[{}:{}] - source:[{}],destination:[{}]",
