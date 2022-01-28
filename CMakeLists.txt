@@ -983,9 +983,10 @@ target_link_libraries(
   ${IRODS_EXTERNALS_FULLPATH_AVRO}/lib/libavrocpp.so
   ${IRODS_EXTERNALS_FULLPATH_BOOST}/lib/libboost_chrono.so
   ${IRODS_EXTERNALS_FULLPATH_BOOST}/lib/libboost_filesystem.so
-  ${IRODS_EXTERNALS_FULLPATH_BOOST}/lib/libboost_thread.so
+  ${IRODS_EXTERNALS_FULLPATH_BOOST}/lib/libboost_iostreams.so
   ${IRODS_EXTERNALS_FULLPATH_BOOST}/lib/libboost_regex.so
   ${IRODS_EXTERNALS_FULLPATH_BOOST}/lib/libboost_system.so
+  ${IRODS_EXTERNALS_FULLPATH_BOOST}/lib/libboost_thread.so
   ${IRODS_EXTERNALS_FULLPATH_FMT}/lib/libfmt.so
   ${IRODS_EXTERNALS_FULLPATH_NANODBC}/lib/libnanodbc.so
   ${IRODS_EXTERNALS_FULLPATH_ZMQ}/lib/libzmq.so
