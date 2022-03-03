@@ -1,11 +1,32 @@
 #include "irods/authentication_plugin_framework.hpp"
 
+#include "irods/authCheck.h"
+#include "irods/authPluginRequest.h"
+#include "irods/authRequest.h"
+#include "irods/authResponse.h"
+#include "irods/authenticate.h"
 #include "irods/base64.h"
+#include "irods/irods_auth_constants.hpp"
+#include "irods/irods_auth_plugin.hpp"
 #include "irods/irods_logger.hpp"
+#include "irods/irods_stacktrace.hpp"
+#include "irods/miscServerFunct.hpp"
+#include "irods/msParam.h"
+#include "irods/rcConnect.h"
+#include "irods/rodsDef.h"
 
 #ifdef RODS_SERVER
 #include "irods/irods_rs_comm_query.hpp"
-#endif
+#include "irods/rsAuthCheck.hpp"
+#include "irods/rsAuthRequest.hpp"
+#endif // RODS_SERVER
+
+#include <openssl/md5.h>
+
+#include <termios.h>
+#include <unistd.h>
+#include <iostream>
+#include <sstream>
 
 int get64RandomBytes( char *buf );
 void setSessionSignatureClientside( char* _sig );
@@ -60,7 +81,7 @@ namespace
 
 namespace irods
 {
-    class native_authentication : public irods::experimental::authentication_base {
+    class native_authentication : public irods::experimental::auth::authentication_base {
     public:
         native_authentication()
         {
@@ -213,13 +234,12 @@ namespace irods
 
             _rsSetAuthRequestGetChallenge(buf);
 
-            log_auth::debug("[{}:{}] - challenge [{}]", __func__, __LINE__, buf);
-
             if (comm.auth_scheme) {
                 free(comm.auth_scheme);
             }
 
-            comm.auth_scheme = strdup(AUTH_NATIVE_SCHEME.c_str());
+            constexpr char* scheme = "native";
+            comm.auth_scheme = strdup(scheme);
 
             return resp;
         } // native_auth_agent_request
@@ -233,7 +253,7 @@ namespace irods
 
             // need to do NoLogin because it could get into inf loop for cross zone auth
             rodsServerHost_t *rodsServerHost;
-            auto zone_name{get<std::string>("zone_name", req)};
+            auto zone_name = req.at("zone_name").get<std::string>();
             int status = getAndConnRcatHostNoLogin(&comm, MASTER_RCAT, const_cast<char*>(zone_name.c_str()), &rodsServerHost);
             if ( status < 0 ) {
                 THROW(status, "Connecting to rcat host failed.");
@@ -246,7 +266,7 @@ namespace irods
             response[RESPONSE_LEN] = 0;
 
             unsigned long out_len = RESPONSE_LEN;
-            auto to_decode{get<std::string>("digest", req)};
+            auto to_decode = req.at("digest").get<std::string>();
             auto err = base64_decode(reinterpret_cast<unsigned char*>(const_cast<char*>(to_decode.c_str())),
                                      to_decode.size(),
                                      reinterpret_cast<unsigned char*>(response),
