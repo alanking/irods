@@ -283,6 +283,17 @@ namespace irods
             authCheckInp.username = const_cast<char*>(username.data());
 
             authCheckOut_t* authCheckOut = nullptr;
+            const auto free_auth_check_out = irods::at_scope_exit{
+                [authCheckOut] {
+                    if (authCheckOut) {
+                        if (authCheckOut->serverResponse) {
+                            free(authCheckOut->serverResponse);
+                        }
+                        free(authCheckOut);
+                    }
+                }
+            };
+
             if (LOCAL_HOST == rodsServerHost->localFlag) {
                 status = rsAuthCheck(&comm, &authCheckInp, &authCheckOut);
             }
@@ -384,24 +395,23 @@ namespace irods
                     if ( status < 0 ) {
                         THROW(status, "getLocalZoneInfo failed.");
                     }
-                    else {
-                        if ( 0 == strcmp( tmpZoneInfo->zoneName, comm.clientUser.rodsZone ) ) {
-                            /* client is from local zone */
-                            if ( REMOTE_PRIV_USER_AUTH == authCheckOut->clientPrivLevel ) {
-                                authCheckOut->clientPrivLevel = LOCAL_PRIV_USER_AUTH;
-                            }
-                            else if ( REMOTE_USER_AUTH == authCheckOut->clientPrivLevel ) {
-                                authCheckOut->clientPrivLevel = LOCAL_USER_AUTH;
-                            }
+
+                    if ( 0 == strcmp( tmpZoneInfo->zoneName, comm.clientUser.rodsZone ) ) {
+                        /* client is from local zone */
+                        if ( REMOTE_PRIV_USER_AUTH == authCheckOut->clientPrivLevel ) {
+                            authCheckOut->clientPrivLevel = LOCAL_PRIV_USER_AUTH;
                         }
-                        else {
-                            /* client is from remote zone */
-                            if ( LOCAL_PRIV_USER_AUTH == authCheckOut->clientPrivLevel ) {
-                                authCheckOut->clientPrivLevel = REMOTE_USER_AUTH;
-                            }
-                            else if ( LOCAL_USER_AUTH == authCheckOut->clientPrivLevel ) {
-                                authCheckOut->clientPrivLevel = REMOTE_USER_AUTH;
-                            }
+                        else if ( REMOTE_USER_AUTH == authCheckOut->clientPrivLevel ) {
+                            authCheckOut->clientPrivLevel = LOCAL_USER_AUTH;
+                        }
+                    }
+                    else {
+                        /* client is from remote zone */
+                        if ( LOCAL_PRIV_USER_AUTH == authCheckOut->clientPrivLevel ) {
+                            authCheckOut->clientPrivLevel = REMOTE_USER_AUTH;
+                        }
+                        else if ( LOCAL_USER_AUTH == authCheckOut->clientPrivLevel ) {
+                            authCheckOut->clientPrivLevel = REMOTE_USER_AUTH;
                         }
                     }
                 }
@@ -427,13 +437,6 @@ namespace irods
             else {          /* proxyUser and clientUser are the same */
                 comm.proxyUser.authInfo.authFlag =
                     comm.clientUser.authInfo.authFlag = authCheckOut->privLevel;
-            }
-
-            if ( authCheckOut != NULL ) {
-                if ( authCheckOut->serverResponse != NULL ) {
-                    free( authCheckOut->serverResponse );
-                }
-                free( authCheckOut );
             }
 
             return resp;

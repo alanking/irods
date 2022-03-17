@@ -2,10 +2,12 @@
 cmake_minimum_required(VERSION 3.12.0 FATAL_ERROR)
 # target_link_libraries for object targets
 
+add_subdirectory(pam)
+
 set(
   IRODS_AUTH_PLUGINS
   native
-  pam
+  pam_password
 )
 
 foreach(plugin IN LISTS IRODS_AUTH_PLUGINS)

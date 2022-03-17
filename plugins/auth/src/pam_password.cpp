@@ -3,7 +3,6 @@
 #define USE_SSL 1
 #include "irods/sslSockComm.h"
 
-#include "irods/icatHighLevelRoutines.hpp"
 #include "irods/irods_at_scope_exit.hpp"
 #include "irods/irods_auth_constants.hpp"
 #include "irods/irods_client_server_negotiation.hpp"
@@ -22,6 +21,11 @@
 #include <termios.h>
 #include <unistd.h>
 
+int chlUpdateIrodsPamPassword(rsComm_t* rsComm,
+                              const char* userName,
+                              int timeToLive,
+                              const char* testTime,
+                              char** irodsPassword);
 namespace
 {
     namespace irods_auth = irods::experimental::auth;
@@ -152,17 +156,17 @@ namespace
 
 namespace irods
 {
-    class pam_authentication : public irods::experimental::auth::authentication_base {
+    class pam_password_authentication : public irods::experimental::auth::authentication_base {
     private:
         static constexpr char* perform_native_auth = "perform_native_auth";
 
     public:
-        pam_authentication()
+        pam_password_authentication()
         {
-            add_operation(AUTH_CLIENT_AUTH_REQUEST,  OPERATION(rcComm_t, pam_auth_client_request));
-            add_operation(perform_native_auth,       OPERATION(rcComm_t, pam_auth_client_perform_native_auth));
+            add_operation(AUTH_CLIENT_AUTH_REQUEST,  OPERATION(rcComm_t, pam_password_auth_client_request));
+            add_operation(perform_native_auth,       OPERATION(rcComm_t, pam_password_auth_client_perform_native_auth));
 #ifdef RODS_SERVER
-            add_operation(AUTH_AGENT_AUTH_REQUEST,   OPERATION(rsComm_t, pam_auth_agent_request));
+            add_operation(AUTH_AGENT_AUTH_REQUEST,   OPERATION(rsComm_t, pam_password_auth_agent_request));
 #endif
         } // ctor
 
@@ -202,7 +206,7 @@ namespace irods
             return resp;
         } // auth_client_start
 
-        json pam_auth_client_request(rcComm_t& comm, const json& req)
+        json pam_password_auth_client_request(rcComm_t& comm, const json& req)
         {
             json svr_req{req};
 
@@ -249,9 +253,9 @@ namespace irods
             resp["next_operation"] = perform_native_auth;
 
             return resp;
-        } // pam_auth_client_request
+        } // pam_password_auth_client_request
 
-        json pam_auth_client_perform_native_auth(rcComm_t& comm, const json& req)
+        json pam_password_auth_client_perform_native_auth(rcComm_t& comm, const json& req)
         {
             // This operation is basically just running the entire native authentication flow
             // because this is how the PAM authentication plugin has worked historically. This
@@ -272,10 +276,10 @@ namespace irods
             comm.loggedIn = 1;
 
             return resp;
-        } // pam_auth_client_perform_native_auth
+        } // pam_password_auth_client_perform_native_auth
 
 #ifdef RODS_SERVER
-        json pam_auth_agent_request(rsComm_t& comm, const json& req)
+        json pam_password_auth_agent_request(rsComm_t& comm, const json& req)
         {
             using log_auth = irods::experimental::log::authentication;
 
@@ -361,13 +365,13 @@ namespace irods
             comm.auth_scheme = strdup(auth_scheme_pam);
 
             return resp;
-        } // pam_auth_agent_request
+        } // pam_password_auth_agent_request
 #endif // #ifdef RODS_SERVER
-    }; // class pam_authentication
+    }; // class pam_password_authentication
 } // namespace irods
 
 extern "C"
-irods::pam_authentication* plugin_factory(const std::string&, const std::string&)
+irods::pam_password_authentication* plugin_factory(const std::string&, const std::string&)
 {
-    return new irods::pam_authentication{};
+    return new irods::pam_password_authentication{};
 }
