@@ -24,6 +24,7 @@ SessionsMixin = session.make_sessions_mixin(
     test.settings.FEDERATION.RODSADMIN_NAME_PASSWORD_LIST, test.settings.FEDERATION.RODSUSER_NAME_PASSWORD_LIST)
 
 
+@skipIf(test.settings.FEDERATION.REMOTE_ZONE is 'UNINITIALIZED_ZONE_NAME')
 class Test_ICommands(SessionsMixin, unittest.TestCase):
 
     def setUp(self):
@@ -1076,6 +1077,7 @@ OUTPUT ruleExecOut
         finally:
             user.run_icommand(['irm', '-f', parameters['remote_data_object']])
 
+@skipIf(test.settings.FEDERATION.REMOTE_ZONE is 'UNINITIALIZED_ZONE_NAME')
 class Test_Admin_Commands(unittest.TestCase):
 
     '''
@@ -1120,6 +1122,7 @@ class Test_Admin_Commands(unittest.TestCase):
         pass
 
 
+@skipIf(test.settings.FEDERATION.REMOTE_ZONE is 'UNINITIALIZED_ZONE_NAME')
 class Test_Microservices(SessionsMixin, unittest.TestCase):
 
     def setUp(self):
@@ -1334,6 +1337,7 @@ OUTPUT ruleExecOut
             "irm -f {remote_home_collection}/{filename}".format(**parameters))
         os.remove(filepath)
 
+@skipIf(test.settings.FEDERATION.REMOTE_ZONE is 'UNINITIALIZED_ZONE_NAME')
 class Test_Recursive_Icp(SessionsMixin, unittest.TestCase):
 
     def setUp(self):
@@ -1423,6 +1427,7 @@ class Test_Recursive_Icp(SessionsMixin, unittest.TestCase):
     def test_icp_tree_remotezone_in_target(self):
         self.cp_recursive_local_source_test(self.local_source_coll, flat_coll=False, remote_zone=True, in_target=True)
 
+@skipIf(test.settings.FEDERATION.REMOTE_ZONE is 'UNINITIALIZED_ZONE_NAME')
 class test_dynamic_peps_in_federation(SessionsMixin, unittest.TestCase):
     plugin_name = IrodsConfig().default_rule_engine_plugin
     class_name = 'Test_Native_Rule_Engine_Plugin'
