@@ -202,7 +202,7 @@ if __name__ == '__main__':
     if options.run_plugin_tests:
         test_identifiers.extend(get_plugin_tests())
 
-    IrodsController().restart(test_mode=True)
+    #IrodsController().restart(test_mode=True)
     results = run_tests_from_names(test_identifiers, options.buffer_test_output, options.xml_output, options.skip_until)
     print(results)
 
