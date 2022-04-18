@@ -17,7 +17,6 @@
 #include "irods/rodsClient.h"
 #include "irods/sslSockComm.h"
 #include "irods/termiosUtil.hpp"
-#include "irods/version.hpp"
 
 #include <openssl/md5.h>
 #include <boost/filesystem/operations.hpp>
@@ -290,24 +289,20 @@ int clientLogin(rcComm_t* _comm, const char* _context, const char* _scheme_overr
         return SYS_INVALID_INPUT_PARAM;
     }
 
-    static constexpr auto minimum_version_for_auth_plugin_framework = irods::version{4, 3, 0};
-    const auto server_version = irods::to_version(_comm->svrVersion->relVersion);
-    if (!server_version) {
-        static constexpr auto ec = VERSION_EMPTY_IN_STRUCT_ERR;
-
-        const std::string msg = fmt::format(
-            "Failed to get version from server [{}]\n",
-            _comm->svrVersion->relVersion);
+    try {
+        if (!irods::experimental::auth::use_legacy_authentication(*_comm)) {
+            return authenticate_with_plugin_framework(*_comm, _context ? json{_context} : json{});
+        }
+    }
+    catch (const irods::exception& e) {
+        const auto ec = e.code();
+        const std::string msg = e.client_display_what();
 
         log_auth::info(msg);
 
         printError(_comm, ec, const_cast<char*>(msg.data()));
 
         return ec;
-    }
-
-    if (*server_version >= minimum_version_for_auth_plugin_framework) {
-        return authenticate_with_plugin_framework(*_comm, _context ? json{_context} : json{});
     }
 
     // If _comm already claims to be authenticated, there is nothing to do.

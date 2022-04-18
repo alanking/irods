@@ -9,6 +9,7 @@
 #include "irods/irods_plugin_base.hpp"
 #include "irods/rcConnect.h"
 #include "irods/rodsErrorTable.h"
+#include "irods/version.hpp"
 
 #include <boost/any.hpp>
 #include <fmt/format.h>
@@ -191,6 +192,28 @@ namespace irods::experimental::auth
             req = resp;
         }
     } // authenticate_client
+
+    /// \brief Return true if server version is too old for authentication plugin framework.
+    ///
+    /// \param[in] _comm The comm object from which version information is derived.
+    ///
+    /// \retval true If server version is less than 4.3.0
+    /// \retval false If server version is greater than or equal to 4.3.0
+    ///
+    /// \since 4.3.0
+    auto use_legacy_authentication(const RcComm& _comm) -> bool
+    {
+        static constexpr auto minimum_version_for_auth_plugin_framework = irods::version{4, 3, 0};
+
+        const auto server_version = irods::to_version(_comm.svrVersion->relVersion);
+        if (!server_version) {
+            THROW(VERSION_EMPTY_IN_STRUCT_ERR, fmt::format(
+                  "Failed to get version from server [{}]\n",
+                  _comm.svrVersion->relVersion));
+        }
+
+        return *server_version < minimum_version_for_auth_plugin_framework;
+    } // use_legacy_authentication
 } // namespace irods::experimental::auth
 
 #endif // IRODS_AUTHENTICATION_PLUGIN_FRAMEWORK_HPP
