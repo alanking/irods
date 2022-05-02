@@ -37,36 +37,6 @@ namespace
     using json = nlohmann::json;
     using log_auth = irods::experimental::log::authentication;
 
-    auto request(rcComm_t& comm, const json& msg)
-    {
-        auto str = msg.dump();
-
-        bytesBuf_t inp;
-        inp.buf = static_cast<void*>(const_cast<char*>(str.c_str()));
-        inp.len = str.size();
-
-        bytesBuf_t* resp{};
-        auto ec = procApiRequest(&comm, 110000, static_cast<void*>(&inp), nullptr, reinterpret_cast<void**>(&resp), nullptr);
-
-        if (ec < 0) {
-            THROW(ec, "failed to perform request");
-        }
-
-        return json::parse(static_cast<char*>(resp->buf), static_cast<char*>(resp->buf) + resp->len);
-    } // request
-
-    // TODO: std::vector could be a const ref
-    auto verify(const json& p, std::vector<std::string> n)
-    {
-        for(auto&& x : n) {
-            if(!p.contains(x)) {
-                return std::make_tuple(false, x);
-            }
-        }
-
-        return std::make_tuple(true, std::string{});
-    } // verify
-
     template<typename T>
     auto get(const std::string& n, const json& p)
     {
@@ -111,10 +81,9 @@ namespace irods
         {
             json resp{req};
 
-            if(auto [e, n] = verify(req, {"user_name","zone_name","request_result"}); !e) {
-                THROW(SYS_INVALID_INPUT_PARAM,
-                      fmt::format("[{}:{}] missing [{}] in request", __func__, __LINE__, n));
-            }
+            irods::experimental::auth::throw_if_request_message_is_missing_key(
+                req, {"user_name", "zone_name", "request_result"}
+            );
 
             auto request_result = req.at("request_result").get<std::string>();
             request_result.resize(CHALLENGE_LEN);
@@ -195,7 +164,7 @@ namespace irods
         {
             json svr_req{req};
             svr_req["next_operation"] = AUTH_AGENT_AUTH_REQUEST;
-            auto resp = request(comm, svr_req);
+            auto resp = irods::experimental::auth::request(comm, svr_req);
 
             resp["next_operation"] = AUTH_ESTABLISH_CONTEXT;
 
@@ -206,14 +175,13 @@ namespace irods
         {
             namespace ie = irods::experimental;
 
-            if(auto [e, n] = verify(req, {"digest","user_name","zone_name"}); !e) {
-                THROW(SYS_INVALID_INPUT_PARAM,
-                      fmt::format("[{}:{}] missing [{}] in request", __func__, __LINE__, n));
-            }
+            irods::experimental::auth::throw_if_request_message_is_missing_key(
+                req, {"digest", "user_name", "zone_name"}
+            );
 
             json svr_req{req};
             svr_req["next_operation"] = AUTH_AGENT_AUTH_RESPONSE;
-            auto resp = request(comm, svr_req);
+            auto resp = irods::experimental::auth::request(comm, svr_req);
 
             comm.loggedIn = 1;
 
@@ -246,10 +214,9 @@ namespace irods
 
         json native_auth_agent_response(rsComm_t& comm, const json& req)
         {
-            if (auto [e, n] = verify(req, {"digest", "zone_name", "user_name"}); !e) {
-                THROW(SYS_INVALID_INPUT_PARAM,
-                      fmt::format("[{}:{}] missing [{}] in request", __func__, __LINE__, n));
-            }
+            irods::experimental::auth::throw_if_request_message_is_missing_key(
+                req, {"digest", "zone_name", "user_name"}
+            );
 
             // need to do NoLogin because it could get into inf loop for cross zone auth
             rodsServerHost_t *rodsServerHost;
