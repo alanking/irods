@@ -17,6 +17,8 @@
 
 #include <functional>
 #include <string>
+#include <string_view>
+#include <vector>
 
 /// \file
 
@@ -127,7 +129,7 @@ namespace irods::experimental::auth
         }
 
         return plugin;
-    } // resolve_plugin
+    } // resolve_authentication_plugin
 
     /// \brief Authenticate the client indicated by \p _comm with scheme \p env.
     ///
@@ -214,6 +216,66 @@ namespace irods::experimental::auth
 
         return *server_version < minimum_version_for_auth_plugin_framework;
     } // use_legacy_authentication
+
+    /// \brief Convenience function for invoking the authentication API endpoint.
+    ///
+    /// \param[in/out] _comm
+    /// \param[in] _msg JSON-based request message to send to the server.\parblock
+    ///
+    /// Depending on the step in the authentication flow for the given plugin, certain keys
+    /// must be present in order for the request to be processed.
+    /// \endparblock
+    ///
+    /// \throws irods::exception If the API request returns with a non-zero code
+    ///
+    /// \return JSON response from the server which may be built upon for the next request
+    ///
+    /// \since 4.3.0
+    auto request(rcComm_t& _comm, const json& _msg)
+    {
+        constexpr int authentication_api_number = 110000;
+
+        auto str = _msg.dump();
+
+        bytesBuf_t inp;
+        inp.buf = static_cast<void*>(const_cast<char*>(str.c_str()));
+        inp.len = str.size();
+
+        bytesBuf_t* resp{};
+        auto ec = procApiRequest(&_comm,
+                                 authentication_api_number,
+                                 static_cast<void*>(&inp),
+                                 nullptr,
+                                 reinterpret_cast<void**>(&resp),
+                                 nullptr);
+
+        if (ec < 0) {
+            THROW(ec, "failed to perform request");
+        }
+
+        return json::parse(static_cast<char*>(resp->buf),
+                           static_cast<char*>(resp->buf) + resp->len);
+    } // request
+
+    /// \brief Throw if request message is missing a required key
+    ///
+    /// \param[in] _msg JSON structure in which \p _required_keys must be found
+    /// \param[in] _required_keys Vector of keys which must be found in \p _msg
+    ///
+    /// \throw irods::exception On first key in \p _required_keys not contained in \p _msg
+    ///
+    /// \since 4.3.0
+    inline auto throw_if_request_message_is_missing_key(
+        const json& _msg,
+        const std::vector<std::string_view>& _required_keys) -> void
+    {
+        for (auto&& k : _required_keys) {
+            if (!_msg.contains(k.data())) {
+                THROW(SYS_INVALID_INPUT_PARAM, fmt::format(
+                      "missing [{}] in request", __func__, __LINE__, k));
+            }
+        }
+    } // throw_if_request_message_is_missing_key
 } // namespace irods::experimental::auth
 
 #endif // IRODS_AUTHENTICATION_PLUGIN_FRAMEWORK_HPP
