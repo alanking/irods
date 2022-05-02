@@ -27,36 +27,6 @@ namespace
     namespace irods_auth = irods::experimental::auth;
     using json = nlohmann::json;
 
-    auto request(rcComm_t& comm, const json& msg)
-    {
-        auto str = msg.dump();
-
-        bytesBuf_t inp;
-        inp.buf = static_cast<void*>(const_cast<char*>(str.c_str()));
-        inp.len = str.size();
-
-        bytesBuf_t* resp{};
-        auto ec = procApiRequest(&comm, 110000, static_cast<void*>(&inp), nullptr, reinterpret_cast<void**>(&resp), nullptr);
-
-        if (ec < 0) {
-            THROW(ec, "failed to perform request");
-        }
-
-        return json::parse(static_cast<char*>(resp->buf), static_cast<char*>(resp->buf) + resp->len);
-    } // request
-
-    // TODO: std::vector could be a const ref
-    auto verify(const json& p, std::vector<std::string> n)
-    {
-        for(auto&& x : n) {
-            if(!p.contains(x)) {
-                return std::make_tuple(false, x);
-            }
-        }
-
-        return std::make_tuple(true, std::string{});
-    } // verify
-
     auto get_password_from_client_stdin() -> std::string
     {
         struct termios tty;
@@ -223,12 +193,11 @@ namespace irods
                 }
             }
 
-            auto resp = request(comm, svr_req);
+            auto resp = irods::experimental::auth::request(comm, svr_req);
 
-            if (const auto [e, n] = verify(resp, {"request_result"}); !e) {
-                THROW(SYS_INVALID_INPUT_PARAM,
-                      fmt::format("[{}:{}] missing [{}] in result", __func__, __LINE__, n));
-            }
+            irods::experimental::auth::throw_if_request_message_is_missing_key(
+                resp, {"request_result"}
+            );
 
             // Save the PAM password-based generated password so that the client remains
             // authenticated with the server while the password is still valid.
@@ -279,13 +248,12 @@ namespace irods
         {
             using log_auth = irods::experimental::log::authentication;
 
-            const std::vector<std::string> required_keys{"user_name",
-                                                         "zone_name",
-                                                         irods::AUTH_PASSWORD_KEY};
-            if (auto [e, n] = verify(req, required_keys); !e) {
-                THROW(SYS_INVALID_INPUT_PARAM,
-                      fmt::format("[{}:{}] missing [{}] in request", __func__, __LINE__, n));
-            }
+            const std::vector<std::string_view> required_keys{"user_name",
+                                                              "zone_name",
+                                                              irods::AUTH_PASSWORD_KEY};
+            irods::experimental::auth::throw_if_request_message_is_missing_key(
+                req, required_keys
+            );
 
             rodsServerHost_t* host = nullptr;
 
@@ -311,7 +279,7 @@ namespace irods
 
                 const auto end_ssl = irods::at_scope_exit{[host] { sslEnd(host->conn); }};
 
-                return request(*host->conn, req);
+                return irods::experimental::auth::request(*host->conn, req);
             }
 
             json resp{req};
