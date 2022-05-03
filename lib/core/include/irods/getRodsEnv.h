@@ -1,5 +1,5 @@
-#ifndef GET_RODS_ENV_H__
-#define GET_RODS_ENV_H__
+#ifndef GET_RODS_ENV_H
+#define GET_RODS_ENV_H
 
 #include "irods/rodsDef.h"
 
@@ -74,6 +74,21 @@ int printRodsEnv( FILE* );
 void _getRodsEnv( rodsEnv &myRodsEnv );
 void _reloadRodsEnv( rodsEnv &myRodsEnv );
 
+int getRodsEnvFromFile(rodsEnv& _env);
+int getRodsEnvFromEnv(rodsEnv& _env);
+int createRodsEnvDefaults(rodsEnv& _env);
+
+/// \brief Populate \p _env with data from various sources for an iRODS client environment.
+///
+/// \param[out] _env \p RodsEnvironment that holds the client environment information.
+/// \param[in] _always_return_valid_env Use default values if none are found.
+///
+/// \retval 0 on success
+/// \retval non-zero on failure
+///
+/// \since 4.3.0
+int get_irods_environment_from_file(rodsEnv& _env, bool _always_return_valid_env);
+
 }
-#endif
-#endif // GET_RODS_ENV_H__
+#endif // #ifdef __cplusplus
+#endif // GET_RODS_ENV_H
