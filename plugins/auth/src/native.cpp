@@ -66,12 +66,14 @@ namespace irods
 
         json native_auth_establish_context(rcComm_t&, const json& req)
         {
-            json resp{req};
-
             irods_auth::throw_if_request_message_is_missing_key(
                 req, {"user_name", "zone_name", "request_result"}
             );
 
+            json resp{req};
+
+            // We should remove the password from the message so that it does not get sent over
+            // the wire.
             auto request_result = req.at("request_result").get<std::string>();
             request_result.resize(CHALLENGE_LEN);
 
@@ -94,6 +96,24 @@ namespace irods
                 need_password = obfGetPw(md5_buf + CHALLENGE_LEN);
             }
 
+            // It is possible that a password was supplied via the command-line before reaching
+            // this point. We need to support this use case, so check to see if the password
+            // was passed along with a keyword.
+            if (need_password) {
+                const auto password_itr = req.find(irods::AUTH_PASSWORD_KEY);
+                if (req.end() != password_itr) {
+                    const auto& pw = password_itr->get_ref<const std::string&>();
+                    if (const auto ec = obfSavePw(0, 0, 0, pw.data()); ec != 0) {
+                        THROW(ec, "failed to save iRODS password");
+                    }
+                    need_password = obfGetPw(md5_buf + CHALLENGE_LEN);
+                }
+            }
+
+            // The client-provided password should no longer be needed. Erase the entry from
+            // the JSON payload so that the password is not sent over the wire to the server.
+            resp.erase(irods::AUTH_PASSWORD_KEY);
+
             // prompt for a password if necessary
             if (need_password) {
                 struct termios tty;
@@ -112,11 +132,21 @@ namespace irods
                 std::string password{};
                 getline(std::cin, password);
                 strncpy(md5_buf + CHALLENGE_LEN, password.c_str(), MAX_PASSWORD_LEN);
+                fmt::print("\n");
                 tty.c_lflag = oldflag;
                 if (tcsetattr(STDIN_FILENO, TCSANOW, &tty)) {
                     fmt::print("Error reinstating echo mode.");
                 }
+
+                // The arguments with value 0 mean:
+                //  - Do not echo the password as it's being typed (not applicable)
+                //  - Do not ask permission to write the password file
+                //  - Do not display a message on success
+                if (const auto ec = obfSavePw(0, 0, 0, password.data()); ec != 0) {
+                    THROW(ec, "failed to save iRODS password");
+                }
             }
+
 
             // create a md5 hash of the challenge
             MD5_CTX context;
@@ -151,9 +181,22 @@ namespace irods
         {
             json svr_req{req};
             svr_req[irods_auth::next_operation] = AUTH_AGENT_AUTH_REQUEST;
+
+            // The server-side plugin does not need the password. If it did, we would need to
+            // make sure that TLS is enabled because the password would be sent over the wire
+            // in the clear. Since it is not needed, we remove it.
+            svr_req.erase(irods::AUTH_PASSWORD_KEY);
+
             auto resp = irods_auth::request(comm, svr_req);
 
             resp[irods_auth::next_operation] = AUTH_ESTABLISH_CONTEXT;
+
+            // Restore the password to the payload. The client side operations still need the
+            // password if it was provided by the client.
+            const auto password_itr = req.find(irods::AUTH_PASSWORD_KEY);
+            if (req.end() != password_itr) {
+                resp[irods::AUTH_PASSWORD_KEY] = password_itr->get_ref<const std::string&>();
+            }
 
             return resp;
         } // native_auth_client_request

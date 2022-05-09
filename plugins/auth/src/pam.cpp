@@ -201,12 +201,6 @@ namespace irods
 
             // Save the PAM password-based generated password so that the client remains
             // authenticated with the server while the password is still valid.
-            //
-            // TODO: we should only perform this step if running iinit. The auth plugins
-            // should support an option which instruct it to save the password (doesn't save
-            // it by default). The result is that running ils and entering the password will
-            // save the password. Maybe this a good thing, but does not reflect the historic
-            // behavior.
             const auto& pw = resp.at("request_result").get_ref<const std::string&>();
             if (const int ec = obfSavePw(0, 0, 0, pw.data()); ec < 0) {
                 THROW(ec, "failed to save obfuscated password");
