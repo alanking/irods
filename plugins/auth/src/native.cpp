@@ -96,24 +96,6 @@ namespace irods
                 need_password = obfGetPw(md5_buf + CHALLENGE_LEN);
             }
 
-            // It is possible that a password was supplied via the command-line before reaching
-            // this point. We need to support this use case, so check to see if the password
-            // was passed along with a keyword.
-            if (need_password) {
-                const auto password_itr = req.find(irods::AUTH_PASSWORD_KEY);
-                if (req.end() != password_itr) {
-                    const auto& pw = password_itr->get_ref<const std::string&>();
-                    if (const auto ec = obfSavePw(0, 0, 0, pw.data()); ec != 0) {
-                        THROW(ec, "failed to save iRODS password");
-                    }
-                    need_password = obfGetPw(md5_buf + CHALLENGE_LEN);
-                }
-            }
-
-            // The client-provided password should no longer be needed. Erase the entry from
-            // the JSON payload so that the password is not sent over the wire to the server.
-            resp.erase(irods::AUTH_PASSWORD_KEY);
-
             // prompt for a password if necessary
             if (need_password) {
                 struct termios tty;
@@ -182,21 +164,9 @@ namespace irods
             json svr_req{req};
             svr_req[irods_auth::next_operation] = AUTH_AGENT_AUTH_REQUEST;
 
-            // The server-side plugin does not need the password. If it did, we would need to
-            // make sure that TLS is enabled because the password would be sent over the wire
-            // in the clear. Since it is not needed, we remove it.
-            svr_req.erase(irods::AUTH_PASSWORD_KEY);
-
             auto resp = irods_auth::request(comm, svr_req);
 
             resp[irods_auth::next_operation] = AUTH_ESTABLISH_CONTEXT;
-
-            // Restore the password to the payload. The client side operations still need the
-            // password if it was provided by the client.
-            const auto password_itr = req.find(irods::AUTH_PASSWORD_KEY);
-            if (req.end() != password_itr) {
-                resp[irods::AUTH_PASSWORD_KEY] = password_itr->get_ref<const std::string&>();
-            }
 
             return resp;
         } // native_auth_client_request
