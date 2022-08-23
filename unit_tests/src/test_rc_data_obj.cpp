@@ -331,14 +331,14 @@ TEST_CASE("rc_data_obj_open")
 
             // Open the first data object
             dataObjInp_t open_inp{};
-            std::snprintf(open_inp.objPath, sizeof(open_inp.objPath), "%s", path_str.data());
+            std::strncpy(open_inp.objPath, path_str.data(), sizeof(open_inp.objPath));
             open_inp.openFlags = O_WRONLY;
             const auto fd = rcDataObjOpen(&comm, &open_inp);
             REQUIRE(fd > 2);
 
             // Then, open the other data object using the same client connection
             dataObjInp_t open_inp2{};
-            std::snprintf(open_inp2.objPath, sizeof(open_inp2.objPath), "%s", path2_str.data());
+            std::strncpy(open_inp2.objPath, path2_str.data(), sizeof(open_inp2.objPath));
             open_inp2.openFlags = O_WRONLY;
             const auto fd2 = rcDataObjOpen(&comm, &open_inp2);
             REQUIRE(fd2 > 2);
