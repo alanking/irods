@@ -313,6 +313,61 @@ TEST_CASE("rc_data_obj_open")
             CHECK(GOOD_REPLICA == replica_info.replica_status());
         }
 
+        SECTION("open_two_objects_on_the_same_connection")
+        {
+            irods::experimental::client_connection conn;
+            RcComm& comm = static_cast<RcComm&>(conn);
+
+            const auto target_object2 = sandbox / "target_object2";
+            std::string_view path2_str = target_object2.c_str();
+
+            // Create a data object
+            unit_test_utils::create_empty_replica(comm, target_object);
+            REQUIRE(replica::replica_exists(comm, target_object, 0));
+
+            // Create another data object
+            unit_test_utils::create_empty_replica(comm, target_object2);
+            REQUIRE(replica::replica_exists(comm, target_object2, 0));
+
+            // Open the first data object
+            dataObjInp_t open_inp{};
+            std::snprintf(open_inp.objPath, sizeof(open_inp.objPath), "%s", path_str.data());
+            open_inp.openFlags = O_WRONLY;
+            const auto fd = rcDataObjOpen(&comm, &open_inp);
+            REQUIRE(fd > 2);
+
+            // Then, open the other data object using the same client connection
+            dataObjInp_t open_inp2{};
+            std::snprintf(open_inp2.objPath, sizeof(open_inp2.objPath), "%s", path2_str.data());
+            open_inp2.openFlags = O_WRONLY;
+            const auto fd2 = rcDataObjOpen(&comm, &open_inp2);
+            REQUIRE(fd2 > 2);
+
+            // Make sure the file descriptors are unique
+            REQUIRE(fd != fd2);
+
+            // Close the first data object
+            openedDataObjInp_t close_inp{};
+            close_inp.l1descInx = fd;
+            REQUIRE(rcDataObjClose(&comm, &close_inp) >= 0);
+
+            // Write to the other data object to make sure I/O still works
+            bytesBuf_t write_bbuf{};
+            write_bbuf.buf = static_cast<void*>(contents.data());
+            write_bbuf.len = contents.size() + 1;
+
+            openedDataObjInp_t write_inp{};
+            write_inp.l1descInx = fd2;
+            write_inp.len = write_bbuf.len;
+            const auto bytes_written = rcDataObjWrite(&comm, &write_inp, &write_bbuf);
+            CHECK(write_bbuf.len == bytes_written);
+
+            // Close the other data object
+            openedDataObjInp_t close_inp2{};
+            close_inp2.l1descInx = fd2;
+            REQUIRE(rcDataObjClose(&comm, &close_inp2) >= 0);
+        }
+
         SECTION("open_for_write_and_close")
         {
             irods::experimental::client_connection conn;
