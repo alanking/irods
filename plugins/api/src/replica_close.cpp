@@ -57,7 +57,6 @@
 namespace
 {
     // clang-format off
-    namespace ix  = irods::experimental;
     namespace fs  = irods::experimental::filesystem;
     namespace ill = irods::logical_locking;
     namespace ir  = irods::experimental::replica;
@@ -87,7 +86,8 @@ namespace
     auto unlock_and_publish_replica(rsComm_t& _comm,
                                     const ir::replica_proxy_t& _replica,
                                     const l1desc& _l1desc,
-                                    const bool _send_notifications) -> int;
+                                    const bool _send_notifications,
+                                    const int _unlock_statuses = ill::restore_status) -> int;
 
     auto update_replica_size_and_status(rsComm_t& _comm,
                                         const l1desc_t& _l1desc,
@@ -100,7 +100,10 @@ namespace
     auto update_replica_status(rsComm_t& _comm,
                                const l1desc_t& _l1desc,
                                const repl_status_t _new_status,
-                               const bool _send_notifications) -> int;
+                               const bool _send_notifications,
+                               const int _unlock_statuses = ill::restore_status) -> int;
+
+    auto update_replica_status_on_error(rsComm_t& _comm, const l1desc_t& _l1desc) -> int;
 
     auto free_l1_descriptor(int _l1desc_index) -> int;
 
@@ -163,14 +166,11 @@ namespace
         rsComm_t& _comm,
         const ir::replica_proxy_t& _replica,
         const l1desc& _l1desc,
-        const bool _send_notifications) -> int
+        const bool _send_notifications,
+        const int _unlock_statuses) -> int
     {
-        // The sibling replicas are always marked stale because replica_close considers itself to be the new
-        // truth when it is given permission to finalize the replica.
-        constexpr auto unlock_statuses = STALE_REPLICA;
-
         // Unlock the data object but do not publish to catalog because we may want to trigger file_modified.
-        if (const int ec = ill::unlock(_replica.data_id(), _replica.replica_number(), _replica.replica_status(), unlock_statuses); ec < 0) {
+        if (const int ec = ill::unlock(_replica.data_id(), _replica.replica_number(), _replica.replica_status(), _unlock_statuses); ec < 0) {
             irods::log(LOG_ERROR, fmt::format(
                 "[{}:{}] - failed to unlock object [{}]:[{}]",
                 __FUNCTION__, __LINE__, _replica.logical_path(), ec));
@@ -245,7 +245,7 @@ namespace
         // Update the RST with the changes made above to the replica.
         rst::update(repl.data_id(), repl);
 
-        return unlock_and_publish_replica(_comm, repl, _l1desc, _send_notifications);
+        return unlock_and_publish_replica(_comm, repl, _l1desc, _send_notifications, STALE_REPLICA);
     } // update_replica_size_and_status
 
     auto update_replica_size(rsComm_t& _comm, const l1desc_t& _l1desc, const bool _send_notifications) -> int
@@ -275,22 +275,30 @@ namespace
         // Update the RST with the changes made above to the replica.
         rst::update(repl.data_id(), repl);
 
-        return unlock_and_publish_replica(_comm, repl, _l1desc, _send_notifications);
+        return unlock_and_publish_replica(_comm, repl, _l1desc, _send_notifications, STALE_REPLICA);
     } // update_replica_size
 
     auto update_replica_status(rsComm_t& _comm,
                                const l1desc_t& _l1desc,
                                const repl_status_t _new_status,
-                               const bool _send_notifications) -> int
+                               const bool _send_notifications,
+                               const int _unlock_statuses) -> int
     {
-        const auto repl = ir::make_replica_proxy(*_l1desc.dataObjInfo);
+        auto repl = ir::make_replica_proxy(*_l1desc.dataObjInfo);
+
+        repl.replica_status(_new_status);
 
         // Set target replica status in RST as logical locking will not set
         // the status of the target replica.
-        rst::update(repl.data_id(), repl.replica_number(), json{{"data_is_dirty", std::to_string(_new_status)}});
+        rst::update(repl.data_id(), repl.replica_number(), json{{"data_is_dirty", std::to_string(repl.replica_status())}});
 
-        return unlock_and_publish_replica(_comm, repl, _l1desc, _send_notifications);
+        return unlock_and_publish_replica(_comm, repl, _l1desc, _send_notifications, _unlock_statuses);
     } // update_replica_status
+
+    auto update_replica_status_on_error(rsComm_t& _comm, const l1desc_t& _l1desc) -> int
+    {
+        return update_replica_status(_comm, _l1desc, STALE_REPLICA, false);
+    } // update_replica_status_on_error
 
     auto free_l1_descriptor(int _l1desc_index) -> int
     {
@@ -369,6 +377,15 @@ namespace
 
             const auto is_write_operation = (O_RDONLY != (l1desc.dataObjInp->openFlags & O_ACCMODE));
 
+            // Close the underlying file object.
+            if (const auto ec = close_physical_object(*_comm, l1desc.l3descInx); ec != 0) {
+                log::api::error("Failed to close file object [error_code={}].", ec);
+                if (is_write_operation) {
+                    update_replica_status_on_error(*_comm, l1desc);
+                }
+                return ec;
+            }
+
             // Allow updates to the replica's catalog information if the stream supports
             // write operations (i.e. the stream is opened in write-only or read-write mode).
             if (is_write_operation) {
@@ -380,14 +397,14 @@ namespace
                 if (update_size && update_status) {
                     if (const auto ec = update_replica_size_and_status(*_comm, l1desc, send_notifications); ec != 0) {
                         log::api::error("Failed to update the replica size and status in the catalog [error_code={}].", ec);
-                        update_replica_status(*_comm, l1desc, STALE_REPLICA, false);
+                        update_replica_status_on_error(*_comm, l1desc);
                         return ec;
                     }
                 }
                 else if (update_size) {
                     if (const auto ec = update_replica_size(*_comm, l1desc, send_notifications); ec != 0) {
                         log::api::error("Failed to update the replica size in the catalog [error_code={}].", ec);
-                        update_replica_status(*_comm, l1desc, STALE_REPLICA, false);
+                        update_replica_status_on_error(*_comm, l1desc);
                         return ec;
                     }
                 }
@@ -410,9 +427,9 @@ namespace
                         new_status = ill::get_original_replica_status(l1desc.dataObjInfo->dataId, l1desc.dataObjInfo->replNum);
                     }
 
-                    if (const auto ec = update_replica_status(*_comm, l1desc, new_status, send_notifications); ec != 0) {
+                    if (const auto ec = update_replica_status(*_comm, l1desc, new_status, send_notifications, STALE_REPLICA); ec != 0) {
                         log::api::error("Failed to update the replica status in the catalog [error_code={}].", ec);
-                        update_replica_status(*_comm, l1desc, STALE_REPLICA, false);
+                        update_replica_status_on_error(*_comm, l1desc);
                         return ec;
                     }
                 }
@@ -426,48 +443,37 @@ namespace
             }
 
             // Remove the agent's PID from the replica access table.
-            auto entry = is_write_operation
-                ? ix::replica_access_table::erase_pid(l1desc.replica_token, getpid())
-                : std::nullopt;
-
-            // Close the underlying file object.
-            if (const auto ec = close_physical_object(*_comm, l1desc.l3descInx); ec != 0) {
-                if (entry) {
-                    ix::replica_access_table::restore(*entry);
-                }
-
-                log::api::error("Failed to close file object [error_code={}].", ec);
-                update_replica_status(*_comm, l1desc, STALE_REPLICA, false);
-                return ec;
+            if (is_write_operation) {
+                irods::experimental::replica_access_table::erase_pid(l1desc.replica_token, getpid());
             }
 
             const auto ec = free_l1_descriptor(l1desc_index);
 
             if (ec != 0) {
-                update_replica_status(*_comm, l1desc, STALE_REPLICA, false);
+                update_replica_status_on_error(*_comm, l1desc);
             }
 
             return ec;
         }
         catch (const json::type_error& e) {
             log::api::error("Failed to extract property from JSON object [error_code={}]", SYS_INTERNAL_ERR);
-            update_replica_status(*_comm, l1desc, STALE_REPLICA, false);
+            update_replica_status_on_error(*_comm, l1desc);
             return SYS_INTERNAL_ERR;
         }
         catch (const irods::exception& e) {
             log::api::error("{} [error_code={}]", e.what(), e.code());
-            update_replica_status(*_comm, l1desc, STALE_REPLICA, false);
+            update_replica_status_on_error(*_comm, l1desc);
             return e.code();
         }
         catch (const fs::filesystem_error& e) {
             log::api::error("{} [error_code={}]", e.what(), e.code().value());
-            update_replica_status(*_comm, l1desc, STALE_REPLICA, false);
+            update_replica_status_on_error(*_comm, l1desc);
             return e.code().value();
         }
         catch (const std::exception& e) {
             log::api::error("An unexpected error occurred while closing the replica. {} [error_code={}]",
                             e.what(), SYS_INTERNAL_ERR);
-            update_replica_status(*_comm, l1desc, STALE_REPLICA, false);
+            update_replica_status_on_error(*_comm, l1desc);
             return SYS_INTERNAL_ERR;
         }
     } // rs_replica_close
