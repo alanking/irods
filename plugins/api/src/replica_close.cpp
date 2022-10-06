@@ -281,11 +281,13 @@ namespace
                                const repl_status_t _new_status,
                                const bool _send_notifications) -> int
     {
-        const auto repl = ir::make_replica_proxy(*_l1desc.dataObjInfo);
+        auto repl = ir::make_replica_proxy(*_l1desc.dataObjInfo);
 
         // Set target replica status in RST as logical locking will not set
         // the status of the target replica.
         rst::update(repl.data_id(), repl.replica_number(), json{{"data_is_dirty", std::to_string(_new_status)}});
+
+        repl.replica_status(_new_status);
 
         return unlock_and_publish_replica(_comm, repl, _l1desc, _send_notifications);
     } // update_replica_status
