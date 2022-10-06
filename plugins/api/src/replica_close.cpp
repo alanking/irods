@@ -55,7 +55,6 @@
 namespace
 {
     // clang-format off
-    namespace ix  = irods::experimental;
     namespace fs  = irods::experimental::filesystem;
     namespace ill = irods::logical_locking;
     namespace ir  = irods::experimental::replica;
@@ -376,6 +375,15 @@ namespace
 
             const auto is_write_operation = (O_RDONLY != (l1desc.dataObjInp->openFlags & O_ACCMODE));
 
+            // Close the underlying file object.
+            if (const auto ec = close_physical_object(*_comm, l1desc.l3descInx); ec != 0) {
+                log::api::error("Failed to close file object [error_code={}].", ec);
+                if (is_write_operation) {
+                    update_replica_status_on_error(*_comm, l1desc);
+                }
+                return ec;
+            }
+
             // Allow updates to the replica's catalog information if the stream supports
             // write operations (i.e. the stream is opened in write-only or read-write mode).
             if (is_write_operation) {
@@ -433,19 +441,8 @@ namespace
             }
 
             // Remove the agent's PID from the replica access table.
-            auto entry = is_write_operation
-                ? ix::replica_access_table::erase_pid(l1desc.replica_token, getpid())
-                : std::nullopt;
-
-            // Close the underlying file object.
-            if (const auto ec = close_physical_object(*_comm, l1desc.l3descInx); ec != 0) {
-                if (entry) {
-                    ix::replica_access_table::restore(*entry);
-                }
-
-                log::api::error("Failed to close file object [error_code={}].", ec);
-                update_replica_status_on_error(*_comm, l1desc);
-                return ec;
+            if (is_write_operation) {
+                irods::experimental::replica_access_table::erase_pid(l1desc.replica_token, getpid());
             }
 
             const auto ec = free_l1_descriptor(l1desc_index);
