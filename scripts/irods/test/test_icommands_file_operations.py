@@ -379,42 +379,6 @@ class Test_ICommands_File_Operations(resource_suite.ResourceBase, unittest.TestC
                         msg="Files missing from vault:\n" + str(file_names - vault_files_post_irsync_source) + "\n\n" +
                             "Extra files in vault:\n" + str(vault_files_post_irsync_source - file_names))
 
-    def test_irsync_r_nested_dir_to_coll(self):
-        # test settings
-        depth = 10
-        files_per_level = 100
-        file_size = 100
-
-        # make local nested dirs
-        base_name = "test_irsync_r_nested_dir_to_coll"
-        local_dir = os.path.join(self.testing_tmp_dir, base_name)
-        local_dirs = lib.make_deep_local_tmp_dir(local_dir, depth, files_per_level, file_size)
-
-        # sync dir to coll
-        self.user0.assert_icommand("irsync -r {local_dir} i:{base_name}".format(**locals()), "STDOUT_SINGLELINE", ustrings.recurse_ok_string())
-
-        # compare files at each level
-        for dir, files in local_dirs.items():
-            partial_path = dir.replace(self.testing_tmp_dir+'/', '', 1)
-
-            # run ils on subcollection
-            self.user0.assert_icommand(['ils', partial_path], 'STDOUT_SINGLELINE')
-            ils_out = self.user0.get_entries_in_collection(partial_path)
-
-            # compare local files with irods objects
-            local_files = set(files)
-            rods_files = set(lib.get_object_names_from_entries(ils_out))
-            self.assertTrue(local_files == rods_files,
-                            msg="Files missing:\n" + str(local_files - rods_files) + "\n\n" +
-                            "Extra files:\n" + str(rods_files - local_files))
-
-            # compare local files with files in vault
-            files_in_vault = set(lib.files_in_dir(os.path.join(self.user0.get_vault_session_path(),
-                                                              partial_path)))
-            self.assertTrue(local_files == files_in_vault,
-                        msg="Files missing from vault:\n" + str(local_files - files_in_vault) + "\n\n" +
-                            "Extra files in vault:\n" + str(files_in_vault - local_files))
-
     def test_irsync_r_nested_dir_to_coll_large_files(self):
         # test settings
         depth = 4
