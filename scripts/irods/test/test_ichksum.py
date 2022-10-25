@@ -466,3 +466,52 @@ C- {5}:
         # Show that ichksum detects the size inconsistency between the catalog and the object in storage.
         self.admin.assert_icommand(['ichksum', '-f', data_object], 'STDERR', ['-512000 UNIX_FILE_READ_ERR'])
 
+    def test_ichksum_with_multiple_bad_replicas(self):
+        filename = 'checksum_test.txt'
+        filepath = lib.create_local_testfile(filename)
+        self.admin.assert_icommand("iput -K -R " + self.testresc + " " + filename)
+        self.admin.assert_icommand("irepl -R " + self.anotherresc + " " + filename)
+        with open(os.path.join(self.anothervault, "home", self.admin.username, self.admin._session_id, filename), "w") as f:
+            f.write("SHAS FOR THE SHA256 GOD MD5 FOR THE MD5 THRONE")
+        with open(os.path.join(self.testvault, "home", self.admin.username, self.admin._session_id, filename), "w") as f:
+            f.write("SHAS FOR THE SHA256 GOD MD5 FOR THE MD5 THRONE")
+        out, _, _ = self.admin.run_icommand("ichksum -aK " + filename)
+        search_string = 'hierarchy [' + self.testresc + ']'
+        self.assertTrue(search_string in out, 'String missing from ichksum -aK output:\n\t' + search_string)
+        search_string = 'hierarchy [' + self.anotherresc + ']'
+        self.assertTrue(search_string in out, 'String missing from ichksum -aK output:\n\t' + search_string)
+
+    def test_ichksum_admin_flag__3265(self):
+        # Get files set up
+        file_size = 50
+        filename1 = 'test_ichksum_admin_flag__3265_1'
+        filename2 = 'test_ichksum_admin_flag__3265_2'
+        lib.make_file(filename1, file_size)
+        lib.make_file(filename2, file_size)
+        self.user0.assert_icommand(['iput', filename1])
+        self.user0.assert_icommand(['iput', filename2])
+
+        # Get paths to data objects
+        data_path,_,_ = self.user0.run_icommand("ipwd")
+        data_path1 = data_path.rstrip() + '/' + filename1
+        data_path2 = data_path.rstrip() + '/' + filename2
+
+        # Generate checksum as admin (no permissions; fail)
+        self.admin.assert_icommand(['ichksum', '-K', data_path1], 'STDERR_SINGLELINE', 'CAT_NO_ACCESS_PERMISSION')
+        # Generate checksum as rodsuser with admin flag (fail)
+        self.user0.assert_icommand(['ichksum', '-K', '-M', data_path1], 'STDERR_SINGLELINE', 'CAT_INSUFFICIENT_PRIVILEGE_LEVEL')
+        # Generate checksum as rodsuser (owner; pass)
+        self.user0.assert_icommand(['ichksum', data_path1], 'STDOUT_SINGLELINE', '    sha2:')
+        # Verify checksum as admin (no permissions; fail)
+        self.admin.assert_icommand(['ichksum', '-K', data_path1], 'STDERR_SINGLELINE', 'CAT_NO_ACCESS_PERMISSION')
+        # Verify checksum as admin with admin flag (pass)
+        self.admin.assert_icommand(['ichksum', '-K', '-M', data_path1])
+
+        # Generate checksum as admin with admin flag (pass)
+        self.admin.assert_icommand(['ichksum', '-M', data_path2], 'STDOUT_SINGLELINE', '    sha2:')
+        # Verify checksum as rodsuser (pass)
+        self.user0.assert_icommand(['ichksum', '-K', data_path2])
+
+        os.unlink(filename1)
+        os.unlink(filename2)
+

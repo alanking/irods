@@ -135,6 +135,13 @@ class Test_iRsync(ResourceBase, unittest.TestCase):
                             msg="Files missing:\n" + str(local_files - rods_files) + "\n\n" +
                             "Extra files:\n" + str(rods_files - local_files))
 
+            # compare local files with files in vault
+            files_in_vault = set(lib.files_in_dir(os.path.join(self.user0.get_vault_session_path(),
+                                                              partial_path)))
+            self.assertTrue(local_files == files_in_vault,
+                        msg="Files missing from vault:\n" + str(local_files - files_in_vault) + "\n\n" +
+                            "Extra files in vault:\n" + str(files_in_vault - local_files))
+
     def test_irsync_r_nested_coll_to_coll(self):
         # test settings
         depth = 10
@@ -180,6 +187,111 @@ class Test_iRsync(ResourceBase, unittest.TestCase):
                             msg="Files missing:\n" + str(local_files - rods_files) + "\n\n" +
                             "Extra files:\n" + str(rods_files - local_files))
 
+            # compare local files with files in vault
+            files_in_vault = set(lib.files_in_dir(os.path.join(self.user0.get_vault_session_path(),
+                                                              dest_partial_path)))
+            self.assertTrue(local_files == files_in_vault,
+                        msg="Files missing from vault:\n" + str(local_files - files_in_vault) + "\n\n" +
+                            "Extra files in vault:\n" + str(files_in_vault - local_files))
+
+    def test_irsync_r_symlink(self):
+
+        # make local dir
+
+        base_name = "test_irsync_r_symlink"
+        local_dir = os.path.join(self.testing_tmp_dir, base_name)
+        lib.make_dir_p(local_dir)
+
+        # make file
+        file_name = os.path.join(local_dir, 'the_file')
+        lib.make_file(file_name, 10)
+
+        # make symlink with relative path
+        link_path_1 = os.path.join(local_dir, 'link1')
+        lib.execute_command(['ln', '-s', 'the_file', link_path_1])
+
+        # make symlink with fully qualified path
+        link_path_2 = os.path.join(local_dir, 'link2')
+        lib.execute_command(['ln', '-s', file_name, link_path_2])
+
+        # sync dir to coll
+        self.user0.assert_icommand("irsync -r {local_dir} i:{base_name}".format(**locals()), "STDOUT_SINGLELINE", ustrings.recurse_ok_string())
+
+    def test_irsync_r_coll_to_dir(self):
+        base_name_source = "test_irsync_r_coll_to_dir_source"
+        file_names = set(self.iput_r_large_collection(
+            self.user0, base_name_source, file_count=1000, file_size=100)[1])
+        local_dir = os.path.join(self.testing_tmp_dir, "test_irsync_r_coll_to_dir_target")
+        self.user0.assert_icommand("irsync -r i:" + base_name_source + " " + local_dir, "EMPTY")
+        self.user0.assert_icommand("ils", 'STDOUT_SINGLELINE', base_name_source)
+        rods_files_source = set(self.user0.get_entries_in_collection(base_name_source))
+        self.assertTrue(file_names == rods_files_source,
+                        msg="Files missing:\n" + str(file_names - rods_files_source) + "\n\n" +
+                            "Extra files:\n" + str(rods_files_source - file_names))
+
+        local_files = set(os.listdir(local_dir))
+        self.assertTrue(file_names == local_files,
+                        msg="Files missing from local dir:\n" + str(file_names - local_files) + "\n\n" +
+                            "Extra files in local dir:\n" + str(local_files - file_names))
+
+        vault_files_post_irsync_source = set(os.listdir(os.path.join(self.user0.get_vault_session_path(),
+                                                                     base_name_source)))
+
+        self.assertTrue(file_names == vault_files_post_irsync_source,
+                        msg="Files missing from vault:\n" + str(file_names - vault_files_post_irsync_source) + "\n\n" +
+                            "Extra files in vault:\n" + str(vault_files_post_irsync_source - file_names))
+
+    def test_irsync_r_dir_to_coll(self):
+        base_name = "test_irsync_r_dir_to_coll"
+        local_dir = os.path.join(self.testing_tmp_dir, base_name)
+        file_names = set(lib.make_large_local_tmp_dir(local_dir, file_count=1000, file_size=100))
+
+        self.user0.assert_icommand("irsync -r " + local_dir + " i:" + base_name, "STDOUT_SINGLELINE", ustrings.recurse_ok_string())
+        self.user0.assert_icommand("ils", 'STDOUT_SINGLELINE', base_name)
+        rods_files = set(self.user0.get_entries_in_collection(base_name))
+        self.assertTrue(file_names == rods_files,
+                        msg="Files missing:\n" + str(file_names - rods_files) + "\n\n" +
+                            "Extra files:\n" + str(rods_files - file_names))
+
+        vault_files_post_irsync = set(os.listdir(os.path.join(self.user0.get_vault_session_path(),
+                                                              base_name)))
+
+        self.assertTrue(file_names == vault_files_post_irsync,
+                        msg="Files missing from vault:\n" + str(file_names - vault_files_post_irsync) + "\n\n" +
+                            "Extra files in vault:\n" + str(vault_files_post_irsync - file_names))
+
+    def test_irsync_r_coll_to_coll(self):
+        base_name_source = "test_irsync_r_coll_to_coll_source"
+        file_names = set(self.iput_r_large_collection(
+            self.user0, base_name_source, file_count=1000, file_size=100)[1])
+        base_name_target = "test_irsync_r_coll_to_coll_target"
+        self.user0.assert_icommand("irsync -r i:" + base_name_source + " i:" + base_name_target, "EMPTY")
+        self.user0.assert_icommand("ils", 'STDOUT_SINGLELINE', base_name_source)
+        self.user0.assert_icommand("ils", 'STDOUT_SINGLELINE', base_name_target)
+        rods_files_source = set(self.user0.get_entries_in_collection(base_name_source))
+        self.assertTrue(file_names == rods_files_source,
+                        msg="Files missing:\n" + str(file_names - rods_files_source) + "\n\n" +
+                            "Extra files:\n" + str(rods_files_source - file_names))
+
+        rods_files_target = set(self.user0.get_entries_in_collection(base_name_target))
+        self.assertTrue(file_names == rods_files_target,
+                        msg="Files missing:\n" + str(file_names - rods_files_target) + "\n\n" +
+                            "Extra files :\n" + str(rods_files_target - file_names))
+
+        vault_files_post_irsync_source = set(os.listdir(os.path.join(self.user0.get_vault_session_path(),
+                                                                     base_name_source)))
+
+        self.assertTrue(file_names == vault_files_post_irsync_source,
+                        msg="Files missing from vault:\n" + str(file_names - vault_files_post_irsync_source) + "\n\n" +
+                            "Extra files in vault:\n" + str(vault_files_post_irsync_source - file_names))
+
+        vault_files_post_irsync_target = set(os.listdir(os.path.join(self.user0.get_vault_session_path(),
+                                                                     base_name_target)))
+
+        self.assertTrue(file_names == vault_files_post_irsync_target,
+                        msg="Files missing from vault:\n" + str(file_names - vault_files_post_irsync_target) + "\n\n" +
+                            "Extra files in vault:\n" + str(vault_files_post_irsync_target - file_names))
+
     def test_irsync_r_nested_coll_to_coll_large_files(self):
         # test settings
         depth = 4
@@ -214,6 +326,13 @@ class Test_iRsync(ResourceBase, unittest.TestCase):
                             msg="Files missing:\n" + str(local_files - rods_files) + "\n\n" +
                             "Extra files:\n" + str(rods_files - local_files))
 
+            # compare local files with files in vault
+            files_in_vault = set(lib.files_in_dir(os.path.join(self.user0.get_vault_session_path(),
+                                                              source_partial_path)))
+            self.assertTrue(local_files == files_in_vault,
+                        msg="Files missing from vault:\n" + str(local_files - files_in_vault) + "\n\n" +
+                            "Extra files in vault:\n" + str(files_in_vault - local_files))
+
             # now the same thing with dest subcollection
             self.user0.assert_icommand(['ils', dest_partial_path], 'STDOUT_SINGLELINE')
             ils_out = self.user0.get_entries_in_collection(dest_partial_path)
@@ -224,6 +343,13 @@ class Test_iRsync(ResourceBase, unittest.TestCase):
             self.assertTrue(local_files == rods_files,
                             msg="Files missing:\n" + str(local_files - rods_files) + "\n\n" +
                             "Extra files:\n" + str(rods_files - local_files))
+
+            # compare local files with files in vault
+            files_in_vault = set(lib.files_in_dir(os.path.join(self.user0.get_vault_session_path(),
+                                                              dest_partial_path)))
+            self.assertTrue(local_files == files_in_vault,
+                        msg="Files missing from vault:\n" + str(local_files - files_in_vault) + "\n\n" +
+                            "Extra files in vault:\n" + str(files_in_vault - local_files))
 
     def test_irsync_r_nested_coll_to_dir(self):
         # test settings
@@ -260,6 +386,13 @@ class Test_iRsync(ResourceBase, unittest.TestCase):
                             msg="Files missing:\n" + str(local_files - rods_files) + "\n\n" +
                             "Extra files:\n" + str(rods_files - local_files))
 
+            # compare local files with files in vault
+            files_in_vault = set(lib.files_in_dir(os.path.join(self.user0.get_vault_session_path(),
+                                                              partial_path)))
+            self.assertTrue(local_files == files_in_vault,
+                        msg="Files missing from vault:\n" + str(local_files - files_in_vault) + "\n\n" +
+                            "Extra files in vault:\n" + str(files_in_vault - local_files))
+
     def test_irsync_r_nested_coll_to_dir_large_files(self):
         # test settings
         depth = 4
@@ -295,25 +428,10 @@ class Test_iRsync(ResourceBase, unittest.TestCase):
                             msg="Files missing:\n" + str(local_files - rods_files) + "\n\n" +
                             "Extra files:\n" + str(rods_files - local_files))
 
-    def test_irsync_r_symlink(self):
+            # compare local files with files in vault
+            files_in_vault = set(lib.files_in_dir(os.path.join(self.user0.get_vault_session_path(),
+                                                              partial_path)))
+            self.assertTrue(local_files == files_in_vault,
+                        msg="Files missing from vault:\n" + str(local_files - files_in_vault) + "\n\n" +
+                            "Extra files in vault:\n" + str(files_in_vault - local_files))
 
-        # make local dir
-
-        base_name = "test_irsync_r_symlink"
-        local_dir = os.path.join(self.testing_tmp_dir, base_name)
-        lib.make_dir_p(local_dir)
-
-        # make file
-        file_name = os.path.join(local_dir, 'the_file')
-        lib.make_file(file_name, 10)
-
-        # make symlink with relative path
-        link_path_1 = os.path.join(local_dir, 'link1')
-        lib.execute_command(['ln', '-s', 'the_file', link_path_1])
-
-        # make symlink with fully qualified path
-        link_path_2 = os.path.join(local_dir, 'link2')
-        lib.execute_command(['ln', '-s', file_name, link_path_2])
-
-        # sync dir to coll
-        self.user0.assert_icommand("irsync -r {local_dir} i:{base_name}".format(**locals()), "STDOUT_SINGLELINE", ustrings.recurse_ok_string())

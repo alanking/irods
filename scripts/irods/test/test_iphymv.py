@@ -394,6 +394,16 @@ class Test_iPhymv(ResourceBase, unittest.TestCase):
             self.admin.run_icommand(['irm', '-f', logical_path])
             self.admin.assert_icommand(['iadmin', 'rmresc', munge_resc])
 
+    def test_iphymv_root(self):
+        self.admin.assert_icommand('iadmin mkresc test1 unixfilesystem ' + lib.get_hostname() + ':' + paths.irods_directory() + '/test1',
+                'STDOUT_SINGLELINE', '')
+        self.admin.assert_icommand('iadmin mkresc test2 unixfilesystem ' + lib.get_hostname() + ':' + paths.irods_directory() + '/test2',
+                'STDOUT_SINGLELINE', '')
+        self.admin.assert_icommand('iphymv -S test1 -R test2 -r /', 'STDERR_SINGLELINE',
+                'ERROR: phymvUtil: \'/\' does not specify a zone; physical move only makes sense within a zone.')
+        self.admin.assert_icommand('iadmin rmresc test1')
+        self.admin.assert_icommand('iadmin rmresc test2')
+
 class test_iphymv_with_two_basic_ufs_resources(session.make_sessions_mixin([('otherrods', 'rods')], [('alice', 'apass')]), unittest.TestCase):
     """Test suite which provides 2 basic unixfilesystem resources.
 

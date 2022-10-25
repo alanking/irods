@@ -542,6 +542,49 @@ class Test_Rule_Engine_Plugin_Framework(session.make_sessions_mixin([('otherrods
             # This proves that the operation was skipped.
             self.admin.assert_icommand(['ils', os.path.basename(filename)], 'STDERR_SINGLELINE', '{} does not exist'.format(os.path.basename(filename)))
 
+    @unittest.skipUnless(plugin_name == 'irods_rule_engine_plugin-python', 'only applicable for python REP')
+    def test_re_serialization__prep_13(self):
+        try:
+            IrodsController().stop()
+            initial_size_of_server_log = lib.get_file_size_by_path(paths.server_log_path())
+            with temporary_core_file() as core:
+                core.add_rule(rule_texts[self.plugin_name][self.class_name][inspect.currentframe().f_code.co_name])
+                IrodsController().start()
+                with tempfile.NamedTemporaryFile(prefix='test_re_serialization__prep_13') as f:
+                    lib.make_file(f.name, 80, contents='arbitrary')
+                    self.admin.assert_icommand(['iput', f.name])
+            time.sleep(5)
+            occur = lib.count_occurrences_of_regexp_in_log( paths.server_log_path(),
+                                                            (r'writeLine: inString =\s*(\S+)=(\S*)',re.M),
+                                                            start_index=initial_size_of_server_log)
+            self.assertTrue(3 == len(occur))
+            self.assertTrue(occur[0].group(1) == b'physical_path'   and occur[0].group(2).decode('utf-8').startswith(os.path.sep))
+            self.assertTrue(occur[1].group(1) == b'logical_path'    and occur[1].group(2).startswith(b'/'))
+            self.assertTrue(occur[2].group(1) == b'proxy_user_name' and occur[2].group(2).decode('utf-8') == self.admin.username)
+        finally:
+            IrodsController().reload_configuration()
+
+    @unittest.skipUnless(plugin_name == 'irods_rule_engine_plugin-python', 'only applicable for python REP')
+    def test_re_serialization__prep_55(self):
+        try:
+            IrodsController().stop()
+            initial_size_of_server_log = lib.get_file_size_by_path(paths.server_log_path())
+            with temporary_core_file() as core:
+                core.add_rule(rule_texts[self.plugin_name][self.class_name][inspect.currentframe().f_code.co_name])
+                IrodsController().start()
+                with tempfile.NamedTemporaryFile(prefix='test_re_serialization__prep_55') as f:
+                    lib.make_file(f.name, 80, contents='arbitrary')
+                    self.admin.assert_icommand(['iput', f.name])
+            time.sleep(5)
+            occur = lib.count_occurrences_of_regexp_in_log( paths.server_log_path(),
+                                                            (r'writeLine: inString =\s*(\S+)=(\S*)',re.M),
+                                                            start_index=initial_size_of_server_log)
+            self.assertTrue(1 == len(occur))
+            self.assertTrue(occur[0].group(1) == b'user_rods_zone' and occur[0].group(2).decode('utf-8') == self.admin.zone_name)
+        finally:
+            IrodsController().reload_configuration()
+
+
 class Test_Plugin_Instance_Delay(ResourceBase, unittest.TestCase):
 
     plugin_name = IrodsConfig().default_rule_engine_plugin

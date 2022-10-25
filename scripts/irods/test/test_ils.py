@@ -152,3 +152,26 @@ class Test_Ils(resource_suite.ResourceBase, unittest.TestCase):
         self.admin.assert_icommand(['ichmod', 'read', 'public', 'foo'])
         self.admin.assert_icommand(['ils', '-A', 'foo'], 'STDOUT', [' g:public#{0}:read_object'.format(self.admin.zone_name)])
 
+    def test_ils_connection_refused_2948(self):
+        @contextlib.contextmanager
+        def irods_server_stopped():
+            control = IrodsController()
+            control.stop()
+            try:
+                yield
+            finally:
+                control.start()
+        with irods_server_stopped():
+            self.admin.assert_icommand(['ils'], 'STDERR_SINGLELINE', 'Connection refused')
+
+            # Crank up debugging level for this bit to verify failure behavior
+            env_backup = copy.deepcopy(self.admin.environment_file_contents)
+            self.admin.environment_file_contents.update({ 'irods_log_level' : 7 })
+
+            _, out, err = self.admin.assert_icommand(['ils', '-V'], 'STDERR_SINGLELINE', 'Connection refused')
+            self.assertTrue('errno = {0}'.format(errno.ECONNREFUSED) in out, 'missing ECONNREFUSED errno in\n' + out)
+            self.assertTrue('errno = {0}'.format(errno.ECONNABORTED) not in out, 'found ECONNABORTED errno in\n' + out)
+            self.assertTrue('errno = {0}'.format(errno.EINVAL) not in out, 'found EINVAL errno in\n' + out)
+
+            self.admin.environment_file_contents = env_backup
+

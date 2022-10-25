@@ -32,3 +32,11 @@ class Test_ihelp(unittest.TestCase):
     def test_local_ihelp_with_bad_option(self):
         with session.make_session_for_existing_admin() as admin_session:
             admin_session.assert_icommand_fail("ihelp -z")
+
+    def test_icommand_help_and_error_codes(self):
+        with session.make_session_for_existing_admin() as admin_session:
+            icmds = ['iput', 'iget']
+            for i in icmds:
+                admin_session.assert_icommand(i + ' -h', 'STDOUT_SINGLELINE', 'Usage', desired_rc=0)
+                admin_session.assert_icommand(i + ' -thisisanerror', 'STDERR_SINGLELINE', 'Usage', desired_rc=1)
+

@@ -199,3 +199,18 @@ class Test_Dynamic_PEPs(session.make_sessions_mixin([('otherrods', 'rods')], [])
                     self.admin.assert_icommand(['irm', '-f', logical_path])
                     self.admin.assert_icommand(['iadmin', 'rum'])
 
+    def test_delay_in_dynamic_pep__3342(self):
+        with temporary_core_file() as core:
+            time.sleep(1)  # remove once file hash fix is committed #2279
+            core.add_rule(rule_texts[self.plugin_name][self.class_name][inspect.currentframe().f_code.co_name])
+            time.sleep(1)  # remove once file hash fix is committed #2279
+
+            initial_size_of_server_log = lib.get_file_size_by_path(paths.server_log_path())
+            with tempfile.NamedTemporaryFile(prefix='test_delay_in_dynamic_pep__3342') as f:
+                lib.make_file(f.name, 80, contents='arbitrary')
+                self.admin.assert_icommand(['iput', '-f', f.name])
+            lib.delayAssert(
+                lambda: lib.log_message_occurrences_equals_count(
+                    msg='writeLine: inString = dynamic pep in delay',
+                    start_index=initial_size_of_server_log))
+

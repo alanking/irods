@@ -208,3 +208,53 @@ class Test_Icp(session.make_sessions_mixin([('otherrods', 'rods')], [('alice', '
                 self.user.assert_icommand(['irm', '-rf', source_collection_path])
                 self.user.assert_icommand(['imkdir', '-p', source_collection_path])
 
+    def test_icp_r(self):
+        base_name_source = "test_icp_r_dir_source"
+        file_names = set(self.iput_r_large_collection(
+            self.user0, base_name_source, file_count=1000, file_size=100)[1])
+
+        base_name_target = "test_icp_r_dir_target"
+        self.user0.assert_icommand("icp -r " + base_name_source + " " + base_name_target, "EMPTY")
+        self.user0.assert_icommand("ils", 'STDOUT_SINGLELINE', base_name_target)
+        rods_files_source = set(self.user0.get_entries_in_collection(base_name_source))
+        self.assertTrue(file_names == rods_files_source,
+                        msg="Files missing:\n" + str(file_names - rods_files_source) + "\n\n" +
+                            "Extra files:\n" + str(rods_files_source - file_names))
+
+        rods_files_target = set(self.user0.get_entries_in_collection(base_name_target))
+        self.assertTrue(file_names == rods_files_target,
+                        msg="Files missing:\n" + str(file_names - rods_files_target) + "\n\n" +
+                            "Extra files:\n" + str(rods_files_target - file_names))
+
+        vault_files_post_icp_source = set(os.listdir(os.path.join(self.user0.get_vault_session_path(),
+                                                                  base_name_source)))
+
+        self.assertTrue(file_names == vault_files_post_icp_source,
+                        msg="Files missing from vault:\n" + str(file_names - vault_files_post_icp_source) + "\n\n" +
+                            "Extra files in vault:\n" + str(vault_files_post_icp_source - file_names))
+
+        vault_files_post_icp_target = set(os.listdir(os.path.join(self.user0.get_vault_session_path(),
+                                                                  base_name_target)))
+        self.assertTrue(file_names == vault_files_post_icp_target,
+                        msg="Files missing from vault:\n" + str(file_names - vault_files_post_icp_target) + "\n\n" +
+                            "Extra files in vault:\n" + str(vault_files_post_icp_target - file_names))
+
+    def test_icp_collection_into_itself(self):
+        base_name_source = "test_icp_collection_into_itself"
+        file_names = set(self.iput_r_large_collection(
+            self.user0, base_name_source, file_count=1, file_size=100)[1])
+
+        self.user0.assert_icommand("icp -r " + base_name_source + " " + base_name_source + "/", 'STDERR_SINGLELINE', 'SAME_SRC_DEST_PATHS_ERR')
+
+    def test_icp_collection_into_itself_3962(self):
+        base_name_source = "test_icp_r_3962"
+        file_names = set(self.iput_r_large_collection(
+            self.user0, base_name_source, file_count=10, file_size=100)[1])
+
+        base_name_target = base_name_source + "_1"
+        self.user0.assert_icommand("icp -r " + base_name_source + " " + base_name_target, "EMPTY")
+
+        # The above was the test case that failed before the bug fix.
+        # There is no need to test the ordinary icp -r onto itself, because
+        # of the previous test - test_icp_collection_into_itself.
+

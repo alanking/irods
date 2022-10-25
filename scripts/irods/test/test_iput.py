@@ -541,6 +541,259 @@ class Test_Iput(session.make_sessions_mixin(rodsadmins, rodsusers), unittest.Tes
 
             self.user.assert_icommand(['ils', '-l', collection_path], 'STDOUT', coll)
 
+    def test_iput_to_root_collection(self):
+        filename = 'original.txt'
+        filepath = lib.create_local_testfile(filename)
+        self.admin.assert_icommand('iput ' + filename + ' /nopes', 'STDERR_SINGLELINE', 'SYS_INVALID_INPUT_PARAM')
+
+    # These tests attempt to put a file to a logical path to which the authenticated user has no access permission
+    def test_iput_small_file_to_restricted_logical_path(self):
+        self.iput_to_restricted_logical_path_test(1)
+
+    def test_iput_large_file_to_restricted_logical_path(self):
+        self.iput_to_restricted_logical_path_test(40000001)
+
+    def iput_to_restricted_logical_path_test(self, size):
+        file_name = 'iput_to_restricted_logical_path_test'
+        file_path = os.path.join(self.testing_tmp_dir, file_name)
+        lib.make_file(file_path, size)
+        logical_path = os.path.join(self.user1.session_collection, file_name) # another user's home collection
+        try:
+            # attempt to put file where there is no permission
+            self.user0.assert_icommand(['iput', file_path, logical_path], 'STDERR', 'CAT_NO_ACCESS_PERMISSION')
+            self.admin.assert_icommand(['ils', '-l', logical_path], 'STDERR', 'does not exist')
+            session_vault_path = self.user1.get_vault_session_path()
+            self.assertFalse(os.path.exists(os.path.join(session_vault_path, file_name)))
+
+            # attempt an overwrite
+            self.user1.assert_icommand(['iput', file_path, logical_path])
+            self.admin.assert_icommand(['ils', '-l', logical_path], 'STDOUT', file_name)
+            self.user0.assert_icommand(['iput', file_path, logical_path], 'STDERR', 'CAT_NO_ACCESS_PERMISSION')
+            self.admin.assert_icommand(['ils', '-l', logical_path], 'STDOUT', file_name)
+            session_vault_path = self.user1.get_vault_session_path()
+            self.assertTrue(os.path.exists(os.path.join(session_vault_path, file_name)))
+
+            # attempt a forced overwrite
+            self.user0.assert_icommand(['iput', '-f', file_path, logical_path], 'STDERR', 'CAT_NO_ACCESS_PERMISSION')
+            self.admin.assert_icommand(['ils', '-l', logical_path], 'STDOUT', file_name)
+            session_vault_path = self.user1.get_vault_session_path()
+            self.assertTrue(os.path.exists(os.path.join(session_vault_path, file_name)))
+        finally:
+            self.admin.run_icommand(['irm', '-f', logical_path])
+            os.unlink(file_path)
+
+    # These tests create a resource with a vault for which iRODS has no write permission and tries to put a file there
+    def test_iput_small_file_to_resource_with_restricted_vault_permission(self):
+        self.iput_to_resource_with_restricted_vault_permission_test(1)
+
+    def test_iput_large_file_to_resource_with_restricted_vault_permission(self):
+        self.iput_to_resource_with_restricted_vault_permission_test(40000001)
+
+    def iput_to_resource_with_restricted_vault_permission_test(self, size):
+        resc_name = 'cantwritetovaultresc'
+        vault_path = os.path.join('/', 'var')
+        self.admin.assert_icommand(['iadmin', 'mkresc', resc_name, 'unixfilesystem', lib.get_hostname() + ':' + vault_path], 'STDOUT_SINGLELINE', resc_name)
+        file_name = 'test_iput_to_resource_with_restricted_vault_permission'
+        file_path = os.path.join(self.testing_tmp_dir, file_name)
+        lib.make_file(file_path, size)
+        logical_path = os.path.join(self.admin.session_collection, file_name) # another user's home collection
+        try:
+            self.admin.assert_icommand(['iput', '-R', resc_name, file_path], 'STDERR', 'UNIX_FILE_MKDIR_ERR')
+            self.admin.assert_icommand(['ils', '-l', file_name], 'STDERR', 'does not exist')
+            session_vault_path = self.admin.get_vault_session_path()
+            self.assertFalse(os.path.exists(os.path.join(session_vault_path, file_name)))
+        finally:
+            self.admin.run_icommand(['irm', '-f', logical_path])
+            os.unlink(file_path)
+            self.admin.assert_icommand(['iadmin', 'rmresc', resc_name])
+
+    def test_iput_resc_scheme_forced(self):
+        filename = 'test_iput_resc_scheme_forced_test_file.txt'
+        filepath = lib.create_local_testfile(filename)
+
+        # manipulate core.re and check the server log
+        with temporary_core_file() as core:
+            time.sleep(1)  # remove once file hash fix is committed #2279
+            core.add_rule(rule_texts[self.plugin_name][self.class_name][inspect.currentframe().f_code.co_name])
+            time.sleep(1)  # remove once file hash fix is committed #2279
+
+            # test as rodsuser
+            self.user0.assert_icommand(['ils', '-l', filename], 'STDERR_SINGLELINE', 'does not exist')
+
+            self.user0.assert_icommand(['iput', '-f', filepath])
+            self.user0.assert_icommand(['ils', '-l', filename], 'STDOUT_SINGLELINE', 'demoResc')
+            self.user0.assert_icommand(['irm', '-f', filename])
+
+            self.user0.assert_icommand(['iput', '-fR', self.testresc, filepath])
+            self.user0.assert_icommand(['ils', '-l', filename], 'STDOUT_SINGLELINE', 'demoResc')
+            self.user0.assert_icommand(['irm', '-f', filename])
+
+            # test as rodsadmin
+            self.admin.assert_icommand(['ils', '-l', filename], 'STDERR_SINGLELINE', 'does not exist')
+
+            self.admin.assert_icommand(['iput', '-f', filepath])
+            self.admin.assert_icommand(['ils', '-l', filename], 'STDOUT_SINGLELINE', 'demoResc')
+            self.admin.assert_icommand(['irm', '-f', filename])
+
+            self.admin.assert_icommand(['iput', '-fR', self.testresc, filepath])
+            self.admin.assert_icommand(['ils', '-l', filename], 'STDOUT_SINGLELINE', self.testresc)
+            self.admin.assert_icommand(['irm', '-f', filename])
+
+            os.unlink(filepath)
+
+    def test_iput_resc_scheme_preferred(self):
+        filename = 'test_iput_resc_scheme_preferred_test_file.txt'
+        filepath = lib.create_local_testfile(filename)
+
+        with temporary_core_file() as core:
+            time.sleep(1)  # remove once file hash fix is committed #2279
+            core.add_rule(rule_texts[self.plugin_name][self.class_name][inspect.currentframe().f_code.co_name])
+            time.sleep(1)  # remove once file hash fix is committed #2279
+
+            # test as rodsuser
+            self.user0.assert_icommand(['ils', '-l', filename], 'STDERR_SINGLELINE', 'does not exist')
+
+            self.user0.assert_icommand(['iput', '-f', filepath])
+            self.user0.assert_icommand(['ils', '-l', filename], 'STDOUT_SINGLELINE', 'demoResc')
+            self.user0.assert_icommand(['irm', '-f', filename])
+
+            self.user0.assert_icommand(['iput', '-fR', self.testresc, filepath])
+            self.user0.assert_icommand(['ils', '-l', filename], 'STDOUT_SINGLELINE', self.testresc)
+            self.user0.assert_icommand(['irm', '-f', filename])
+
+            # test as rodsadmin
+            self.admin.assert_icommand(['ils', '-l', filename], 'STDERR_SINGLELINE', 'does not exist')
+
+            self.admin.assert_icommand(['iput', '-f', filepath])
+            self.admin.assert_icommand(['ils', '-l', filename], 'STDOUT_SINGLELINE', 'demoResc')
+            self.admin.assert_icommand(['irm', '-f', filename])
+
+            self.admin.assert_icommand(['iput', '-fR', self.testresc, filepath])
+            self.admin.assert_icommand(['ils', '-l', filename], 'STDOUT_SINGLELINE', self.testresc)
+            self.admin.assert_icommand(['irm', '-f', filename])
+
+            os.unlink(filepath)
+
+    def test_iput_resc_scheme_null(self):
+        filename = 'test_iput_resc_scheme_null_test_file.txt'
+        filepath = lib.create_local_testfile(filename)
+
+        with temporary_core_file() as core:
+            time.sleep(1)  # remove once file hash fix is committed #2279
+            core.add_rule(rule_texts[self.plugin_name][self.class_name][inspect.currentframe().f_code.co_name])
+            time.sleep(1)  # remove once file hash fix is committed #2279
+
+            # test as rodsuser
+            self.user0.assert_icommand(['ils', '-l', filename], 'STDERR_SINGLELINE', 'does not exist')
+
+            self.user0.assert_icommand(['iput', '-f', filepath])
+            self.user0.assert_icommand(['ils', '-l', filename], 'STDOUT_SINGLELINE', 'demoResc')
+            self.user0.assert_icommand(['irm', '-f', filename])
+
+            self.user0.assert_icommand(['iput', '-fR', self.testresc, filepath])
+            self.user0.assert_icommand(['ils', '-l', filename], 'STDOUT_SINGLELINE', self.testresc)
+            self.user0.assert_icommand(['irm', '-f', filename])
+
+            # test as rodsadmin
+            self.admin.assert_icommand(['ils', '-l', filename], 'STDERR_SINGLELINE', 'does not exist')
+
+            self.admin.assert_icommand(['iput', '-f', filepath])
+            self.admin.assert_icommand(['ils', '-l', filename], 'STDOUT_SINGLELINE', 'demoResc')
+            self.admin.assert_icommand(['irm', '-f', filename])
+
+            self.admin.assert_icommand(['iput', '-fR', self.testresc, filepath])
+            self.admin.assert_icommand(['ils', '-l', filename], 'STDOUT_SINGLELINE', self.testresc)
+            self.admin.assert_icommand(['irm', '-f', filename])
+
+            os.unlink(filepath)
+
+    def test_cancel_large_iput_for_create(self):
+        base_name = 'test_cancel_large_put'
+        local_dir = os.path.join(self.testing_tmp_dir, base_name)
+        file_size = pow(2, 30)
+        file_name = lib.make_large_local_tmp_dir(local_dir, file_count=1, file_size=file_size)[0]
+        file_local_full_path = os.path.join(local_dir, file_name)
+        iput_cmd = "iput '" + file_local_full_path + "'"
+        file_vault_full_path = os.path.join(self.user0.get_vault_session_path(), file_name)
+        self.user0.interrupt_icommand(iput_cmd, file_vault_full_path, 10)
+
+        # multiple threads could still be writing on the server side, so we need to wait for
+        # the size in the vault to converge - then were done.
+        old_size = None
+        new_size = os.path.getsize(file_vault_full_path)
+        while old_size != new_size:
+            time.sleep(1)
+            old_size = new_size
+            new_size = os.path.getsize(file_vault_full_path)
+
+        # wait for select() call to timeout, set to "SELECT_TIMEOUT_FOR_CONN", which is 60 seconds
+        time.sleep(63)
+        self.user0.assert_icommand('ils -l', 'STDOUT_SINGLELINE', [file_name, str(new_size)])
+
+    def test_cancel_large_iput_for_overwrite__issue_3091(self):
+        filename = 'test_cancel_large_iput_for_overwrite__issue_3091'
+        small_local_file = os.path.join(self.user0.local_session_dir, 'smol')
+        large_local_file = os.path.join(self.user0.local_session_dir, filename)
+        logical_path = os.path.join(self.user0.session_collection, filename)
+        file_size = pow(2, 30)
+
+        try:
+            if not os.path.exists(small_local_file):
+                lib.make_file(small_local_file, 1024)
+
+            self.user0.assert_icommand(['iput', '-K', small_local_file, logical_path])
+            out, err, ec = self.user0.run_icommand(
+                ['iquest', '%s %s',
+                 "select DATA_CHECKSUM, DATA_REPL_STATUS where DATA_NAME = '{0}' and COLL_NAME = '{1}'"
+                 .format(os.path.basename(logical_path), os.path.dirname(logical_path))])
+
+            self.assertEqual(0, ec)
+            self.assertEqual(0, len(err))
+            self.assertEqual(1, len(out.splitlines()))
+
+            result = out.split()
+            self.assertEqual(1, int(result[1]))
+            old_checksum = result[0]
+
+            if not os.path.exists(large_local_file):
+                lib.make_file(large_local_file, file_size)
+
+            iput_cmd = 'iput -f -K {0} {1}'.format(large_local_file, logical_path)
+            file_vault_full_path = os.path.join(self.user0.get_vault_session_path(), filename)
+            self.user0.interrupt_icommand(iput_cmd, file_vault_full_path, 2048)
+            self.user0.assert_icommand('ils -L', 'STDOUT_SINGLELINE', filename)
+
+            # multiple threads could still be writing on the server side, so we need to wait for
+            # the size in the vault to converge - then we're done.
+            old_size = None
+            new_size = os.path.getsize(file_vault_full_path)
+            while old_size != new_size:
+                time.sleep(1)
+                old_size = new_size
+                new_size = os.path.getsize(file_vault_full_path)
+
+            # wait for select() call to timeout, set to slightly above "SELECT_TIMEOUT_FOR_CONN", which is 60 seconds
+            time.sleep(63)
+            self.user0.assert_icommand('ils -L', 'STDOUT_SINGLELINE', [filename, str(new_size)])
+
+            out, err, ec = self.user0.run_icommand(
+                ['iquest', '%s...%s...%s',
+                 "select DATA_SIZE, DATA_CHECKSUM, DATA_REPL_STATUS where DATA_NAME = '{0}' and COLL_NAME = '{1}'"
+                 .format(os.path.basename(logical_path), os.path.dirname(logical_path))])
+
+            self.assertEqual(0, ec)
+            self.assertEqual(0, len(err))
+
+            self.assertEqual(1, len(out.splitlines()))
+            result = out.split('...')
+
+            self.assertEqual(new_size, int(result[0]))
+            self.assertNotEqual(old_checksum, result[1])
+            self.assertEqual(0, int(result[2]))
+
+        finally:
+            self.user0.assert_icommand(['irm', '-f', logical_path])
+
 class test_iput_with_checksums(session.make_sessions_mixin(rodsadmins, rodsusers), unittest.TestCase):
 
     def setUp(self):

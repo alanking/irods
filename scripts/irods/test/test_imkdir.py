@@ -77,3 +77,6 @@ class Test_imkdir(session.make_sessions_mixin([('otherrods', 'rods')], []), unit
         self.admin.assert_icommand("imkdir -p " + longpath)
         self.admin.assert_icommand("ils -l " + basecoll, 'STDOUT_SINGLELINE', basecoll)  # should be listed
 
+    def test_imkdir_to_root_collection(self):
+        self.admin.assert_icommand('imkdir /nopes', 'STDERR_SINGLELINE', 'SYS_INVALID_INPUT_PARAM')
+
