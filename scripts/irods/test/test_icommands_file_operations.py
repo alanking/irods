@@ -129,13 +129,6 @@ class Test_ICommands_File_Operations(resource_suite.ResourceBase, unittest.TestC
     def test_iget_with_verify_to_stdout(self):
         self.admin.assert_icommand("iget -K nopes -", 'STDERR_SINGLELINE', 'Cannot verify checksum if data is piped to stdout')
 
-    def test_force_iput_to_diff_resc(self):
-        filename = "original.txt"
-        filepath = lib.create_local_testfile(filename)
-        self.admin.assert_icommand("iput " + filename)  # put file
-        self.admin.assert_icommand("iput -f " + filename)  # put file
-        self.admin.assert_icommand("iput -fR " + self.testresc + " " + filename, 'STDERR_SINGLELINE', 'HIERARCHY_ERROR')  # fail
-
     def test_get_null_perms__2833(self):
         l = logging.getLogger(__name__)
         base_name = 'test_dir_for_perms'
