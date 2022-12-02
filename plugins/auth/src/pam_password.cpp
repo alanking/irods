@@ -271,11 +271,20 @@ namespace irods
 
                 log_auth::trace("redirecting call to CSP");
 
-                if (const auto ec = sslStart(host->conn); ec) {
-                    THROW(ec, "could not establish SSL connection");
-                }
+                // Need to enable SSL here if it is not already being used because the PAM password
+                // is forwarded to the provider in the clear.
+                const bool using_ssl = irods::CS_NEG_USE_SSL == host->conn->negotiation_results;
+                const auto end_ssl_if_we_enabled_it = irods::at_scope_exit{[host, using_ssl] {
+                    if (!using_ssl) {
+                        sslEnd(host->conn);
+                    }
+                }};
 
-                const auto end_ssl = irods::at_scope_exit{[host] { sslEnd(host->conn); }};
+                if (!using_ssl) {
+                    if (const int ec = sslStart(host->conn); ec) {
+                        THROW(ec, "failed to enable SSL in server-to-server communication");
+                    }
+                }
 
                 return irods_auth::request(*host->conn, req);
             }
