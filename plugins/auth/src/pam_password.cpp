@@ -273,7 +273,8 @@ namespace irods
 
                 // Need to enable SSL here if it is not already being used because the PAM password
                 // is forwarded to the provider in the clear.
-                const bool using_ssl = 0 == std::strncmp(irods::CS_NEG_USE_SSL, host->conn->negotiation_results, MAX_NAME_LEN);
+                const bool using_ssl =
+                    0 == std::strncmp(irods::CS_NEG_USE_SSL, host->conn->negotiation_results, MAX_NAME_LEN);
                 const auto end_ssl_if_we_enabled_it = irods::at_scope_exit{[host, using_ssl] {
                     if (!using_ssl) {
                         sslEnd(host->conn);
