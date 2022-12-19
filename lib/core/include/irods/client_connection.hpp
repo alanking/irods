@@ -18,7 +18,9 @@ namespace irods::experimental
     /// authentication occurs.
     ///
     /// \since 4.2.9
-    struct defer_connection {} defer_connection;
+    const inline struct defer_connection
+    {
+    } defer_connection;
 
     /// This move-only class provides a convenient way to connect to and
     /// disconnect from an iRODS server in a safe manner.
