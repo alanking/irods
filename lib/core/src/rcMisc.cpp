@@ -985,8 +985,14 @@ clearInxIval( inxIvalPair_t *inxIvalPair ) {
         return 0;
     }
 
-    free( inxIvalPair->inx );
-    free( inxIvalPair->value );
+    if (inxIvalPair->inx) {
+        free(inxIvalPair->inx);
+    }
+
+    if (inxIvalPair->value) {
+        free(inxIvalPair->value);
+    }
+
     memset( inxIvalPair, 0, sizeof( inxIvalPair_t ) );
 
     return 0;
@@ -1000,12 +1006,17 @@ clearInxVal( inxValPair_t *inxValPair ) {
         return 0;
     }
 
-    for ( i = 0; i < inxValPair->len; i++ ) {
-        free( inxValPair->value[i] );
+    if (inxValPair->value) {
+        for (i = 0; i < inxValPair->len; i++) {
+            free(inxValPair->value[i]);
+        }
+        free(inxValPair->value);
     }
 
-    free( inxValPair->inx );
-    free( inxValPair->value );
+    if (inxValPair->inx) {
+        free(inxValPair->inx);
+    }
+
     memset( inxValPair, 0, sizeof( inxValPair_t ) );
 
     return 0;

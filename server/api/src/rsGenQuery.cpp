@@ -388,8 +388,8 @@ irods::error add_resc_grp_name_to_query_out( genQueryOut_t *_out, int& _pos ) {
 static
 irods::error strip_resc_hier_name_from_query_inp( genQueryInp_t* _inp, int& _pos ) {
     // sanity check
-    if ( !_inp ) {
-        return CODE( SYS_INTERNAL_NULL_INPUT_ERR );
+    if (!_inp || !_inp->sqlCondInp.inx || !_inp->sqlCondInp.value) {
+        return CODE(SYS_INTERNAL_NULL_INPUT_ERR);
     }
 
     // =-=-=-=-=-=-=-
