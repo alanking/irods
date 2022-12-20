@@ -13,9 +13,13 @@
 
 #include "irods/get_hier_from_leaf_id.h"
 
-#include <fstream>
 #include <boost/filesystem/operations.hpp>
 #include <boost/filesystem/convenience.hpp>
+
+#include <algorithm>
+#include <array>
+#include <fstream>
+#include <span>
 
 /* VERIFY_DIV - contributed by g.soudlenkov@auckland.ac.nz */
 #define VERIFY_DIV(_v1_,_v2_) ((_v2_)? (float)(_v1_)/(_v2_):0.0)
@@ -1826,36 +1830,38 @@ myChmod( char *inPath, uint dataMode ) {
     return 0;
 }
 
-char *
-getZoneHintForGenQuery( genQueryInp_t *genQueryInp ) {
-    char *zoneHint;
-    int i;
-
-    if ( genQueryInp == NULL ) {
-        return NULL;
+auto getZoneHintForGenQuery(genQueryInp_t* genQueryInp) -> char*
+{
+    if (!genQueryInp) {
+        return nullptr;
     }
 
-    if ( ( zoneHint = getValByKey( &genQueryInp->condInput, ZONE_KW ) ) != NULL ) {
-        return zoneHint;
+    if (char* hint = getValByKey(&genQueryInp->condInput, ZONE_KW); hint) {
+        return hint;
     }
 
-    for ( i = 0; i < genQueryInp->sqlCondInp.len; i++ ) {
-        int inx = genQueryInp->sqlCondInp.inx[i];
-        if ( inx == COL_COLL_NAME ||
-                inx == COL_COLL_PARENT_NAME ||
-                inx == COL_ZONE_NAME ) {
-            char *tmpPtr;
-            zoneHint = genQueryInp->sqlCondInp.value[i];
-            if (strcmp(zoneHint, NON_ROOT_COLL_CHECK_STR)) {
-                if ( ( tmpPtr = strchr( zoneHint, '/' ) ) != NULL ) {
-                    zoneHint = tmpPtr;
-                }
-                return zoneHint;
+    if (!genQueryInp->sqlCondInp.inx || !genQueryInp->sqlCondInp.value) {
+        return nullptr;
+    }
+
+    static constexpr std::array<int, 3> zone_hint_columns = {COL_COLL_NAME, COL_COLL_PARENT_NAME, COL_ZONE_NAME};
+    static constexpr auto e = std::cend(zone_hint_columns);
+    const auto inxs = std::span{genQueryInp->sqlCondInp.inx, static_cast<std::size_t>(genQueryInp->sqlCondInp.len)};
+    const auto vals = std::span{genQueryInp->sqlCondInp.value, static_cast<std::size_t>(genQueryInp->sqlCondInp.len)};
+    for (int i = 0; i < genQueryInp->sqlCondInp.len; ++i) {
+        if (e == std::find(std::begin(zone_hint_columns), std::end(zone_hint_columns), inxs[i])) {
+            continue;
+        }
+
+        if (char* hint = vals[i]; 0 != strcmp(hint, NON_ROOT_COLL_CHECK_STR)) {
+            if (char* root = strchr(hint, '/'); root) {
+                hint = root;
             }
+            return hint;
         }
     }
-    return NULL;
-}
+    return nullptr;
+} // getZoneHintForGenQuery
 
 /* getZoneType - get the ZoneType of inZoneName. icatZone is the icat
  * to query.

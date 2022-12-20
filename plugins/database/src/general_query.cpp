@@ -1854,6 +1854,10 @@ generateSQL( genQueryInp_t genQueryInp, char *resultingSQL,
     static char offsetStr[20];
 #endif
 
+    if (!genQueryInp.selectInp.inx || !genQueryInp.selectInp.value) {
+        return SYS_INTERNAL_NULL_INPUT_ERR;
+    }
+
     if ( firstCall ) {
         icatGeneralQuerySetup(); /* initialize */
     }
