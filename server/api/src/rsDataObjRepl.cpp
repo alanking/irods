@@ -695,13 +695,19 @@ namespace
 
     int replicate_data_object(RsComm& _comm, DataObjInp& _inp, transferStat_t** _stat)
     {
-        const auto cond_input = irods::experimental::make_key_value_proxy(_inp.condInput);
+        auto cond_input = irods::experimental::make_key_value_proxy(_inp.condInput);
 
         // get information about source replica
         auto source_inp = init_source_replica_input(_comm, _inp);
         const irods::at_scope_exit free_source_cond_input{[&source_inp]() { clearKeyVal(&source_inp.condInput); }};
         auto source_cond_input = irods::experimental::make_key_value_proxy(source_inp.condInput);
         auto source_obj = resolve_hierarchy_and_get_data_object_info(_comm, source_inp, irods::OPEN_OPERATION);
+
+        // Copy the resolved hierarchy for the source back into the input struct to maintain legacy behavior.
+        if (!cond_input.contains(RESC_HIER_STR_KW)) {
+            cond_input[RESC_HIER_STR_KW] = source_cond_input.at(RESC_HIER_STR_KW).value();
+        }
+
         auto& source_replica = get_replica_with_hierarchy(
             _comm, source_obj, source_cond_input.at(RESC_HIER_STR_KW).value(),
             irods::replication::log_errors::yes);
@@ -734,6 +740,12 @@ namespace
         const irods::at_scope_exit free_destination_cond_input{[&destination_inp]() { clearKeyVal(&destination_inp.condInput); }};
         auto destination_cond_input = irods::experimental::make_key_value_proxy(destination_inp.condInput);
         auto destination_obj = resolve_hierarchy_and_get_data_object_info(_comm, destination_inp, irods::CREATE_OPERATION);
+
+        // Copy the resolved hierarchy for the destination back into the input struct to maintain legacy behavior.
+        if (!cond_input.contains(DEST_RESC_HIER_STR_KW)) {
+            cond_input[DEST_RESC_HIER_STR_KW] = destination_cond_input.at(DEST_RESC_HIER_STR_KW).value();
+        }
+
         try {
             if (irods::experimental::keyword_has_a_value(destination_inp.condInput, DEST_RESC_NAME_KW)) {
                 const auto resolved_hierarchy = destination_cond_input.at(DEST_RESC_HIER_STR_KW).value();
