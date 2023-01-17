@@ -163,6 +163,7 @@ namespace
 
     auto close_destination_data_obj(RsComm* _comm, const int _l1_index, const DataObjInp& _inp) -> int
     {
+        // The L1 descriptor may not be available at this point, so we need to use the path from the DataObjInp.
         const std::string_view path = static_cast<const char*>(_inp.objPath);
 
         log_api::trace("[{}:{}] - closing [{}]", __func__, __LINE__, path);
@@ -173,10 +174,12 @@ namespace
         // Declare this here because we need to return an error if the source index is invalid.
         int ec = 0;
 
-        // The L1 descriptor index is const and confirmed to be in-bounds above. Therefore, ignore linter.
+        // The L1 descriptor index is const and bounds-checked before this function is called. Therefore, ignore linter.
         //
         // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
-        const int source_l1_index = L1desc[_l1_index].srcL1descInx;
+        auto& l1_desc = L1desc[_l1_index];
+
+        const int source_l1_index = l1_desc.srcL1descInx;
         if (source_l1_index < 3 || source_l1_index >= NUM_L1_DESC) {
             log_api::error("[{}:{}] - Source L1 descriptor for [{}] is out of range: [{}]",
                            __func__,
@@ -184,8 +187,12 @@ namespace
                            path,
                            source_l1_index);
 
-            // Set the error code, but continue to the close call so the destination data object can be finalized.
+            // Set the error code, but continue to the close call so the destination data object can be finalized. The
+            // L1 descriptor oprType is also set so that rsDataObjClose knows that the operation encountered an issue.
+            // The data object should be marked stale because the source L1 descriptor has been corrupted and cannot be
+            // used for data verification in the finalization process of the new data object.
             ec = SYS_FILE_DESC_OUT_OF_RANGE;
+            l1_desc.oprStatus = ec;
         }
         else {
             // The L1 descriptor index is const and confirmed to be in-bounds above. Therefore, ignore linter.
@@ -194,12 +201,11 @@ namespace
             close_inp.bytesWritten = L1desc[source_l1_index].dataObjInfo->dataSize;
         }
 
-        if (const int close_ec = rsDataObjClose(_comm, &close_inp); ec >= 0) {
+        if (const int close_ec = rsDataObjClose(_comm, &close_inp); close_ec < 0) {
             ec = close_ec;
         }
 
         if (ec < 0) {
-            // The L1 descriptor may not be available at this point, so we need to use the path from the DataObjInp.
             log_api::error("[{}:{}] - failed closing [{}] with status [{}]", __func__, __LINE__, path, ec);
         }
 
@@ -236,11 +242,12 @@ namespace
 
         rodsServerHost_t* rodsServerHost = nullptr;
         int remoteFlag = connect_to_remote_zone( rsComm, dataObjCopyInp, &rodsServerHost );
-        if (remoteFlag < 0 || !rodsServerHost) {
-            return remoteFlag < 0 ? remoteFlag : NO_CATALOG_SERVICE_PROVIDER;
+        if (remoteFlag < 0) {
+            return remoteFlag;
         }
         else if ( remoteFlag == REMOTE_HOST ) {
-            return _rcDataObjCopy(rodsServerHost->conn, dataObjCopyInp, transStat);
+            return !rodsServerHost ? NO_CATALOG_SERVICE_PROVIDER
+                                   : _rcDataObjCopy(rodsServerHost->conn, dataObjCopyInp, transStat);
         }
 
         if (strcmp(srcDataObjInp->objPath, destDataObjInp->objPath) == 0) {
