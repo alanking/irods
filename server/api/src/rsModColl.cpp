@@ -87,7 +87,7 @@ auto rsModColl(rsComm_t* rsComm, collInp_t* modCollInp) -> int
             return SYS_INVALID_FILE_PATH;
         }
 
-        if (!isLocalZone(zone_name->data())) {
+        if (!isLocalZone(zone_name->c_str())) {
             auto* host = ic::redirect_to_catalog_provider(*rsComm, static_cast<char*>(modCollInp->collName));
             return rcModColl(host->conn, modCollInp);
         }
