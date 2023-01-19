@@ -246,8 +246,8 @@ namespace
             return remoteFlag;
         }
         else if ( remoteFlag == REMOTE_HOST ) {
-            return !rodsServerHost ? NO_CATALOG_SERVICE_PROVIDER
-                                   : _rcDataObjCopy(rodsServerHost->conn, dataObjCopyInp, transStat);
+            // It is not possible to have REMOTE_HOST and rodsServerHost as a nullptr, so no check is needed.
+            return _rcDataObjCopy(rodsServerHost->conn, dataObjCopyInp, transStat);
         }
 
         if (strcmp(srcDataObjInp->objPath, destDataObjInp->objPath) == 0) {
