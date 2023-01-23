@@ -703,6 +703,16 @@ int runIrodsAgentFactory(sockaddr_un agent_addr)
         return ret.code();
     }
 
+    const auto cleanup_and_free_rsComm_members = [&rsComm] {
+        cleanup();
+        if (rsComm.thread_ctx) {
+            std::free(rsComm.thread_ctx); // NOLINT(cppcoreguidelines-no-malloc, cppcoreguidelines-owning-memory)
+        }
+        if (rsComm.auth_scheme) {
+            std::free(rsComm.auth_scheme); // NOLINT(cppcoreguidelines-no-malloc, cppcoreguidelines-owning-memory)
+        }
+    };
+
     new_net_obj->to_server(&rsComm);
     status = agentMain(&rsComm);
 
@@ -710,14 +720,13 @@ int runIrodsAgentFactory(sockaddr_un agent_addr)
     ret = sockAgentStop( new_net_obj );
     if (!ret.ok()) {
         log_agent::error(PASS(ret).result());
+        cleanup_and_free_rsComm_members();
         return ret.code();
     }
 
     new_net_obj->to_server(&rsComm);
-    // TODO: move this into an at_scope_exit
-    cleanup();
-    std::free(rsComm.thread_ctx);
-    std::free(rsComm.auth_scheme);
+
+    cleanup_and_free_rsComm_members();
 
     // clang-format off
     (0 == status)
