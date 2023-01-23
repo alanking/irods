@@ -683,6 +683,13 @@ def replica_exists_on_resource(session, logical_path, resource_name):
 
     return 'CAT_NO_ROWS_FOUND' not in out
 
+
+def set_replica_status(session, logical_path, replica_number, desired_status):
+    session.run_icommand(['iadmin', 'modrepl',
+        'logical_path', logical_path,
+        'replica_number', str(replica_number),
+        'DATA_REPL_STATUS', str(desired_status)])
+
 def iterfy(iterable):
     """Will return an iterable, even if input is a single item
 
