@@ -106,64 +106,12 @@ namespace
         // default is attached mode
         return false;
     }
-
-    auto set_munge_operations(irods::plugin_property_map& _props) -> void
-    {
-        std::string munge_operations_str;
-        if (const auto err = _props.get(MUNGE_OPERATIONS, munge_operations_str); !err.ok()) {
-            log_resource::trace("{}: no munge_operations in context", __func__);
-            return;
-        }
-
-        log_resource::trace("{}: munge_operations [{}]", __func__, munge_operations_str);
-
-        constexpr const char* delimiter = ",";
-        std::vector<std::string> operation_tokens;
-        irods::string_tokenize(munge_operations_str, delimiter, operation_tokens);
-
-        if (operation_tokens.empty()) {
-            _props.erase(MUNGE_OPERATIONS);
-            return;
-        }
-
-        // Replace the comma-delimited string with a vector of operation names for reference in the plugin operations.
-        _props.set(MUNGE_OPERATIONS, operation_tokens);
-    } // set_munge_operations
-
-    auto get_error_if_operation_is_configured_to_fail(irods::plugin_property_map& _props, const std::string& _name)
-        -> irods::error
-    {
-        static bool checked_for_munge_operations = false;
-        static bool munge_operations_in_context = false;
-        static std::vector<std::string> ops;
-
-        if (!checked_for_munge_operations) {
-            const auto r = _props.get(MUNGE_OPERATIONS, ops);
-            checked_for_munge_operations = true;
-            munge_operations_in_context = r.ok();
-        }
-
-        if (!munge_operations_in_context) {
-            log_resource::trace("{}: munge_operations not configured", __func__);
-            return SUCCESS();
-        }
-
-        if (std::cend(ops) == std::find(std::cbegin(ops), std::cend(ops), _name)) {
-            log_resource::trace("{}: op [{}] not found in munge_operations", __func__, _name);
-            return SUCCESS();
-        }
-
-        return ERROR(PLUGIN_OPERATION_CONFIGURED_TO_FAIL, fmt::format("Operation [{}] is configured to fail", _name));
-    } // get_error_if_operation_is_configured_to_fail
 } // namespace
 
 // The return value is always SUCCESS() because the errors encountered are to
 // be treated as warnings and no fatal errors.
 auto unix_file_start_operation(irods::plugin_property_map& prop_map) -> irods::error
 {
-    log_resource::trace("{}: setting up munge_operations", __func__);
-    set_munge_operations(prop_map);
-
     if (!is_operating_in_detached_mode(prop_map)) {
         // Detached mode is disabled.  Return early.
         return SUCCESS();
@@ -419,11 +367,6 @@ irods::error unix_file_mkdir_r(const std::string& path, mode_t mode)
 /// @brief interface to notify of a file registration
 irods::error unix_file_registered(irods::plugin_context& _ctx)
 {
-    static const std::string& operation_name = irods::RESOURCE_OP_REGISTERED;
-    if (const auto err = get_error_if_operation_is_configured_to_fail(_ctx.prop_map(), operation_name); !err.ok()) {
-        return err;
-    }
-
     if (!is_operating_in_detached_mode(_ctx.prop_map())) {
         return SUCCESS();
     }
@@ -456,11 +399,6 @@ irods::error unix_file_registered(irods::plugin_context& _ctx)
 /// @brief interface to notify of a file unregistration
 irods::error unix_file_unregistered(irods::plugin_context& _ctx)
 {
-    static const std::string& operation_name = irods::RESOURCE_OP_UNREGISTERED;
-    if (const auto err = get_error_if_operation_is_configured_to_fail(_ctx.prop_map(), operation_name); !err.ok()) {
-        return err;
-    }
-
     // NOOP
     return SUCCESS();
 } // unix_file_unregistered
@@ -468,11 +406,6 @@ irods::error unix_file_unregistered(irods::plugin_context& _ctx)
 /// @brief interface to notify of a file modification
 irods::error unix_file_modified(irods::plugin_context& _ctx)
 {
-    static const std::string& operation_name = irods::RESOURCE_OP_MODIFIED;
-    if (const auto err = get_error_if_operation_is_configured_to_fail(_ctx.prop_map(), operation_name); !err.ok()) {
-        return err;
-    }
-
     // NOOP
     return SUCCESS();
 } // unix_file_modified
@@ -480,11 +413,6 @@ irods::error unix_file_modified(irods::plugin_context& _ctx)
 /// @brief interface to notify of a file operation
 irods::error unix_file_notify(irods::plugin_context& _ctx, const std::string*)
 {
-    static const std::string& operation_name = irods::RESOURCE_OP_NOTIFY;
-    if (const auto err = get_error_if_operation_is_configured_to_fail(_ctx.prop_map(), operation_name); !err.ok()) {
-        return err;
-    }
-
     // NOOP
     return SUCCESS();
 } // unix_file_notify
@@ -492,11 +420,6 @@ irods::error unix_file_notify(irods::plugin_context& _ctx, const std::string*)
 // interface to determine free space on a device given a path
 irods::error unix_file_getfs_freespace(irods::plugin_context& _ctx)
 {
-    static const std::string& operation_name = irods::RESOURCE_OP_FREESPACE;
-    if (const auto err = get_error_if_operation_is_configured_to_fail(_ctx.prop_map(), operation_name); !err.ok()) {
-        return err;
-    }
-
     // Check the operation parameters and update the physical path
     if (const auto err = unix_check_params_and_path(_ctx); !err.ok()) {
         return PASSMSG("Invalid parameters or physical path.", err);
@@ -619,11 +542,6 @@ void warn_if_deprecated_context_string_set(
 // interface for POSIX create
 irods::error unix_file_create(irods::plugin_context& _ctx)
 {
-    static const std::string& operation_name = irods::RESOURCE_OP_CREATE;
-    if (const auto err = get_error_if_operation_is_configured_to_fail(_ctx.prop_map(), operation_name); !err.ok()) {
-        return err;
-    }
-
     // Check the operation parameters and update the physical path
     if (const auto err = unix_check_params_and_path(_ctx); !err.ok()) {
         return PASSMSG("Invalid parameters or physical path.", err);
@@ -722,11 +640,6 @@ irods::error unix_file_create(irods::plugin_context& _ctx)
 // interface for POSIX Open
 irods::error unix_file_open(irods::plugin_context& _ctx)
 {
-    static const std::string& operation_name = irods::RESOURCE_OP_OPEN;
-    if (const auto err = get_error_if_operation_is_configured_to_fail(_ctx.prop_map(), operation_name); !err.ok()) {
-        return err;
-    }
-
     // Check the operation parameters and update the physical path
     if (const auto err = unix_check_params_and_path(_ctx); !err.ok()) {
         return PASSMSG("Invalid parameters or physical path.", err);
@@ -813,11 +726,6 @@ irods::error unix_file_read(irods::plugin_context& _ctx,
                             void*                  _buf,
                             const int              _len)
 {
-    static const std::string& operation_name = irods::RESOURCE_OP_READ;
-    if (const auto err = get_error_if_operation_is_configured_to_fail(_ctx.prop_map(), operation_name); !err.ok()) {
-        return err;
-    }
-
     // Check the operation parameters and update the physical path
     if (const auto err = unix_check_params_and_path(_ctx); !err.ok()) {
         return PASSMSG("Invalid parameters or physical path.", err);
@@ -847,11 +755,6 @@ irods::error unix_file_write(irods::plugin_context& _ctx,
                              const void*            _buf,
                              const int              _len)
 {
-    static const std::string& operation_name = irods::RESOURCE_OP_WRITE;
-    if (const auto err = get_error_if_operation_is_configured_to_fail(_ctx.prop_map(), operation_name); !err.ok()) {
-        return err;
-    }
-
     // Check the operation parameters and update the physical path
     if (const auto err = unix_check_params_and_path(_ctx); !err.ok()) {
         return PASSMSG("Invalid parameters or physical path.", err);
@@ -879,11 +782,6 @@ irods::error unix_file_write(irods::plugin_context& _ctx,
 // interface for POSIX Close
 irods::error unix_file_close(irods::plugin_context& _ctx)
 {
-    static const std::string& operation_name = irods::RESOURCE_OP_CLOSE;
-    if (const auto err = get_error_if_operation_is_configured_to_fail(_ctx.prop_map(), operation_name); !err.ok()) {
-        return err;
-    }
-
     // Check the operation parameters and update the physical path
     if (const auto err = unix_check_params_and_path(_ctx); !err.ok()) {
         return PASSMSG("Invalid parameters or physical path.", err);
@@ -911,11 +809,6 @@ irods::error unix_file_close(irods::plugin_context& _ctx)
 // interface for POSIX Unlink
 irods::error unix_file_unlink(irods::plugin_context& _ctx)
 {
-    static const std::string& operation_name = irods::RESOURCE_OP_UNLINK;
-    if (const auto err = get_error_if_operation_is_configured_to_fail(_ctx.prop_map(), operation_name); !err.ok()) {
-        return err;
-    }
-
     // Check the operation parameters and update the physical path
     if (const auto err = unix_check_params_and_path(_ctx); !err.ok()) {
         return PASSMSG("Invalid parameters or physical path.", err);
@@ -944,11 +837,6 @@ irods::error unix_file_unlink(irods::plugin_context& _ctx)
 // interface for POSIX Stat
 irods::error unix_file_stat(irods::plugin_context& _ctx, struct stat* _statbuf)
 {
-    static const std::string& operation_name = irods::RESOURCE_OP_STAT;
-    if (const auto err = get_error_if_operation_is_configured_to_fail(_ctx.prop_map(), operation_name); !err.ok()) {
-        return err;
-    }
-
     // NOTE:: this function assumes the object's physical path is
     //        correct and should not have the vault path
     //        prepended - hcj
@@ -980,11 +868,6 @@ irods::error unix_file_lseek(irods::plugin_context& _ctx,
                              const long long        _offset,
                              const int              _whence)
 {
-    static const std::string& operation_name = irods::RESOURCE_OP_LSEEK;
-    if (const auto err = get_error_if_operation_is_configured_to_fail(_ctx.prop_map(), operation_name); !err.ok()) {
-        return err;
-    }
-
     // Check the operation parameters and update the physical path
     if (const auto err = unix_check_params_and_path(_ctx); !err.ok()) {
         return PASSMSG("Invalid parameters or physical path.", err);
@@ -1012,11 +895,6 @@ irods::error unix_file_lseek(irods::plugin_context& _ctx,
 // interface for POSIX mkdir
 irods::error unix_file_mkdir(irods::plugin_context& _ctx)
 {
-    static const std::string& operation_name = irods::RESOURCE_OP_MKDIR;
-    if (const auto err = get_error_if_operation_is_configured_to_fail(_ctx.prop_map(), operation_name); !err.ok()) {
-        return err;
-    }
-
     // NOTE :: this function assumes the object's physical path is correct and
     //         should not have the vault path prepended - hcj
     if (const auto err = _ctx.valid(); !err.ok()) {
@@ -1049,11 +927,6 @@ irods::error unix_file_mkdir(irods::plugin_context& _ctx)
 // interface for POSIX rmdir
 irods::error unix_file_rmdir(irods::plugin_context& _ctx)
 {
-    static const std::string& operation_name = irods::RESOURCE_OP_RMDIR;
-    if (const auto err = get_error_if_operation_is_configured_to_fail(_ctx.prop_map(), operation_name); !err.ok()) {
-        return err;
-    }
-
     // Check the operation parameters and update the physical path
     if (const auto err = unix_check_params_and_path(_ctx); !err.ok()) {
         return PASSMSG("Invalid parameters or physical path.", err);
@@ -1079,11 +952,6 @@ irods::error unix_file_rmdir(irods::plugin_context& _ctx)
 // interface for POSIX opendir
 irods::error unix_file_opendir(irods::plugin_context& _ctx)
 {
-    static const std::string& operation_name = irods::RESOURCE_OP_OPENDIR;
-    if (const auto err = get_error_if_operation_is_configured_to_fail(_ctx.prop_map(), operation_name); !err.ok()) {
-        return err;
-    }
-
     // Check the operation parameters and update the physical path
     if (const auto ret = unix_check_params_and_path<irods::collection_object>(_ctx); !ret.ok()) {
         return PASSMSG("Invalid parameters or physical path.", ret);
@@ -1120,11 +988,6 @@ irods::error unix_file_opendir(irods::plugin_context& _ctx)
 // interface for POSIX closedir
 irods::error unix_file_closedir(irods::plugin_context& _ctx)
 {
-    static const std::string& operation_name = irods::RESOURCE_OP_CLOSEDIR;
-    if (const auto err = get_error_if_operation_is_configured_to_fail(_ctx.prop_map(), operation_name); !err.ok()) {
-        return err;
-    }
-
     // Check the operation parameters and update the physical path
     if (const auto ret = unix_check_params_and_path<irods::collection_object>(_ctx); !ret.ok()) {
         return PASSMSG("Invalid parameters or physical path.", ret);
@@ -1150,11 +1013,6 @@ irods::error unix_file_closedir(irods::plugin_context& _ctx)
 // interface for POSIX readdir
 irods::error unix_file_readdir(irods::plugin_context& _ctx, struct rodsDirent** _dirent_ptr)
 {
-    static const std::string& operation_name = irods::RESOURCE_OP_READDIR;
-    if (const auto err = get_error_if_operation_is_configured_to_fail(_ctx.prop_map(), operation_name); !err.ok()) {
-        return err;
-    }
-
     // Check the operation parameters and update the physical path
     if (const auto ret = unix_check_params_and_path<irods::collection_object>(_ctx); !ret.ok()) {
         return PASSMSG("Invalid parameters or physical path.", ret);
@@ -1203,11 +1061,6 @@ irods::error unix_file_readdir(irods::plugin_context& _ctx, struct rodsDirent** 
 // interface for POSIX readdir
 irods::error unix_file_rename(irods::plugin_context& _ctx, const char* _new_file_name)
 {
-    static const std::string& operation_name = irods::RESOURCE_OP_RENAME;
-    if (const auto err = get_error_if_operation_is_configured_to_fail(_ctx.prop_map(), operation_name); !err.ok()) {
-        return err;
-    }
-
     // Check the operation parameters and update the physical path
     if (const auto ret = unix_check_params_and_path(_ctx); !ret.ok()) {
         return PASSMSG("Invalid parameters or physical path.", ret);
@@ -1260,11 +1113,6 @@ irods::error unix_file_rename(irods::plugin_context& _ctx, const char* _new_file
 // interface for POSIX truncate
 irods::error unix_file_truncate(irods::plugin_context& _ctx)
 {
-    static const std::string& operation_name = irods::RESOURCE_OP_TRUNCATE;
-    if (const auto err = get_error_if_operation_is_configured_to_fail(_ctx.prop_map(), operation_name); !err.ok()) {
-        return err;
-    }
-
     // Check the operation parameters and update the physical path
     if (const auto ret = unix_check_params_and_path<irods::file_object>(_ctx); !ret.ok()) {
         return PASSMSG("Invalid parameters or physical path.", ret);
@@ -1293,11 +1141,6 @@ irods::error unix_file_truncate(irods::plugin_context& _ctx)
 // is not used.
 irods::error unix_file_stage_to_cache(irods::plugin_context& _ctx, const char* _cache_file_name)
 {
-    static const std::string& operation_name = irods::RESOURCE_OP_STAGETOCACHE;
-    if (const auto err = get_error_if_operation_is_configured_to_fail(_ctx.prop_map(), operation_name); !err.ok()) {
-        return err;
-    }
-
     // Check the operation parameters and update the physical path
     if (const auto ret = unix_check_params_and_path(_ctx); !ret.ok()) {
         return PASSMSG("Invalid parameters or physical path.", ret);
@@ -1318,11 +1161,6 @@ irods::error unix_file_stage_to_cache(irods::plugin_context& _ctx, const char* _
 // is not used.
 irods::error unix_file_sync_to_arch(irods::plugin_context& _ctx, const char* _cache_file_name)
 {
-    static const std::string& operation_name = irods::RESOURCE_OP_SYNCTOARCH;
-    if (const auto err = get_error_if_operation_is_configured_to_fail(_ctx.prop_map(), operation_name); !err.ok()) {
-        return err;
-    }
-
     // Check the operation parameters and update the physical path
     if (const auto ret = unix_check_params_and_path(_ctx); !ret.ok()) {
         return PASSMSG("Invalid parameters or physical path.", ret);
@@ -1347,11 +1185,6 @@ irods::error unix_file_resolve_hierarchy(
     irods::hierarchy_parser* _out_parser,
     float*                   _out_vote)
 {
-    static const std::string& operation_name = irods::RESOURCE_OP_RESOLVE_RESC_HIER;
-    if (const auto err = get_error_if_operation_is_configured_to_fail(_ctx.prop_map(), operation_name); !err.ok()) {
-        return err;
-    }
-
     namespace irv = irods::experimental::resource::voting;
 
     if (irods::error ret = _ctx.valid<irods::file_object>(); !ret.ok()) {
@@ -1392,11 +1225,6 @@ irods::error unix_file_resolve_hierarchy(
 // unix_file_rebalance - code which would rebalance the subtree
 irods::error unix_file_rebalance(
     irods::plugin_context& _ctx ) {
-    static const std::string& operation_name = irods::RESOURCE_OP_REBALANCE;
-    if (const auto err = get_error_if_operation_is_configured_to_fail(_ctx.prop_map(), operation_name); !err.ok()) {
-        return err;
-    }
-
     return SUCCESS();
 
 } // unix_file_rebalance
