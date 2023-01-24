@@ -162,15 +162,17 @@ namespace
         return rsFileClose(&_comm, &input);
     }
 
-    auto unlock_and_publish_replica(
-        rsComm_t& _comm,
-        const ir::replica_proxy_t& _replica,
-        const l1desc& _l1desc,
-        const bool _send_notifications,
-        const int _unlock_statuses) -> int
+    auto unlock_and_publish_replica(rsComm_t& _comm,
+                                    const ir::replica_proxy_t& _replica,
+                                    const l1desc& _l1desc,
+                                    const bool _send_notifications,
+                                    const int _unlock_statuses) -> int
     {
         // Unlock the data object but do not publish to catalog because we may want to trigger file_modified.
-        if (const int ec = ill::unlock(_replica.data_id(), _replica.replica_number(), _replica.replica_status(), _unlock_statuses); ec < 0) {
+        if (const int ec =
+                ill::unlock(_replica.data_id(), _replica.replica_number(), _replica.replica_status(), _unlock_statuses);
+            ec < 0)
+        {
             irods::log(LOG_ERROR, fmt::format(
                 "[{}:{}] - failed to unlock object [{}]:[{}]",
                 __FUNCTION__, __LINE__, _replica.logical_path(), ec));
@@ -290,7 +292,8 @@ namespace
 
         // Set target replica status in RST as logical locking will not set
         // the status of the target replica.
-        rst::update(repl.data_id(), repl.replica_number(), json{{"data_is_dirty", std::to_string(repl.replica_status())}});
+        rst::update(
+            repl.data_id(), repl.replica_number(), json{{"data_is_dirty", std::to_string(repl.replica_status())}});
 
         return unlock_and_publish_replica(_comm, repl, _l1desc, _send_notifications, _unlock_statuses);
     } // update_replica_status
@@ -427,7 +430,9 @@ namespace
                         new_status = ill::get_original_replica_status(l1desc.dataObjInfo->dataId, l1desc.dataObjInfo->replNum);
                     }
 
-                    if (const auto ec = update_replica_status(*_comm, l1desc, new_status, send_notifications, STALE_REPLICA); ec != 0) {
+                    if (const auto ec =
+                            update_replica_status(*_comm, l1desc, new_status, send_notifications, STALE_REPLICA);
+                        ec != 0) {
                         log::api::error("Failed to update the replica status in the catalog [error_code={}].", ec);
                         update_replica_status_on_error(*_comm, l1desc);
                         return ec;
