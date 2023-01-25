@@ -39,58 +39,6 @@ namespace irods
         return SUCCESS();
     }
 
-    static auto set_munge_operations(irods::plugin_property_map& _props) -> void
-    {
-        std::string munge_operations_str;
-        if (const auto err = _props.get(MUNGE_OPERATIONS, munge_operations_str); !err.ok()) {
-            return;
-        }
-
-        constexpr const char* delimiter = ",";
-        std::vector<std::string> operation_tokens;
-        irods::string_tokenize(munge_operations_str, delimiter, operation_tokens);
-
-        if (operation_tokens.empty()) {
-            _props.erase(MUNGE_OPERATIONS);
-            return;
-        }
-
-        // Replace the comma-delimited string with a vector of operation names for reference in the plugin operations.
-        _props.set(MUNGE_OPERATIONS, operation_tokens);
-    } // set_munge_operations
-
-    static auto plugin_operation_is_configured_to_fail(irods::plugin_property_map& _props, const std::string& _name)
-        -> irods::error
-    {
-        static bool checked_for_munge_operations = false;
-        static bool munge_operations_in_context = false;
-        static std::vector<std::string> ops;
-
-        if (!checked_for_munge_operations) {
-            const auto r = _props.get(MUNGE_OPERATIONS, ops);
-            checked_for_munge_operations = true;
-            munge_operations_in_context = r.ok();
-        }
-
-#if 0
-        if (!munge_operations_in_context) {
-            return SUCCESS();
-        }
-
-        if (std::cend(ops) == std::find(std::cbegin(ops), std::cend(ops), _name)) {
-            return SUCCESS();
-        }
-
-        return ERROR(PLUGIN_OPERATION_CONFIGURED_TO_FAIL, fmt::format("Operation [{}] is configured to fail", _name));
-#else
-        if (!munge_operations_in_context) {
-            return false;
-        }
-
-        return std::cend(ops) == std::find(std::cbegin(ops), std::cend(ops), _name);
-#endif
-    } // plugin_operation_is_configured_to_fail
-
     /**
      * \brief  Abstract Base Class for iRODS Plugins
      This class enforces the delay_load interface necessary for the
@@ -219,14 +167,14 @@ namespace irods
                 using adapted_func_type = std::function<error(plugin_context&, std::string*, types_t...)>;
 
                 adapted_func_type adapted_fcn = [this, &_operation_name](plugin_context& _ctx, std::string* _out_param, types_t... _t) {
-                    if (irods::plugin_operation_is_configured_to_fail(_ctx.prop_map(), _operation_name)) {
-                        return ERROR(PLUGIN_OPERATION_CONFIGURED_TO_FAIL, "Operation is configured to fail");
-                    }
                     _ctx.rule_results( *_out_param );
                     typedef std::function<error(plugin_context&,types_t...)> fcn_t;
                     fcn_t& fcn = boost::any_cast< fcn_t& >( operations_[ _operation_name ] );
                     error ret = fcn( _ctx, _t... );
                     *_out_param = _ctx.rule_results();
+                    if (irods::plugin_operation_is_configured_to_fail(_ctx.prop_map(), _operation_name)) {
+                        return ERROR(PLUGIN_OPERATION_CONFIGURED_TO_FAIL, fmt::format("Operation is configured to fail [{}]", _operation_name));
+                    }
                     return ret;
                 };
 

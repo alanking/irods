@@ -437,6 +437,15 @@ install(
   COMPONENT ${IRODS_PACKAGE_COMPONENT_DEVELOPMENT_NAME}
 )
 
+if (IRODS_ENABLE_ALL_TESTS)
+  install(
+    FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/irods/test_plugin_operations.hpp"
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/irods"
+    COMPONENT ${IRODS_PACKAGE_COMPONENT_DEVELOPMENT_NAME}
+  )
+endif()
+
 install(
   FILES
   "${CMAKE_CURRENT_SOURCE_DIR}/include/irods/transport/transport.hpp"
