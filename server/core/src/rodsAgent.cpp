@@ -1,39 +1,39 @@
 #include "irods/rodsAgent.hpp"
 
-#include "irods/reconstants.hpp"
-#include "irods/rsApiHandler.hpp"
 #include "irods/icatHighLevelRoutines.hpp"
-#include "irods/miscServerFunct.hpp"
-#include "irods/irods_socket_information.hpp"
-#include "irods/irods_dynamic_cast.hpp"
-#include "irods/irods_signal.hpp"
-#include "irods/irods_client_server_negotiation.hpp"
-#include "irods/irods_network_factory.hpp"
-#include "irods/irods_auth_object.hpp"
+#include "irods/initServer.hpp"
+#include "irods/irods_at_scope_exit.hpp"
+#include "irods/irods_auth_constants.hpp"
 #include "irods/irods_auth_factory.hpp"
 #include "irods/irods_auth_manager.hpp"
+#include "irods/irods_auth_object.hpp"
 #include "irods/irods_auth_plugin.hpp"
-#include "irods/irods_auth_constants.hpp"
-#include "irods/irods_environment_properties.hpp"
-#include "irods/irods_server_properties.hpp"
-#include "irods/irods_server_api_table.hpp"
 #include "irods/irods_client_api_table.hpp"
+#include "irods/irods_client_server_negotiation.hpp"
+#include "irods/irods_dynamic_cast.hpp"
+#include "irods/irods_environment_properties.hpp"
+#include "irods/irods_logger.hpp"
+#include "irods/irods_network_factory.hpp"
 #include "irods/irods_pack_table.hpp"
-#include "irods/irods_server_state.hpp"
-#include "irods/irods_threads.hpp"
 #include "irods/irods_re_plugin.hpp"
 #include "irods/irods_re_serialization.hpp"
-#include "irods/irods_logger.hpp"
-#include "irods/irods_at_scope_exit.hpp"
+#include "irods/irods_server_api_table.hpp"
+#include "irods/irods_server_properties.hpp"
+#include "irods/irods_server_state.hpp"
+#include "irods/irods_signal.hpp"
+#include "irods/irods_socket_information.hpp"
+#include "irods/irods_threads.hpp"
+#include "irods/miscServerFunct.hpp"
+#include "irods/plugin_lifetime_manager.hpp"
 #include "irods/procLog.h"
-#include "irods/initServer.hpp"
+#include "irods/reconstants.hpp"
 #include "irods/replica_access_table.hpp"
+#include "irods/replica_state_table.hpp"
+#include "irods/rsApiHandler.hpp"
+#include "irods/server_utilities.hpp"
 #include "irods/sockCommNetworkInterface.hpp"
 #include "irods/sslSockComm.h"
-#include "irods/server_utilities.hpp"
-#include "irods/plugin_lifetime_manager.hpp"
 #include "irods/version.hpp"
-#include "irods/replica_state_table.hpp"
 
 #include <csignal>
 #include <cstdlib>
@@ -213,6 +213,9 @@ void cleanup()
 
     if (INITIAL_DONE == InitialState) {
         close_all_l1_descriptors(*ThisComm);
+
+        // This agent's PID must be erased from all replica access table entries as it will soon no longer exist.
+        irods::experimental::replica_access_table::erase_pid(getpid());
 
         irods::replica_state_table::deinit();
 
