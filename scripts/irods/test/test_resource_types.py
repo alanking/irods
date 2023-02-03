@@ -2811,6 +2811,7 @@ class Test_Resource_Compound(ChunkyDevTest, ResourceSuite, unittest.TestCase):
             self.admin.run_icommand(['iadmin', 'rmresc', comp_resc])
 
 
+    @unittest.skipIf(test.settings.RUN_IN_TOPOLOGY, "Manipulates vault directory permissions on local host.")
     def test_synctoarch_failure_returns_an_error_and_can_be_overwritten__issue_6886(self):
         filename = 'test_iput_with_unwritable_archive_resource_vault__issue_6886'
         logical_path = os.path.join(self.user0.session_collection, filename)
@@ -2834,8 +2835,8 @@ class Test_Resource_Compound(ChunkyDevTest, ResourceSuite, unittest.TestCase):
             # Clean it up
             self.user0.assert_icommand(['irm', '-f', logical_path])
 
-            # Make the archive vault read-only so that sync-to-archive fails.
-            os.chmod(archive_vault_path, 0o400)
+            # Make the service account have no permissions on the archive vault so that sync-to-archive fails.
+            os.chmod(archive_vault_path, 0o000)
 
             # Try a put to the compound resource and make sure that a failure occurs. The archive replica should exist
             # and be stale in addition to an error being returned from the operation.
@@ -2863,6 +2864,7 @@ class Test_Resource_Compound(ChunkyDevTest, ResourceSuite, unittest.TestCase):
             os.chmod(archive_vault_path, 0o750)
 
 
+    @unittest.skipIf(test.settings.RUN_IN_TOPOLOGY, "Manipulates vault directory permissions on local host.")
     def test_synctoarch_failure_returns_an_error_and_can_be_removed__issue_6886(self):
         filename = 'test_iput_with_unwritable_archive_resource_vault__issue_6886'
         logical_path = os.path.join(self.user0.session_collection, filename)
@@ -2880,14 +2882,11 @@ class Test_Resource_Compound(ChunkyDevTest, ResourceSuite, unittest.TestCase):
             self.assertEqual(str(1), lib.get_replica_status(self.user0, os.path.basename(logical_path), 0))
             self.assertEqual(str(1), lib.get_replica_status(self.user0, os.path.basename(logical_path), 1))
 
-            # debugging
-            self.user0.assert_icommand(['ils', '-L', os.path.dirname(logical_path)], 'STDOUT', filename)
-
             # Clean it up
             self.user0.assert_icommand(['irm', '-f', logical_path])
 
-            # Make the archive vault read-only so that sync-to-archive fails.
-            os.chmod(archive_vault_path, 0o400)
+            # Make the service account have no permissions on the archive vault so that sync-to-archive fails.
+            os.chmod(archive_vault_path, 0o000)
 
             # Try a put to the compound resource and make sure that a failure occurs. The archive replica should exist
             # and be stale in addition to an error being returned from the operation.
@@ -2896,9 +2895,6 @@ class Test_Resource_Compound(ChunkyDevTest, ResourceSuite, unittest.TestCase):
             self.assertTrue(lib.replica_exists_on_resource(self.user0, logical_path, self.cache_resc))
             self.assertEqual(str(1), lib.get_replica_status(self.user0, os.path.basename(logical_path), 0))
             self.assertEqual(str(0), lib.get_replica_status(self.user0, os.path.basename(logical_path), 1))
-
-            # debugging
-            self.user0.assert_icommand(['ils', '-L', os.path.dirname(logical_path)], 'STDOUT', filename)
 
             # Try to clean it up, even though the archive replica physical path does not exist.
             self.user0.assert_icommand(['irm', '-f', logical_path])
