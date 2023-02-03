@@ -380,12 +380,17 @@ namespace
 
             const auto is_write_operation = (O_RDONLY != (l1desc.dataObjInp->openFlags & O_ACCMODE));
 
+            const auto update_size = !json_input.contains("update_size") || json_input.at("update_size").get<bool>();
+            const auto update_status =
+                !json_input.contains("update_status") || json_input.at("update_status").get<bool>();
+            const auto compute_checksum =
+                json_input.contains("compute_checksum") && json_input.at("compute_checksum").get<bool>();
+
             // Close the underlying file object.
             if (const auto ec = close_physical_object(*_comm, l1desc.l3descInx); ec != 0) {
                 log::api::error("Failed to close file object [error_code={}].", ec);
-                if (is_write_operation) {
+                if (is_write_operation && update_status) {
                     update_replica_status_on_error(*_comm, l1desc);
-                    irods::experimental::replica_access_table::erase_pid(l1desc.replica_token, getpid());
                 }
                 return ec;
             }
@@ -393,10 +398,6 @@ namespace
             // Allow updates to the replica's catalog information if the stream supports
             // write operations (i.e. the stream is opened in write-only or read-write mode).
             if (is_write_operation) {
-                const auto update_size = !json_input.contains("update_size") || json_input.at("update_size").get<bool>();
-                const auto update_status = !json_input.contains("update_status") || json_input.at("update_status").get<bool>();
-                const auto compute_checksum = json_input.contains("compute_checksum") && json_input.at("compute_checksum").get<bool>();
-
                 // Update the replica's information in the catalog if requested.
                 if (update_size && update_status) {
                     if (const auto ec = update_replica_size_and_status(*_comm, l1desc, send_notifications); ec != 0) {
@@ -448,18 +449,13 @@ namespace
                 }
             }
 
-            // Remove the agent's PID from the replica access table.
+            // Remove the agent's PID from the replica access table for this replica. The replica access table entry is
+            // only erased when everythng else is successful.
             if (is_write_operation) {
                 irods::experimental::replica_access_table::erase_pid(l1desc.replica_token, getpid());
             }
 
-            const auto ec = free_l1_descriptor(l1desc_index);
-
-            if (ec != 0) {
-                update_replica_status_on_error(*_comm, l1desc);
-            }
-
-            return ec;
+            return free_l1_descriptor(l1desc_index);
         }
         catch (const json::type_error& e) {
             log::api::error("Failed to extract property from JSON object [error_code={}]", SYS_INTERNAL_ERR);
