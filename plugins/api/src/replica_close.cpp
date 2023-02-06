@@ -448,11 +448,9 @@ namespace
                     constexpr const auto calculation = irods::experimental::replica::verification_calculation::always;
                     irods::experimental::replica::replica_checksum(*_comm, info.objPath, info.replNum, calculation);
                 }
-            }
 
-            // Remove the agent's PID from the replica access table for this replica. The replica access table entry is
-            // only erased when everythng else is successful.
-            if (is_write_operation) {
+                // Remove the agent's PID from the replica access table for this replica. The replica access table entry
+                // is only erased when everythng else is successful.
                 irods::experimental::replica_access_table::erase_pid(l1desc.replica_token, getpid());
             }
 
