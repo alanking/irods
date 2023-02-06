@@ -343,7 +343,9 @@ namespace
         }
 
         const auto& l1desc = L1desc[l1desc_index];
+        const auto is_write_operation = (O_RDONLY != (l1desc.dataObjInp->openFlags & O_ACCMODE));
         const auto send_notifications = !json_input.contains("send_notifications") || json_input.at("send_notifications").get<bool>();
+        const auto update_status = !json_input.contains("update_status") || json_input.at("update_status").get<bool>();
 
         try {
             if (l1desc.inuseFlag != FD_INUSE) {
@@ -378,11 +380,7 @@ namespace
                 }
             }};
 
-            const auto is_write_operation = (O_RDONLY != (l1desc.dataObjInp->openFlags & O_ACCMODE));
-
             const auto update_size = !json_input.contains("update_size") || json_input.at("update_size").get<bool>();
-            const auto update_status =
-                !json_input.contains("update_status") || json_input.at("update_status").get<bool>();
             const auto compute_checksum =
                 json_input.contains("compute_checksum") && json_input.at("compute_checksum").get<bool>();
 
@@ -408,8 +406,11 @@ namespace
                 }
                 else if (update_size) {
                     if (const auto ec = update_replica_size(*_comm, l1desc, send_notifications); ec != 0) {
+                        // Intentionally do not update the replica status here. The client explicitly disabled updating
+                        // the status, so it is not updated. This leaves the data object in a locked status and the
+                        // caller is now responsible for unlocking/finalizing the data object. Note that the physical
+                        // data has been closed at this point.
                         log::api::error("Failed to update the replica size in the catalog [error_code={}].", ec);
-                        update_replica_status_on_error(*_comm, l1desc);
                         return ec;
                     }
                 }
@@ -459,23 +460,31 @@ namespace
         }
         catch (const json::type_error& e) {
             log::api::error("Failed to extract property from JSON object [error_code={}]", SYS_INTERNAL_ERR);
-            update_replica_status_on_error(*_comm, l1desc);
+            if (is_write_operation && update_status) {
+                update_replica_status_on_error(*_comm, l1desc);
+            }
             return SYS_INTERNAL_ERR;
         }
         catch (const irods::exception& e) {
             log::api::error("{} [error_code={}]", e.what(), e.code());
-            update_replica_status_on_error(*_comm, l1desc);
+            if (is_write_operation && update_status) {
+                update_replica_status_on_error(*_comm, l1desc);
+            }
             return e.code();
         }
         catch (const fs::filesystem_error& e) {
             log::api::error("{} [error_code={}]", e.what(), e.code().value());
-            update_replica_status_on_error(*_comm, l1desc);
+            if (is_write_operation && update_status) {
+                update_replica_status_on_error(*_comm, l1desc);
+            }
             return e.code().value();
         }
         catch (const std::exception& e) {
             log::api::error("An unexpected error occurred while closing the replica. {} [error_code={}]",
                             e.what(), SYS_INTERNAL_ERR);
-            update_replica_status_on_error(*_comm, l1desc);
+            if (is_write_operation && update_status) {
+                update_replica_status_on_error(*_comm, l1desc);
+            }
             return SYS_INTERNAL_ERR;
         }
     } // rs_replica_close
