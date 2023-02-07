@@ -396,6 +396,8 @@ namespace
                 log::api::error("Failed to close file object [error_code={}].", ec);
                 if (is_write_operation && update_status) {
                     update_replica_status_on_error(*_comm, l1desc);
+                    // TODO: Should we do this for open-for-read? Regardless of update_status?
+                    free_l1_descriptor(l1desc_index);
                 }
                 return ec;
             }
