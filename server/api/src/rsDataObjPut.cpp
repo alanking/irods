@@ -334,6 +334,15 @@ namespace
                     "[{}:{}] - error closing replica; ec:[{}]",
                     __FUNCTION__, __LINE__, ec));
 
+                if (const auto ec = finalize_on_failure(_comm, *final_replica.get(), l1desc_cache); ec < 0) {
+                    irods::log(LOG_ERROR,
+                               fmt::format("[{}:{}] - failed while finalizing object [{}]; ec:[{}]",
+                                           __func__,
+                                           __LINE__,
+                                           _inp.objPath,
+                                           ec));
+                }
+
                 return ec;
             }
 

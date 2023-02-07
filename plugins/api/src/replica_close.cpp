@@ -157,10 +157,17 @@ namespace
 
     auto close_physical_object(rsComm_t& _comm, int _l3desc_index) -> int
     {
+        // The L3 descriptor index is set to -1 when the physical data has already been closed so that it can be
+        // detected on subsequent calls to replica_close. Return 0 here so that the rest of the close operations
+        // (i.e. finalizing) can complete since we do not need to close the data again.
+        if (_l3desc_index < 0) {
+            return 0;
+        }
+
         fileCloseInp_t input{};
         input.fileInx = _l3desc_index;
         return rsFileClose(&_comm, &input);
-    }
+    } // close_physical_object
 
     auto unlock_and_publish_replica(rsComm_t& _comm,
                                     const ir::replica_proxy_t& _replica,
@@ -392,6 +399,10 @@ namespace
                 }
                 return ec;
             }
+
+            // Set the L3 descriptor index to -1 here so that any subsequent calls to replica_close will not attempt to
+            // close the physical object again.
+            L1desc[l1desc_index].l3descInx = -1; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
 
             // Allow updates to the replica's catalog information if the stream supports
             // write operations (i.e. the stream is opened in write-only or read-write mode).
