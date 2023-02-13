@@ -683,6 +683,15 @@ def replica_exists_on_resource(session, logical_path, resource_name):
 
     return 'CAT_NO_ROWS_FOUND' not in out
 
+
+def get_replica_mtime(session, logical_path, replica_number):
+    return session.run_icommand(['iquest', '%s',
+        "select DATA_MODIFY_TIME where COLL_NAME = '{}' and DATA_NAME = '{}' and DATA_REPL_NUM = '{}'"
+        .format(os.path.dirname(logical_path),
+                os.path.basename(logical_path),
+                str(replica_number))])[0].strip()
+
+
 def iterfy(iterable):
     """Will return an iterable, even if input is a single item
 
@@ -717,3 +726,13 @@ def log_command_result(command, stdout, stderr, ec):
     print('  stderr:')
     output = [indent_prefix + line for line in stderr.splitlines()]
     print(os.linesep.join(output) + os.linesep)
+
+
+def get_resource_parent(session, resource_name):
+    parent_id = session.run_icommand(['iquest', '%s',
+        "select RESC_PARENT where RESC_NAME = '{}'"
+        .format(resource_name)])[0].strip()
+
+    return session.run_icommand(['iquest', '%s',
+        "select RESC_NAME where RESC_ID = '{}'"
+        .format(parent_id)])[0].strip()
