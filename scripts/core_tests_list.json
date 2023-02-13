@@ -83,5 +83,6 @@
     "test_special_collections",
     "test_ssl",
     "test_stacktrace",
-    "test_symlink_operations"
+    "test_symlink_operations",
+    "test_targeting_specific_replica_number"
 ]
