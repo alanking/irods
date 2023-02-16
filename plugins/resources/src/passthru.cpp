@@ -68,22 +68,32 @@
 const std::string WRITE_WEIGHT_KW( "write" );
 const std::string READ_WEIGHT_KW( "read" );
 
-namespace {
-
-auto apply_weight_to_object_votes(
-    irods::plugin_context& ctx,
-    const double weight) -> void
+namespace
 {
-    irods::file_object_ptr file_obj = boost::dynamic_pointer_cast<irods::file_object>(ctx.fco());
-    for (auto& r : file_obj->replicas()) {
-        rodsLog(LOG_DEBUG,
-            "[%s:%d] - applying weight [%f] to vote [%f] for [%s]",
-            __FUNCTION__, __LINE__,
-            weight, r.vote(),
-            r.resc_hier().c_str());
-        r.vote(r.vote() * weight);
-    }
-} // apply_weight_to_object_votes
+    using log_resource = irods::experimental::log::resource;
+
+    auto apply_weight_to_object_votes(irods::plugin_context& _ctx, double _weight) -> void
+    {
+        std::string this_resource_name;
+        _ctx.prop_map().get<std::string>(irods::RESOURCE_NAME, this_resource_name);
+
+        irods::file_object_ptr file_obj = boost::dynamic_pointer_cast<irods::file_object>(_ctx.fco());
+        for (auto& r : file_obj->replicas()) {
+            // Only apply vote weight to replicas whose hierarchies contain this resource.
+            if (!irods::hierarchy_parser{r.resc_hier()}.contains(this_resource_name)) {
+                continue;
+            }
+
+            log_resource::debug("[{}]: applying weight [{}] to replica [{}] of [{}] which voted [{}]",
+                                this_resource_name,
+                                _weight,
+                                r.repl_num(),
+                                file_obj->logical_path(),
+                                r.vote());
+
+            r.vote(r.vote() * static_cast<float>(_weight));
+        }
+    } // apply_weight_to_object_votes
 
 } // anonymous namespace
 
