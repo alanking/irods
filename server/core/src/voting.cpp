@@ -5,6 +5,7 @@
 
 #include <boost/lexical_cast.hpp>
 
+#include <cmath>
 #include <optional>
 
 namespace irods::experimental::resource::voting {
@@ -246,5 +247,12 @@ float calculate(
 
     return vote;
 } // calculate
+
+auto is_equal(float _lhs, float _rhs) -> bool
+{
+    // See: https://isocpp.org/wiki/faq/newbie#floating-point-arith
+    constexpr double epsilon = 0.00000001;
+    return std::abs(_lhs - _rhs) <= epsilon * std::abs(_lhs);
+} // is_equal
 
 } // namespace irods::experimental::resource::voting
