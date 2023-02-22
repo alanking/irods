@@ -763,12 +763,19 @@ namespace
 
         if (hierarchy_for_open.empty()) {
             try {
+                std::string operation;
+
                 // NOLINTNEXTLINE(hicpp-signed-bitwise)
-                const auto open_for_create = 0 != (_inp.openFlags & O_CREAT);
-                const auto open_for_write = 0 != getWriteFlag(_inp.openFlags);
-                const auto operation = open_for_create  ? irods::CREATE_OPERATION
-                                       : open_for_write ? irods::WRITE_OPERATION
-                                                        : irods::OPEN_OPERATION;
+                if (0 != (_inp.openFlags & O_CREAT)) {
+                    operation = irods::CREATE_OPERATION;
+                }
+                else if (0 != getWriteFlag(_inp.openFlags)) {
+                    operation = irods::WRITE_OPERATION;
+                }
+                else {
+                    operation = irods::OPEN_OPERATION;
+                }
+
                 irods::file_object_ptr file_obj;
                 std::tie(file_obj, hierarchy_for_open) =
                     irods::resolve_resource_hierarchy(operation, &_comm, _inp, &info_head);
