@@ -63,7 +63,7 @@ class test_targeting_specific_replica_number__issue_6896(
 
 
     def tearDown(self):
-        self.user.assert_icommand(['irm', '-f', self.logical_path])
+        self.user.run_icommand(['irm', '-f', self.logical_path])
 
         for parent, child in [(self.pt1, self.ufs1), (self.pt2, self.ufs2)]:
             if (lib.get_resource_parent(self.admin, child) == parent):
@@ -303,7 +303,7 @@ class test_targeting_specific_replica_number__issue_6896(
             # Set write weight to 0.0 on passthru with replica 1
             self.admin.assert_icommand(['iadmin', 'modresc', self.pt2, 'context', 'write=0.0'])
 
-            # Stream to the existing replica and confirm that it fails to update the mtime.
+            # Stream to the existing replica and confirm that it fails to update the contents.
             self.user.assert_icommand(
                 ['istream', '-n1', 'write', self.logical_path], 'STDERR', stream_error_msg, input=content)
             self.assertEqual(
