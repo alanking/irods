@@ -72,19 +72,19 @@ namespace
 {
     using log_resource = irods::experimental::log::resource;
 
-    auto apply_weight_to_object_votes(irods::plugin_context& _ctx, double _weight) -> void
+    auto apply_weight_to_object_votes(irods::plugin_context& _ctx,
+                                      const std::string& _this_resource_name,
+                                      double _weight) -> void
     {
-        const auto this_resource_name{irods::get_resource_name(_ctx)};
-
         irods::file_object_ptr file_obj = boost::dynamic_pointer_cast<irods::file_object>(_ctx.fco());
         for (auto& r : file_obj->replicas()) {
             // Only apply vote weight to replicas whose hierarchies contain this resource.
-            if (!irods::hierarchy_parser{r.resc_hier()}.contains(this_resource_name)) {
+            if (!irods::hierarchy_parser{r.resc_hier()}.contains(_this_resource_name)) {
                 continue;
             }
 
             log_resource::debug("[{}]: applying weight [{}] to replica [{}] of [{}] which voted [{}]",
-                                this_resource_name,
+                                _this_resource_name,
                                 _weight,
                                 r.repl_num(),
                                 file_obj->logical_path(),
@@ -764,12 +764,14 @@ irods::error passthru_file_resolve_hierarchy(
         return ERROR(SYS_INVALID_INPUT_PARAM, "Invalid input parameter.");
     }
 
+    std::string this_resource_name;
     try {
-        _out_parser->add_child(irods::get_resource_name(_ctx));
+        this_resource_name = irods::get_resource_name(_ctx);
     }
     catch (const irods::exception& e) {
         return {e};
     }
+    _out_parser->add_child(this_resource_name);
 
     irods::resource_ptr resc;
     ret = passthru_get_first_child_resc( _ctx.prop_map(), resc );
@@ -792,43 +794,37 @@ irods::error passthru_file_resolve_hierarchy(
 
     double orig_vote = *_out_vote;
 
-    try {
-        if (irods::OPEN_OPERATION == (*_opr)) {
-            double read_weight = 1.0;
-            if (const auto ret = capture_weight(_ctx, READ_WEIGHT_KW, read_weight); !ret.ok()) {
-                irods::log(PASS(ret));
-            }
-            else {
-                // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-                (*_out_vote) *= read_weight;
-                apply_weight_to_object_votes(_ctx, read_weight);
-            }
+    if (irods::OPEN_OPERATION == (*_opr)) {
+        double read_weight = 1.0;
+        if (const auto ret = capture_weight(_ctx, READ_WEIGHT_KW, read_weight); !ret.ok()) {
+            irods::log(PASS(ret));
         }
-        else if ((irods::CREATE_OPERATION == (*_opr) || irods::WRITE_OPERATION == (*_opr))) {
-            double write_weight = 1.0;
-            if (const auto ret = capture_weight(_ctx, WRITE_WEIGHT_KW, write_weight); !ret.ok()) {
-                irods::log(PASS(ret));
-            }
-            else {
-                // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-                (*_out_vote) *= write_weight;
-                apply_weight_to_object_votes(_ctx, write_weight);
-            }
+        else {
+            // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+            (*_out_vote) *= read_weight;
+            apply_weight_to_object_votes(_ctx, this_resource_name, read_weight);
         }
     }
-    catch (const irods::exception& e) {
-        log_resource::error("Error occurred while applying weight to vote: [{}]", e.client_display_what());
+    else if ((irods::CREATE_OPERATION == (*_opr) || irods::WRITE_OPERATION == (*_opr))) {
+        double write_weight = 1.0;
+        if (const auto ret = capture_weight(_ctx, WRITE_WEIGHT_KW, write_weight); !ret.ok()) {
+            irods::log(PASS(ret));
+        }
+        else {
+            // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+            (*_out_vote) *= write_weight;
+            apply_weight_to_object_votes(_ctx, this_resource_name, write_weight);
+        }
     }
 
-    rodsLog(
-        LOG_DEBUG,
-        "passthru_file_resolve_hierarchy - [%s] : %f - %f",
-        _opr->c_str(),
-        orig_vote,
-        *_out_vote );
+    log_resource::debug("[{}] - resource [{}], operation [{}], original vote [{}], weighted vote [{}]",
+                        __func__,
+                        this_resource_name,
+                        *_opr,
+                        orig_vote,
+                        *_out_vote);
 
     return final_ret;
-
 } // passthru_file_resolve_hierarchy
 
 // =-=-=-=-=-=-=-
