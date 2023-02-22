@@ -74,8 +74,7 @@ namespace
 
     auto apply_weight_to_object_votes(irods::plugin_context& _ctx, double _weight) -> void
     {
-        std::string this_resource_name;
-        _ctx.prop_map().get<std::string>(irods::RESOURCE_NAME, this_resource_name);
+        const auto this_resource_name{irods::get_resource_name(_ctx)};
 
         irods::file_object_ptr file_obj = boost::dynamic_pointer_cast<irods::file_object>(_ctx.fco());
         for (auto& r : file_obj->replicas()) {
@@ -91,7 +90,8 @@ namespace
                                 file_obj->logical_path(),
                                 r.vote());
 
-            r.vote(r.vote() * static_cast<float>(_weight));
+            // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+            r.vote(r.vote() * _weight);
         }
     } // apply_weight_to_object_votes
 
@@ -764,7 +764,12 @@ irods::error passthru_file_resolve_hierarchy(
         return ERROR(SYS_INVALID_INPUT_PARAM, "Invalid input parameter.");
     }
 
-    _out_parser->add_child(irods::get_resource_name(_ctx));
+    try {
+        _out_parser->add_child(irods::get_resource_name(_ctx));
+    }
+    catch (const irods::exception& e) {
+        return {e};
+    }
 
     irods::resource_ptr resc;
     ret = passthru_get_first_child_resc( _ctx.prop_map(), resc );
@@ -784,31 +789,35 @@ irods::error passthru_file_resolve_hierarchy(
                                  _curr_host,
                                  _out_parser,
                                  _out_vote );
- 
-    double orig_vote = *_out_vote;
-    if ( irods::OPEN_OPERATION == ( *_opr ) ) {
-        double read_weight = 1.0;
-        irods::error ret = capture_weight(_ctx, READ_WEIGHT_KW, read_weight);
-        if ( !ret.ok() ) {
-            irods::log( PASS( ret ) );
-        }
-        else {
-            ( *_out_vote ) *= read_weight;
-            apply_weight_to_object_votes(_ctx, read_weight);
-        }
 
+    double orig_vote = *_out_vote;
+
+    try {
+        if (irods::OPEN_OPERATION == (*_opr)) {
+            double read_weight = 1.0;
+            if (const auto ret = capture_weight(_ctx, READ_WEIGHT_KW, read_weight); !ret.ok()) {
+                irods::log(PASS(ret));
+            }
+            else {
+                // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+                (*_out_vote) *= read_weight;
+                apply_weight_to_object_votes(_ctx, read_weight);
+            }
+        }
+        else if ((irods::CREATE_OPERATION == (*_opr) || irods::WRITE_OPERATION == (*_opr))) {
+            double write_weight = 1.0;
+            if (const auto ret = capture_weight(_ctx, WRITE_WEIGHT_KW, write_weight); !ret.ok()) {
+                irods::log(PASS(ret));
+            }
+            else {
+                // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+                (*_out_vote) *= write_weight;
+                apply_weight_to_object_votes(_ctx, write_weight);
+            }
+        }
     }
-    else if ( ( irods::CREATE_OPERATION == ( *_opr ) ||
-                irods::WRITE_OPERATION == ( *_opr ) ) ) {
-        double write_weight = 1.0;
-        irods::error ret = capture_weight(_ctx, WRITE_WEIGHT_KW, write_weight);
-        if ( !ret.ok() ) {
-            irods::log( PASS( ret ) );
-        }
-        else {
-            ( *_out_vote ) *= write_weight;
-            apply_weight_to_object_votes(_ctx, write_weight);
-        }
+    catch (const irods::exception& e) {
+        log_resource::error("Error occurred while applying weight to vote: [{}]", e.client_display_what());
     }
 
     rodsLog(
