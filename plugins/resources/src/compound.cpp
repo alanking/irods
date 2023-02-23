@@ -1626,6 +1626,26 @@ irods::error open_for_prefer_archive_policy(
         return SUCCESS();
     }
 
+    std::string cache_name;
+    if (const auto err = _ctx.prop_map().get<std::string>(CACHE_CONTEXT_TYPE, cache_name); !err.ok()) {
+        return PASS(err);
+    }
+
+    try {
+        // Set the vote for the replica in the cache resource to be the same as the vote for the replica in the archive
+        // because the replica in the cache is going to be overwritten by the replica in the archive anyway. The vote
+        // must be set for the cache replica because the user may have requested the replica in the cache replica
+        // specifically and the requested replica must vote higher than 0 or else the operation will fail with an error.
+        // If the cache does not have a replica, there is no replica number to refer to and an error will occur if the
+        // user tries to request a non-existent replica.
+        if (const auto r = f_ptr->get_replica(resc_mgr.get_hier_to_root_for_resc(cache_name)); r) {
+            r->get().vote(arch_check_vote);
+        }
+    }
+    catch (const irods::exception& e) {
+        return {e};
+    }
+
     irods::data_object_ptr d_ptr = boost::dynamic_pointer_cast<irods::data_object>(f_ptr);
     add_key_val(d_ptr, NO_CHK_COPY_LEN_KW, "prefer_archive_policy");
 
@@ -1657,14 +1677,6 @@ irods::error open_for_prefer_archive_policy(
     // get this resc name
     std::string current_name;
     ret = _ctx.prop_map().get<std::string>( irods::RESOURCE_NAME, current_name );
-    if ( !ret.ok() ) {
-        return PASS( ret );
-    }
-
-    // =-=-=-=-=-=-=-
-    // get the cache name
-    std::string cache_name;
-    ret = _ctx.prop_map().get< std::string >( CACHE_CONTEXT_TYPE, cache_name );
     if ( !ret.ok() ) {
         return PASS( ret );
     }
