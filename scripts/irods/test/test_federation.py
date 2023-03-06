@@ -1128,6 +1128,42 @@ OUTPUT ruleExecOut
         finally:
             user.run_icommand(['irm', '-f', parameters['remote_data_object']])
 
+
+    def test_catalog_provider_hosts_other_than_the_first_are_considered__issue_6827(self):
+        import json
+
+        user = self.user_sessions[0]
+        remote_zone = self.config['remote_zone']
+        local_zone = self.config['local_zone']
+        remote_home_collection = os.path.join('/{}'.format(remote_zone), 'home', '#'.join([user.username, local_zone]))
+
+        # Control case: Make sure we can list the contents in the remote zone...
+        user.assert_icommand(['ils', '-l', remote_home_collection], 'STDOUT')
+
+        # Get the current server configuration so we can make changes
+        server_config_filename = paths.server_config_path()
+        with open(server_config_filename) as f:
+            svr_cfg = json.load(f)
+
+        # Add a dummy entry to the beginning of the catalog_provider_hosts which will not resolve.
+        print(svr_cfg['federation'])
+        remote_provider_host = svr_cfg['federation'][0]['catalog_provider_hosts'][0]
+        svr_cfg['federation'][0]['catalog_provider_hosts'][0] = 'keeplookinbuddy'
+        svr_cfg['federation'][0]['catalog_provider_hosts'].append(remote_provider_host)
+
+        # Dump to a string to repave the existing server_config.json.
+        new_server_config = json.dumps(svr_cfg, sort_keys=True, indent=4, separators=(',', ': '))
+        with lib.file_backed_up(server_config_filename):
+            #lib.update_json_file_from_dict(client_env_file, env_update)
+            # repave the existing server_config.json
+            with open(server_config_filename, 'w') as f:
+                f.write(new_server_config)
+
+            # Ensure that we can still list the contents in the remote zone because the server negotiation logic looked
+            # at all the entries in the catalog_provider_hosts (not just the first one).
+            user.assert_icommand(['ils', '-l', remote_home_collection], 'STDOUT')
+
+
 class Test_Admin_Commands(unittest.TestCase):
 
     '''
