@@ -214,19 +214,17 @@ namespace {
         return fmt::format("IN ({})", fmt::join(leaf_ids, ","));
     } // get_resc_id_cond_for_hier_cond
 
-    auto translate_data_resc_hier_condition_to_resc_id_condition(const std::string_view _condition) -> std::string
+    auto translate_data_resc_hier_condition_to_resc_id_condition(const std::string& _condition) -> std::string
     {
-        const auto cond = std::string{_condition};
-
         std::string condition_str;
 
         // For each || operator found, take the clause immediately preceding and translate it from the DATA_RESC_HIER
         // condition to the equivalent RESC_ID condition.
         auto previous_or_position = std::string_view::size_type{};
-        for (auto or_position = cond.find("||", previous_or_position); std::string_view::npos != or_position;
-             or_position = cond.find("||", previous_or_position))
+        for (auto or_position = _condition.find("||", previous_or_position); std::string_view::npos != or_position;
+             or_position = _condition.find("||", previous_or_position))
         {
-            condition_str += get_resc_id_cond_for_hier_cond(cond.substr(previous_or_position, or_position)) + " || ";
+            condition_str += get_resc_id_cond_for_hier_cond(_condition.substr(previous_or_position, or_position)) + " || ";
 
             // Advance the previous position tracker to the current || position, plus 2 so that the next clause does not
             // include the || itself.
@@ -234,7 +232,7 @@ namespace {
         }
 
         // There should be one clause found after the last || operator has been found which will need to be translated.
-        return condition_str + get_resc_id_cond_for_hier_cond(cond.substr(previous_or_position));
+        return condition_str + get_resc_id_cond_for_hier_cond(_condition.substr(previous_or_position));
     } // translate_data_resc_hier_condition_to_resc_id_condition
 } // anonymous namespace
 
