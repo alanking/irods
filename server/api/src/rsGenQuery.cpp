@@ -128,7 +128,7 @@ namespace {
         f << '\n';
     }
 
-    auto get_resc_id_cond_for_hier_cond(const std::string& _cond) -> std::string
+    auto translate_single_data_resc_hier_condition_to_resc_id(const std::string& _cond) -> std::string
     {
         // The default return string will yield 0 results when run in a query because RESC_ID is never '0'.
         constexpr const char* default_condition_str = "='0'";
@@ -212,9 +212,9 @@ namespace {
         }
 
         return fmt::format("IN ({})", fmt::join(leaf_ids, ","));
-    } // get_resc_id_cond_for_hier_cond
+    } // translate_single_data_resc_hier_condition_to_resc_id
 
-    auto translate_data_resc_hier_condition_to_resc_id_condition(const std::string& _condition) -> std::string
+    auto translate_data_resc_hier_where_clause_to_resc_id(const std::string& _condition) -> std::string
     {
         std::string condition_str;
 
@@ -224,7 +224,9 @@ namespace {
         for (auto or_position = _condition.find("||", previous_or_position); std::string_view::npos != or_position;
              or_position = _condition.find("||", previous_or_position))
         {
-            condition_str += get_resc_id_cond_for_hier_cond(_condition.substr(previous_or_position, or_position)) + " || ";
+            condition_str += translate_single_data_resc_hier_condition_to_resc_id(
+                                 _condition.substr(previous_or_position, or_position)) +
+                             " || ";
 
             // Advance the previous position tracker to the current || position, plus 2 so that the next clause does not
             // include the || itself.
@@ -232,8 +234,9 @@ namespace {
         }
 
         // There should be one clause found after the last || operator has been found which will need to be translated.
-        return condition_str + get_resc_id_cond_for_hier_cond(_condition.substr(previous_or_position));
-    } // translate_data_resc_hier_condition_to_resc_id_condition
+        return condition_str +
+               translate_single_data_resc_hier_condition_to_resc_id(_condition.substr(previous_or_position));
+    } // translate_data_resc_hier_where_clause_to_resc_id
 } // anonymous namespace
 
 std::string
@@ -462,7 +465,7 @@ irods::error strip_resc_hier_name_from_query_inp( genQueryInp_t* _inp, int& _pos
             const int inx = inxs[i];
             const char* val = vals[i];
             if (inx == COL_D_RESC_HIER) {
-                const auto new_cond = translate_data_resc_hier_condition_to_resc_id_condition(val);
+                const auto new_cond = translate_data_resc_hier_where_clause_to_resc_id(val);
                 addInxVal(&_inp->sqlCondInp, COL_D_RESC_ID, new_cond.empty() ? "='0'" : new_cond.c_str());
             }
             else {
