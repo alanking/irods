@@ -1,30 +1,32 @@
-#include "irods/msParam.h"
-#include "irods/generalAdmin.h"
-#include "irods/physPath.hpp"
-#include "irods/reIn2p3SysRule.hpp"
-#include "irods/miscServerFunct.hpp"
-#include "irods/dataObjRepl.h"
-#include "irods/rsDataObjOpen.hpp"
-#include "irods/rsDataObjClose.hpp"
-#include "irods/rsFileStageToCache.hpp"
-#include "irods/rsFileSyncToArch.hpp"
 #include "irods/dataObjOpr.hpp"
-#include "irods/irods_resource_plugin.hpp"
-#include "irods/irods_file_object.hpp"
-#include "irods/irods_physical_object.hpp"
+#include "irods/dataObjRepl.h"
+#include "irods/finalize_utilities.hpp"
+#include "irods/generalAdmin.h"
+#include "irods/irods_at_scope_exit.hpp"
 #include "irods/irods_collection_object.hpp"
-#include "irods/irods_string_tokenize.hpp"
+#include "irods/irods_file_object.hpp"
 #include "irods/irods_hierarchy_parser.hpp"
-#include "irods/irods_logger.hpp"
-#include "irods/irods_resource_redirect.hpp"
-#include "irods/irods_stacktrace.hpp"
 #include "irods/irods_kvp_string_parser.hpp"
 #include "irods/irods_lexical_cast.hpp"
+#include "irods/irods_logger.hpp"
+#include "irods/irods_physical_object.hpp"
 #include "irods/irods_random.hpp"
-#include "irods/irods_at_scope_exit.hpp"
-#include "irods/voting.hpp"
-#include "irods/finalize_utilities.hpp"
+#include "irods/irods_resource_plugin.hpp"
+#include "irods/irods_resource_redirect.hpp"
+#include "irods/irods_stacktrace.hpp"
+#include "irods/irods_string_tokenize.hpp"
+#include "irods/miscServerFunct.hpp"
+#include "irods/msParam.h"
+#include "irods/physPath.hpp"
+#include "irods/reIn2p3SysRule.hpp"
 #include "irods/replica_proxy.hpp"
+#include "irods/rsDataObjClose.hpp"
+#include "irods/rsDataObjOpen.hpp"
+#include "irods/rsFileStageToCache.hpp"
+#include "irods/rsFileSyncToArch.hpp"
+#include "irods/scoped_client_identity.hpp"
+#include "irods/scoped_privileged_client.hpp"
+#include "irods/voting.hpp"
 
 #include <boost/lexical_cast.hpp>
 #include <boost/function.hpp>
@@ -561,6 +563,13 @@ namespace
             if (getValByKey(&source_data_obj_inp.condInput, PURGE_CACHE_KW)) {
                 rmKeyVal(&source_data_obj_inp.condInput, PURGE_CACHE_KW);
             }
+
+            if (!getValByKey(&source_data_obj_inp.condInput, ADMIN_KW)) {
+                // Adding the admin keyword is required at this point to ensure that the replication can complete. The user
+                // may not have sufficient privilege to perform the replication, so elevated privileges need to be granted
+                // as well as the indication that this is being performed by an admin, as afforded by the admin keyword.
+                addKeyVal(&source_data_obj_inp.condInput, ADMIN_KW, "");
+            }
         }
 
         source_data_obj_inp.oprType = REPLICATE_SRC;
@@ -606,6 +615,12 @@ namespace
             if (getValByKey(&destination_data_obj_inp.condInput, PURGE_CACHE_KW)) {
                 rmKeyVal(&destination_data_obj_inp.condInput, PURGE_CACHE_KW);
             }
+        }
+        else if (!getValByKey(&destination_data_obj_inp.condInput, ADMIN_KW)) {
+            // Adding the admin keyword is required at this point to ensure that the replication can complete. The user
+            // may not have sufficient privilege to perform the replication, so elevated privileges need to be granted
+            // as well as the indication that this is being performed by an admin, as afforded by the admin keyword.
+            addKeyVal(&destination_data_obj_inp.condInput, ADMIN_KW, "");
         }
 
         addKeyVal( &destination_data_obj_inp.condInput, RESC_HIER_STR_KW, dst_hier.c_str() );
@@ -1785,12 +1800,20 @@ irods::error open_for_prefer_archive_policy(
     irods::data_object_ptr d_ptr = boost::dynamic_pointer_cast<irods::data_object>(f_ptr);
     add_key_val(d_ptr, NO_CHK_COPY_LEN_KW, "prefer_archive_policy");
 
-    // =-=-=-=-=-=-=-
-    // if the vote is 0 then we do a wholesale stage, not an update
-    // otherwise it is an update operation for the stage to cache.
-    ret = repl_object(_ctx, _out_parser, STAGE_OBJ_KW);
-    if ( !ret.ok() ) {
-        return PASS( ret );
+    {
+        // If a user does not have sufficient permission on the target data object to replicate or trim, the compound
+        // resource operations may not behave correctly. So, we escalate privileges here to ensure that administrative
+        // capabilities can be invoked to complete the necessary operations.
+        const auto temporary_admin_identity =
+            irods::experimental::scoped_client_identity{
+                *_ctx.comm(),
+                static_cast<char*>(_ctx.comm()->myEnv.rodsUserName),
+                static_cast<char*>(_ctx.comm()->myEnv.rodsZone)};
+        const auto temporary_privilege_escalation = irods::experimental::scoped_privileged_client{*_ctx.comm()};
+
+        if (const auto err = repl_object(_ctx, _out_parser, STAGE_OBJ_KW); !err.ok()) {
+            return PASS(err);
+        }
     }
 
     remove_key_val(d_ptr, NO_CHK_COPY_LEN_KW);
@@ -2026,13 +2049,21 @@ irods::error open_for_prefer_cache_policy(
             f_ptr->resc_hier(old_resc_hier);
         }};
 
-        // =-=-=-=-=-=-=-
-        // if the archive has it, then replicate
-        ret = repl_object( _ctx, arch_check_parser, STAGE_OBJ_KW );
-        if ( !ret.ok() ) {
-            return PASS( ret );
-        }
+        {
+            // If a user does not have sufficient permission on the target data object to replicate or trim, the
+            // compound resource operations may not behave correctly. So, we escalate privileges here to ensure that
+            // administrative capabilities can be invoked to complete the necessary operations.
+            const auto temporary_admin_identity =
+                irods::experimental::scoped_client_identity{
+                    *_ctx.comm(),
+                    static_cast<char*>(_ctx.comm()->myEnv.rodsUserName),
+                    static_cast<char*>(_ctx.comm()->myEnv.rodsZone)};
+            const auto temporary_privilege_escalation = irods::experimental::scoped_privileged_client{*_ctx.comm()};
 
+            if (const auto err = repl_object(_ctx, arch_check_parser, STAGE_OBJ_KW); !err.ok()) {
+                return PASS(err);
+            }
+        }
         ( *_out_parser ) = cache_check_parser;
         ( *_out_vote ) = arch_check_vote;
     }

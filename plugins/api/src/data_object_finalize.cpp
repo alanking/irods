@@ -368,7 +368,9 @@ namespace
                 // to perform the file_modified logic here.
                 irods::log(LOG_DEBUG8, "Redirecting request to catalog service provider ...");
 
-                auto* host_info = ic::redirect_to_catalog_provider(*_comm);
+                const bool reset_connection = nullptr != getValByKey(&_comm->session_props, USE_ONEOFF_CONNECTIONS_KW);
+
+                auto* host_info = ic::redirect_to_catalog_provider(*_comm, nullptr, reset_connection);
 
                 // Explicitly set trigger_file_modified to false here. The file_modified logic should be
                 // executing on this machine, not the catalog service provider to which the connection is
@@ -379,6 +381,15 @@ namespace
 
                 const auto ec = rc_data_object_finalize(host_info->conn, input.dump().data(), &json_output);
                 *_output = irods::to_bytes_buffer(json_output);
+
+                // The reset connection with the catalog provider must be disconnected in order for this connection
+                // to be a one-off. The client comm pointer must also be invalidated in order for new connections
+                // to be established within the agent later.
+                if (reset_connection) {
+                    rcDisconnect(host_info->conn);
+                    host_info->conn = nullptr;
+                }
+
                 if (ec < 0) {
                     return ec;
                 }

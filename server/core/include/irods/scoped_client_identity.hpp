@@ -71,6 +71,8 @@ namespace irods::experimental
 
             std::strcpy(comm_.clientUser.userName, _new_username.c_str());
             std::strcpy(comm_.clientUser.rodsZone, new_zone);
+
+            addKeyVal(&comm_.session_props, USE_ONEOFF_CONNECTIONS_KW, "");
         }
 
         scoped_client_identity(const scoped_client_identity&) = delete;
@@ -79,6 +81,8 @@ namespace irods::experimental
         /// Restores the identity of the RsComm::clientUser to its original value.
         ~scoped_client_identity()
         {
+            rmKeyVal(&comm_.session_props, USE_ONEOFF_CONNECTIONS_KW);
+
             std::strcpy(comm_.clientUser.userName, old_username_.c_str());
             std::strcpy(comm_.clientUser.rodsZone, old_zone_.c_str());
         }

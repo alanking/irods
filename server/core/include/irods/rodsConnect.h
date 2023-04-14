@@ -18,6 +18,18 @@
 #define INITIAL_NOT_DONE                0
 #define INITIAL_DONE                    1
 
+/// \brief Keyword used to avoid connection reuse when making server-to-server connections
+///
+/// \parblock
+/// Add this keyword to the session_props of an RsComm to use a new connection for every server-to-server connection
+/// that occurs throughout server-side operations. This results in disconnecting an existing connection, and creating a
+/// new connection. This can be useful when information in the RsComm has been updated and the connection to another
+/// server needs to be re-established to reflect the updates.
+///
+/// This should be used sparingly as using new connections
+/// \endparblock
+#define USE_ONEOFF_CONNECTIONS_KW "use_oneoff_connections"
+
 typedef struct hostName {
     char *name;
     struct hostName *next;
