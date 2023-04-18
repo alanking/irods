@@ -1,3 +1,6 @@
+#include "irods/client_connection.hpp"
+#include "irods/dataObjClose.h"
+#include "irods/dataObjOpen.h"
 #include "irods/dataObjOpr.hpp"
 #include "irods/dataObjRepl.h"
 #include "irods/finalize_utilities.hpp"
@@ -26,6 +29,9 @@
 #include "irods/rsFileSyncToArch.hpp"
 #include "irods/scoped_privileged_client.hpp"
 #include "irods/voting.hpp"
+
+#define IRODS_FILESYSTEM_ENABLE_SERVER_SIDE_API
+#include "irods/filesystem.hpp"
 
 #include <boost/lexical_cast.hpp>
 #include <boost/function.hpp>
@@ -61,6 +67,8 @@ const std::string AUTO_REPL_POLICY_ENABLED( "on" );
 
 namespace
 {
+    namespace fs = irods::experimental::filesystem;
+
     const int REPLICA_DOES_NOT_EXIST = -1;
 
     auto throw_error_if_archive_replica_requested(const irods::file_object_ptr& obj,
@@ -650,6 +658,101 @@ namespace
         clearKeyVal( &data_obj_close_inp.condInput );
         return close_status;
     }
+
+    auto open_source_replica_for_stage(RcComm& _comm, const irods::file_object_ptr _obj, const std::string& _src_hier)
+        -> int
+    {
+        dataObjInp_t inp{};
+        inp.oprType = REPLICATE_SRC;
+        inp.openFlags = O_RDONLY;
+
+        const auto free_cond_input = irods::at_scope_exit{[&inp] { clearKeyVal(&inp.condInput); }};
+
+        std::strncpy(inp.objPath, _obj->logical_path().c_str(), MAX_NAME_LEN);
+        copyKeyVal(&_obj->cond_input(), &inp.condInput);
+
+        auto kvp = irods::experimental::make_key_value_proxy(inp.condInput);
+
+        kvp[STAGE_OBJ_KW] = "";
+        kvp[NO_OPEN_FLAG_KW] = "";
+        kvp[RESC_HIER_STR_KW] = _src_hier;
+
+        if (!kvp.contains(ADMIN_KW)) {
+            kvp[ADMIN_KW] = "";
+        }
+
+        kvp.erase(PURGE_CACHE_KW);
+
+        int source_l1descInx = rcDataObjOpen(&_comm, &inp);
+        if (source_l1descInx < 0) {
+            const auto msg = fmt::format("Failed to open source replica for [{}]", _obj->logical_path());
+            irods::log(LOG_ERROR, msg);
+            THROW(source_l1descInx, msg);
+        }
+        return source_l1descInx;
+    } // open_source_replica_for_stage
+
+    auto open_destination_replica_for_stage(
+        RcComm& _comm,
+        const irods::file_object_ptr _obj,
+        int _source_l1_desc_inx,
+        const std::string& _dst_hier) -> int
+    {
+        dataObjInp_t inp{};
+        inp.createMode = _obj->mode();
+        inp.oprType = REPLICATE_DEST;
+        inp.openFlags = O_CREAT | O_RDWR;
+
+        const auto free_cond_input = irods::at_scope_exit{[&inp] { clearKeyVal(&inp.condInput); }};
+
+        std::strncpy(inp.objPath, _obj->logical_path().c_str(), MAX_NAME_LEN);
+        copyKeyVal(&_obj->cond_input(), &inp.condInput);
+
+        auto kvp = irods::experimental::make_key_value_proxy(inp.condInput);
+
+        kvp.erase(PURGE_CACHE_KW);
+
+        kvp[RESC_HIER_STR_KW] = _dst_hier;
+        kvp[REG_REPL_KW] = "";
+        kvp[FORCE_FLAG_KW] = "";
+        kvp[SOURCE_L1_DESC_KW] = std::to_string(_source_l1_desc_inx);
+
+        if (!kvp.contains(ADMIN_KW)) {
+            // Adding the admin keyword is required at this point to ensure that the replication can complete. The user
+            // may not have sufficient privilege to perform the replication, so elevated privileges need to be granted
+            // as well as the indication that this is being performed by an admin, as afforded by the admin keyword.
+            kvp[ADMIN_KW] = "";
+        }
+
+        int destination_l1descInx = rcDataObjOpen(&_comm, &inp);
+        if (destination_l1descInx < 0) {
+            const auto msg = fmt::format("Failed to open destination replica for [{}]", inp.objPath);
+            irods::log(LOG_ERROR, msg);
+            THROW(destination_l1descInx, msg);
+        }
+        return destination_l1descInx;
+    } // open_destination_replica_for_stage
+
+    auto close_replica_for_stage(RcComm& _comm, int _l1descInx, int _operation_status = 0) -> int
+    {
+        openedDataObjInp_t inp{};
+        inp.l1descInx = _l1descInx;
+
+        auto kvp = irods::experimental::make_key_value_proxy(inp.condInput);
+        kvp[ADMIN_KW] = "";
+        kvp[IN_PDMO_KW] = L1desc[_l1descInx].dataObjInfo->rescHier;
+
+        L1desc[_l1descInx].oprStatus = 0 == operation_status ? _l1descInx : _operation_status;
+
+        int close_status = rcDataObjClose(&_comm, &inp);
+        if (close_status < 0) {
+            irods::log(LOG_ERROR, fmt::format("[{}] - rsDataObjClose failed with [{}]", __func__, close_status));
+        }
+
+        clearKeyVal(&inp.condInput);
+
+        return close_status;
+    } // close_replica_for_stage
 } // anonymous namespace
 
 /// =-=-=-=-=-=-=-
@@ -947,6 +1050,187 @@ irods::error repl_object(
 
     return SUCCESS();
 } // repl_object
+
+auto check_object_permissions_for_user(irods::plugin_context& _ctx, const std::string& _logical_path) -> irods::error
+{
+    std::string operation;
+    if (const auto err = _ctx.prop_map().get<std::string>(OPERATION_TYPE, operation); !err.ok()) {
+        return ERROR(INVALID_OPERATION, "Failed to determine operation type.");
+    }
+
+    const auto perms = fs::server::status(*_ctx.comm(), fs::path{_logical_path}).permissions();
+    if (perms.empty()) {
+        // User does not have permission to do anything with this data object.
+        return ERROR(SYS_USER_NO_PERMISSION, "User has no permissions on this data object.");
+    }
+
+    const auto p = perms.at(0).prms;
+    if (irods::OPEN_OPERATION == operation && p < fs::perms::read) {
+        return ERROR(SYS_USER_NO_PERMISSION, "User has insufficient permissions to read from this data object.");
+    }
+
+    if (irods::WRITE_OPERATION == operation && p < fs::perms::write) {
+        return ERROR(SYS_USER_NO_PERMISSION, "User has insufficient permissions to write to this data object.");
+    }
+
+    return SUCCESS();
+} // check_object_permissions_for_user
+
+auto stage_to_cache(irods::plugin_context& _ctx, const irods::hierarchy_parser& _hier_from_root_to_compound)
+    -> irods::error
+{
+    irods::file_object_ptr obj = boost::dynamic_pointer_cast<irods::file_object>(_ctx.fco());
+    addKeyVal((keyValPair_t*)&obj->cond_input(), STAGE_OBJ_KW, "");
+
+    if (const auto err = check_object_permissions_for_user(_ctx, obj->logical_path()); !err.ok()) {
+        return err;
+    }
+
+    std::string parent_id_str;
+    if (const auto err = _ctx.prop_map().get<std::string>(irods::RESOURCE_PARENT, parent_id_str); !err.ok()) {
+        return PASSMSG("Failed to get the parent name.", err);
+    }
+
+    std::string parent_name;
+    if (const auto err = resc_mgr.resc_id_to_name(parent_id_str, parent_name); !err.ok()) {
+        return PASS(err);
+    }
+
+    std::string cache_name;
+    if (const auto err = _ctx.prop_map().get<std::string>(CACHE_CONTEXT_TYPE, cache_name); !err.ok()) {
+        return PASSMSG("Failed to get the cache name.", err);
+    }
+
+    std::string arch_name;
+    if (const auto err = _ctx.prop_map().get<std::string>(ARCHIVE_CONTEXT_TYPE, arch_name); !err.ok()) {
+        return PASSMSG("Failed to get the archive name.", err);
+    }
+
+    std::string current_name;
+    if (const auto err = _ctx.prop_map().get<std::string>(irods::RESOURCE_NAME, current_name); !err.ok()) {
+        return PASSMSG("Failed to get the resource name.", err);
+    }
+
+    std::string inp_hier = _hier_from_root_to_compound.str();
+
+    size_t pos = inp_hier.find(parent_name);
+    if (std::string::npos == pos) {
+        const auto msg = fmt::format("parent resc [{}] not in fco resc hier [{}]", parent_name, inp_hier);
+        return ERROR(SYS_INVALID_INPUT_PARAM, msg);
+    }
+
+    std::string dst_hier = inp_hier.substr(0, pos + parent_name.size());
+    if (!dst_hier.empty()) {
+        dst_hier += irods::hierarchy_parser::delimiter();
+    }
+    dst_hier += current_name + irods::hierarchy_parser::delimiter() + cache_name;
+
+    std::string src_hier = inp_hier.substr(0, pos + parent_name.size());
+    if (!src_hier.empty()) {
+        src_hier += irods::hierarchy_parser::delimiter();
+    }
+    src_hier += current_name + irods::hierarchy_parser::delimiter() + arch_name;
+
+    irods::resource_ptr resc;
+    if (const auto err = get_archive(_ctx, resc); !err.ok()) {
+        const auto msg = fmt::format("failed to get child resource [{}]", current_name);
+        return PASSMSG(msg, err);
+    }
+
+    // We should already be in the correct zone.
+    rodsServerHost* catalog_provider_host{};
+    if (const int status = getRcatHost(PRIMARY_RCAT, nullptr, &catalog_provider_host);
+        status < 0 || !catalog_provider_host) {
+        return ERROR(status, "Failed to get catalog provider host.");
+    }
+    auto conn = irods::experimental::client_connection{catalog_provider_host->hostName->name,
+                                                       _ctx.comm()->myEnv.rodsPort,
+                                                       static_cast<char*>(_ctx.comm()->myEnv.rodsUserName),
+                                                       static_cast<char*>(_ctx.comm()->myEnv.rodsZone)};
+
+    int source_l1descInx{};
+    int destination_l1descInx{};
+
+    // If we have an error on rsFileStageToCache, this needs to be set
+    // to the oprStatus on close to make sure the replica is staled.  A status of 0
+    // indicates no error and the oprStatus will be set to l1descInx as normal.
+    int error_code_set_to_oprStatus_on_dest_close = 0;
+
+    const auto close_l1_descriptors = [&](RcComm& _comm) {
+        if (destination_l1descInx > 0) {
+            auto [replica, lm] =
+                irods::experimental::replica::duplicate_replica(*L1desc[destination_l1descInx].dataObjInfo);
+
+            close_replica_for_stage(_comm, destination_l1descInx, error_code_set_to_oprStatus_on_dest_close);
+
+            // If we got a REPLICA_IS_BEING_STAGED error, just remove the cache replica.
+            if (REPLICA_IS_BEING_STAGED == error_code_set_to_oprStatus_on_dest_close) {
+                irods::purge_cache(*_ctx.comm(), *replica.get());
+            }
+        }
+
+        if (source_l1descInx > 0) {
+            close_replica_for_stage(_comm, source_l1descInx);
+        }
+    };
+
+    try {
+        source_l1descInx = open_source_replica_for_stage(static_cast<RcComm&>(conn), obj, src_hier);
+        destination_l1descInx = open_destination_replica_for_stage(static_cast<RcComm&>(conn), obj, source_l1descInx, dst_hier);
+        L1desc[destination_l1descInx].srcL1descInx = source_l1descInx;
+    }
+    catch (const irods::exception& _e) {
+        close_l1_descriptors(static_cast<RcComm&>(conn));
+        irods::log(_e);
+        return irods::error(_e);
+    }
+
+    irods::file_object_ptr file_obj(
+            new irods::file_object(
+                _ctx.comm(),
+                obj->logical_path().c_str(),
+                L1desc[source_l1descInx].dataObjInfo->filePath, "", 0,
+                getDefFileMode(),
+                L1desc[source_l1descInx].dataObjInfo->flags ) );
+    file_obj->resc_hier( src_hier );
+
+    // =-=-=-=-=-=-=-
+    // pass condInput
+    file_obj->cond_input( L1desc[destination_l1descInx].dataObjInp->condInput );
+
+    // set object id if provided
+    char *id_str = getValByKey(&file_obj->cond_input(), DATA_ID_KW);
+    if (id_str) {
+        file_obj->id(strtol(id_str, NULL, 10));
+    }
+
+    dataObjInfo_t* destDataObjInfo = L1desc[destination_l1descInx].dataObjInfo;
+    dataObjInfo_t* srcDataObjInfo = L1desc[source_l1descInx].dataObjInfo;
+
+    fileStageSyncInp_t file_stage{};
+    rstrcpy( file_stage.cacheFilename, destDataObjInfo->filePath, MAX_NAME_LEN );
+    rstrcpy( file_stage.rescHier,      destDataObjInfo->rescHier, MAX_NAME_LEN );
+    rstrcpy( file_stage.filename,      srcDataObjInfo->filePath,  MAX_NAME_LEN );
+    rstrcpy( file_stage.objPath,       srcDataObjInfo->objPath,   MAX_NAME_LEN );
+    file_stage.dataSize = srcDataObjInfo->dataSize;
+    file_stage.mode = getFileMode(L1desc[destination_l1descInx].dataObjInp);
+
+    int status = rsFileStageToCache(_ctx.comm(), &file_stage);
+    if (status < 0) {
+        error_code_set_to_oprStatus_on_dest_close = status;
+        close_l1_descriptors(static_cast<RcComm&>(conn));
+        return ERROR(status, "rsFileStageToCache failed");
+    }
+
+    if (destination_l1descInx < 0) {
+        const auto msg = fmt::format(
+            "Failed to replicate the data object [{}] for operation [{}]", obj->logical_path(), STAGE_OBJ_KW);
+        irods::log(LOG_ERROR, msg);
+        return ERROR(destination_l1descInx, msg);
+    }
+
+    return SUCCESS();
+} // stage_to_cache
 
 /// =-=-=-=-=-=-=-
 /// @brief interface for POSIX create
@@ -1796,9 +2080,9 @@ irods::error open_for_prefer_archive_policy(
         // If a user does not have sufficient permission on the target data object to replicate or trim, the compound
         // resource operations may not behave correctly. So, we escalate privileges here to ensure that administrative
         // capabilities can be invoked to complete the necessary operations.
-        const auto temporary_privilege_escalation = irods::experimental::scoped_privileged_client{*_ctx.comm()};
+        //const auto temporary_privilege_escalation = irods::experimental::scoped_privileged_client{*_ctx.comm()};
 
-        if (const auto err = repl_object(_ctx, _out_parser, STAGE_OBJ_KW); !err.ok()) {
+        if (const auto err = stage_to_cache(_ctx, _out_parser); !err.ok()) {
             return PASS(err);
         }
     }
@@ -2040,9 +2324,9 @@ irods::error open_for_prefer_cache_policy(
             // If a user does not have sufficient permission on the target data object to replicate or trim, the
             // compound resource operations may not behave correctly. So, we escalate privileges here to ensure that
             // administrative capabilities can be invoked to complete the necessary operations.
-            const auto temporary_privilege_escalation = irods::experimental::scoped_privileged_client{*_ctx.comm()};
+            //const auto temporary_privilege_escalation = irods::experimental::scoped_privileged_client{*_ctx.comm()};
 
-            if (const auto err = repl_object(_ctx, arch_check_parser, STAGE_OBJ_KW); !err.ok()) {
+            if (const auto err = stage_to_cache(_ctx, arch_check_parser); !err.ok()) {
                 return PASS(err);
             }
         }
