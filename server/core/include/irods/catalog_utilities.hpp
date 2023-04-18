@@ -222,7 +222,7 @@ namespace irods::experimental::catalog
     /// \returns rodsServerHost* pointer to rodsServerHost which is managed by ServerHostHead
     ///
     /// \since 4.2.9
-    auto redirect_to_catalog_provider(RsComm& _comm, const char* _zone_hint = nullptr) -> rodsServerHost*;
+    auto redirect_to_catalog_provider(RsComm& _comm, const char* _zone_hint = nullptr, bool _reset_connection = false) -> rodsServerHost*;
 } // namespace irods::experimental::catalog
 
 #endif // #ifndef IRODS_CATALOG_UTILITIES_HPP

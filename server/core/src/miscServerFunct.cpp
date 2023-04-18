@@ -95,10 +95,17 @@ int _l3Close( rsComm_t *rsComm, int l3descInx ) {
 } // anonymous namespace
 
 int
-svrToSvrConnectNoLogin( rsComm_t *rsComm, rodsServerHost_t *rodsServerHost ) {
+svrToSvrConnectNoLogin( rsComm_t *rsComm, rodsServerHost_t *rodsServerHost, bool reset_connection) {
     rErrMsg_t errMsg;
     int reconnFlag;
 
+    if (rodsServerHost->conn && reset_connection) {
+        if (const int ec = rcDisconnect(rodsServerHost->conn); ec < 0) {
+            return ec;
+        }
+
+        rodsServerHost->conn = nullptr;
+    }
 
     if ( rodsServerHost->conn == NULL ) { /* a connection already */
         if ( getenv( RECONNECT_ENV ) != NULL ) {
@@ -126,11 +133,11 @@ svrToSvrConnectNoLogin( rsComm_t *rsComm, rodsServerHost_t *rodsServerHost ) {
     return rodsServerHost->localFlag;
 }
 
-int
-svrToSvrConnect( rsComm_t *rsComm, rodsServerHost_t *rodsServerHost ) {
+int svrToSvrConnect(rsComm_t *rsComm, rodsServerHost_t *rodsServerHost, bool reset_connection)
+{
     int status;
 
-    status = svrToSvrConnectNoLogin( rsComm, rodsServerHost );
+    status = svrToSvrConnectNoLogin( rsComm, rodsServerHost, reset_connection );
 
     if ( status < 0 ) {
         return status;

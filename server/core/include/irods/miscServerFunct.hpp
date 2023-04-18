@@ -47,12 +47,8 @@ typedef struct PortalTransferInp {
 
 } portalTransferInp_t;
 
-int
-svrToSvrConnect( rsComm_t *rsComm, rodsServerHost_t *rodsServerHost );
-int
-svrToSvrConnect( rsComm_t *rsComm, rodsServerHost_t *rodsServerHost );
-int
-svrToSvrConnectNoLogin( rsComm_t *rsComm, rodsServerHost_t *rodsServerHost );
+int svrToSvrConnect( rsComm_t *rsComm, rodsServerHost_t *rodsServerHost, bool reset_connection = false);
+int svrToSvrConnectNoLogin(rsComm_t* rsComm, rodsServerHost_t* rodsServerHost, bool reset_connection = false);
 int
 createSrvPortal( rsComm_t *rsComm, portList_t *thisPortList, int proto );
 int
