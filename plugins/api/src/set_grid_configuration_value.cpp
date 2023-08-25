@@ -15,6 +15,8 @@
 // Server-side Implementation
 //
 
+// clang-format off
+
 #include "irods/set_grid_configuration_value.h"
 #include "irods/irods_server_api_call.hpp"
 #include "irods/icatHighLevelRoutines.hpp"
@@ -22,6 +24,10 @@
 #include "irods/irods_logger.hpp"
 
 #include <string>
+#include <string_view>
+#include <utility> // for std::pair
+
+// clang-format on
 
 namespace ic = irods::experimental::catalog;
 
@@ -37,9 +43,32 @@ namespace
 
     auto rs_set_grid_configuration_value(RsComm*, const GridConfigurationInput*) -> int;
 
+    auto is_grid_configuration_allowed_to_be_modified(const char* _namespace, const char* _option_name) -> bool;
+
     //
     // Function Implementations
     //
+
+    auto is_grid_configuration_allowed_to_be_modified(const char* _namespace, const char* _option_name) -> bool
+    {
+        constexpr auto protected_config_list = std::to_array<std::pair<std::string_view, std::string_view>>(
+            {{"database", "schema_version"}, {"delay_server", ""}});
+
+        for (const auto& [protected_namespace, protected_option_name] : protected_config_list) {
+            if (protected_namespace != _namespace) {
+                continue;
+            }
+
+            // Empty string indicates that modifications for all options in the namespace are forbidden.
+            // If the namespace and option name combo is found in the protected config list, modification is forbidden.
+            if (protected_option_name.empty() || protected_option_name == _option_name) {
+                return false;
+            }
+        }
+
+        // If the namespace/option_name combo isn't found in the protected config list, modifying the option is allowed.
+        return true;
+    } // is_grid_configuration_allowed_to_be_modified
 
     auto call_set_grid_configuration_value(irods::api_entry* _api,
                                            RsComm* _comm,
@@ -63,6 +92,12 @@ namespace
         catch (const irods::exception& e) {
             log_api::error(e.what());
             return e.code();
+        }
+
+        if (!is_grid_configuration_allowed_to_be_modified(_input->name_space, _input->option_name)) {
+            constexpr auto ec = SYS_NOT_ALLOWED;
+            addRErrorMsg(&_comm->rError, ec, "Specified grid configuration is not allowed to be modified.");
+            return ec;
         }
 
         return chlSetGridConfigurationValue(_comm,
