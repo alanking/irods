@@ -186,6 +186,8 @@ int getLocalTimeStr(struct tm* mytm, char* timeStr);
 
 int getOffsetTimeStr(char* timeStr, const char* offSet);
 
+int convert_time_str_to_epoch_seconds(const char* _time_str);
+
 void updateOffsetTimeStr(char* timeStr, int offset);
 
 int checkDateFormat(char* s);

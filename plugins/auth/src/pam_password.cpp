@@ -299,14 +299,22 @@ namespace irods
             log_auth::trace("getting TTL param");
 
             int ttl = 0;
-            if (req.contains(irods::AUTH_TTL_KEY)) {
-                if (const auto& ttl_str = req.at(irods::AUTH_TTL_KEY).get_ref<const std::string&>(); !ttl_str.empty()) {
-                    try {
-                        ttl = boost::lexical_cast<int>(ttl_str);
+            auto ttl_key_itr = req.find(irods::AUTH_TTL_KEY);
+            if (std::end(req) != ttl_key_itr) {
+                if (auto ttl_str = ttl_key_itr->get<std::string>(); !ttl_str.empty()) {
+                    if (!std::isalpha(ttl_str.back())) {
+                        // If no alpha character appears at the end of the string, we default to hours for historical
+                        // reasons. This is represented by an 'h' in the TTL string parser.
+                        ttl_str += 'h';
                     }
-                    catch (const boost::bad_lexical_cast& e) {
-                        THROW(SYS_INVALID_INPUT_PARAM, fmt::format("invalid TTL [{}]", ttl_str));
+
+                    ttl = convert_time_str_to_epoch_seconds(ttl_str.c_str());
+                    if (ttl < 0) {
+                        log_auth::debug("Invalid TTL string [{}]", irods::AUTH_TTL_KEY);
+                        THROW(ttl, fmt::format("Invalid TTL string [{}]", irods::AUTH_TTL_KEY));
                     }
+
+                    log_auth::debug("TTL value in seconds: [{}], str:[{}]", ttl, ttl_str);
                 }
             }
 

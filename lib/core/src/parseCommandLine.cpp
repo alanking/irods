@@ -86,6 +86,7 @@ parseCmdLineOpt( int argc, char **argv, const char *optString, int includeLong,
             }
             if ( strcmp( "--ttl", argv[i] ) == 0 ) {
                 rodsArgs->ttl = True;
+                printf("ttl is TRRRUUUUEEEE\n");
                 argv[i] = "-Z";
                 if ( i + 2 <= argc ) {
                     if ( *argv[i + 1] == '-' ) {
@@ -93,7 +94,28 @@ parseCmdLineOpt( int argc, char **argv, const char *optString, int includeLong,
                                  "--ttl option needs a time to live number" );
                         return USER_INPUT_OPTION_ERR;
                     }
-                    rodsArgs->ttlValue = atoi( argv[i + 1] );
+
+                    std::string ttl_str = argv[i + 1];
+                    printf("ttl str [%s]\n", ttl_str.c_str());
+
+                    if (!std::isalpha(ttl_str.back())) {
+                        // If no alpha character appears at the end of the string, we default to hours for historical
+                        // reasons. This is represented by an 'h' in the TTL string parser.
+                        ttl_str += 'h';
+                    }
+
+                    printf("ttl str 2 [%s]\n", ttl_str.c_str());
+
+                    int ttl = convert_time_str_to_epoch_seconds(ttl_str.c_str());
+
+                    printf("ttl is [%d]\n", ttl);
+                    if (ttl < 0) {
+                        return ttl;
+                    }
+
+                    rodsArgs->ttlValue = ttl;
+
+                    //rodsArgs->ttlValue = atoi( argv[i + 1] );
                     argv[i + 1] = "-Z";
                 }
             }
