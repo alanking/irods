@@ -6979,7 +6979,6 @@ irods::error db_make_limited_pw_op(
     int j = 0;
     char tSQL[MAX_SQL_SIZE];
     char expTime[50];
-    int timeToLive;
 
     if ( logSQL != 0 ) {
         log_sql::debug("chlMakeLimitedPw");
@@ -7048,13 +7047,12 @@ irods::error db_make_limited_pw_op(
         log_db::warn("Failed to get password configuration - using defaults.");
     }
 
-    timeToLive = _ttl * 3600; /* convert input hours to seconds */
-    if (timeToLive < ac.password_min_time || timeToLive > ac.password_max_time) {
+    if (_ttl < ac.password_min_time || _ttl > ac.password_max_time) {
         return ERROR( PAM_AUTH_PASSWORD_INVALID_TTL, "invalid ttl" );
     }
 
     /* Insert the limited password */
-    snprintf( expTime, sizeof expTime, "%d", timeToLive );
+    snprintf( expTime, sizeof expTime, "%d", _ttl );
     cllBindVars[cllBindVarCount++] = _ctx.comm()->clientUser.userName;
     cllBindVars[cllBindVarCount++] = _ctx.comm()->clientUser.rodsZone,
                                      cllBindVars[cllBindVarCount++] = newPw;
@@ -7178,8 +7176,6 @@ auto db_update_pam_password_op(irods::plugin_context& _ctx,
         rstrcpy(expTime, std::to_string(ac.password_min_time).c_str(), sizeof expTime);
     }
     else {
-        /* convert ttl to seconds and make sure ttl is within the limits */
-        _ttl = _ttl * 3600;
         if (_ttl < ac.password_min_time || _ttl > ac.password_max_time) {
             return ERROR( PAM_AUTH_PASSWORD_INVALID_TTL, "pam ttl invalid" );
         }
