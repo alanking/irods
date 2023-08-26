@@ -1,15 +1,10 @@
-/*** Copyright (c), The Regents of the University of California            ***
- *** For more information please refer to files in the COPYRIGHT directory ***/
-
-/* See getLimitedPassword.h for a description of this API call.*/
+#include "irods/rsGetLimitedPassword.hpp"
 
 #include "irods/getLimitedPassword.h"
 #include "irods/icatHighLevelRoutines.hpp"
-#include "irods/miscServerFunct.hpp"
 #include "irods/irods_configuration_keywords.hpp"
-#include "irods/rsGetLimitedPassword.hpp"
-
-
+#include "irods/miscServerFunct.hpp"
+#include "irods/rcMisc.h" // for convert_time_str_to_epoch_seconds
 
 int
 rsGetLimitedPassword( rsComm_t *rsComm,
@@ -68,8 +63,18 @@ _rsGetLimitedPassword( rsComm_t *rsComm,
 
     myGetLimitedPasswordOut = ( getLimitedPasswordOut_t* )malloc( sizeof( getLimitedPasswordOut_t ) );
 
-    status = chlMakeLimitedPw( rsComm, getLimitedPasswordInp->ttl,
-                               myGetLimitedPasswordOut->stringToHashWith );
+    // parse here to convert to seconds. This is a double-parse situation, but the interface is maintained.
+    const auto ttl_str =
+        fmt::format(
+            "{}{}", getLimitedPasswordInp->ttl, getLimitedPasswordInp->unused1 ? getLimitedPasswordInp->unused1 : "h");
+
+    int ttl = convert_time_str_to_epoch_seconds(ttl_str.c_str());
+
+    if (ttl < 0) {
+        return ttl;
+    }
+
+    status = chlMakeLimitedPw( rsComm, ttl, myGetLimitedPasswordOut->stringToHashWith );
     if ( status < 0 ) {
         rodsLog( LOG_NOTICE,
                  "_rsGetLimitedPassword: getLimitedPassword, status = %d",

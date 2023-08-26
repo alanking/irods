@@ -6487,7 +6487,9 @@ irods::error db_check_auth_op(
         memset( md5Buf, 0, sizeof( md5Buf ) );
         strncpy( md5Buf, _challenge, CHALLENGE_LEN );
         rstrcpy( lastPw, cpw, MAX_PASSWORD_LEN );
+        log_db::info("lastPw:[{}]",lastPw);
         icatDescramble( cpw );
+        log_db::info("cpw:[{}]",cpw);
         strncpy( md5Buf + CHALLENGE_LEN, cpw, MAX_PASSWORD_LEN );
 
         obfMakeOneWayHash( hashType,
@@ -6512,6 +6514,7 @@ irods::error db_check_auth_op(
         memset( md5Buf, 0, sizeof( md5Buf ) );
         if ( OK == 1 ) {
             rstrcpy( goodPw, cpw, MAX_PASSWORD_LEN );
+            log_db::info("goodPw:[{}]",goodPw);
             cpw += MAX_PASSWORD_LEN;
             rstrcpy( goodPwExpiry, cpw, MAX_PASSWORD_LEN );
             cpw += MAX_PASSWORD_LEN;
@@ -6619,6 +6622,7 @@ irods::error db_check_auth_op(
         }
 
 
+#if 0
         /* Remove this temporary, one-time password */
         cllBindVars[cllBindVarCount++] = goodPw;
         if ( logSQL != 0 ) {
@@ -6632,6 +6636,7 @@ irods::error db_check_auth_op(
             _rollback( "chlCheckAuth" );
             return ERROR( status, "delete failure" );
         }
+#endif
 
         /* Also remove any expired temporary passwords */
 
@@ -7042,12 +7047,13 @@ irods::error db_make_limited_pw_op(
     getNowStr( myTime );
 
     auth_config ac{};
-    if (const auto err = get_auth_config(_ctx, "authentication::pam_password", ac); !err.ok()) {
+    if (const auto err = get_auth_config(_ctx, "authentication::native", ac); !err.ok()) {
         irods::log(err);
         log_db::warn("Failed to get password configuration - using defaults.");
     }
 
     if (_ttl < ac.password_min_time || _ttl > ac.password_max_time) {
+        log_db::error("min time: [{}] max time:[{}] ttl: [{}]", ac.password_min_time, ac.password_max_time, _ttl);
         return ERROR( PAM_AUTH_PASSWORD_INVALID_TTL, "invalid ttl" );
     }
 

@@ -247,7 +247,7 @@ int clientLoginTTL( rcComm_t *Conn, int ttl ) {
 
     getLimitedPasswordInp_t getLimitedPasswordInp;
     getLimitedPasswordInp.ttl = ttl;
-    getLimitedPasswordInp.unused1 = "";
+    getLimitedPasswordInp.unused1 = "s";
 
     getLimitedPasswordOut_t *getLimitedPasswordOut;
     if ( int status = rcGetLimitedPassword( Conn,
