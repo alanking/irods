@@ -1902,8 +1902,8 @@ getOffsetTimeStr( char *timeStr, const char *offSet )
         return epoch_seconds;
     }
 
-    time_t myTime = time( NULL ) + epoch_seconds;
-    snprintf( timeStr, TIME_LEN, "%ld", ( long ) myTime );
+    time_t myTime = time(NULL) + epoch_seconds;
+    snprintf(timeStr, TIME_LEN, "%ld", (long) myTime);
     return 0;
 }
 
@@ -1913,8 +1913,10 @@ auto convert_time_str_to_epoch_seconds(const char* _time_str) -> int
     static const std::map<char,long> multiplier {
         {'\0',1}, {'s',1}, {'m',60}, {'h',3600}, {'d',24*3600}, {'y',24*3600*365}
     };
-    if (_time_str == nullptr) { return SYS_INTERNAL_NULL_INPUT_ERR; }
-    const char *lTrimOffSet = _time_str;
+    if (_time_str == nullptr) {
+        return SYS_INTERNAL_NULL_INPUT_ERR;
+    }
+    const char* lTrimOffSet = _time_str;
     while(isspace(*lTrimOffSet)) {++lTrimOffSet;}        // left-trim any whitespace
     int nonNumberLoc = strspn(lTrimOffSet,"0123456789.");
     char u = lTrimOffSet[nonNumberLoc];                  // u is value of first nondigit character (at or before end '\0')
@@ -1936,7 +1938,7 @@ auto convert_time_str_to_epoch_seconds(const char* _time_str) -> int
         rodsLog(LOG_ERROR, "Incorrect delay interval '%s'.  Reason:  %s.", lTrimOffSet, error_type);
         return INPUT_ARG_NOT_WELL_FORMED_ERR;
     }
-    return atol( lTrimOffSet ) * std::max(1L,seconds_multiplier);     // max function prevents zeroing or negation
+    return atol(lTrimOffSet) * std::max(1L, seconds_multiplier); // max function prevents zeroing or negation
 } // convert_time_str_to_epoch_seconds
 
 /* Update the input time string to be offset minutes ahead of the

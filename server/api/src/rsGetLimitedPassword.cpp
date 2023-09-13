@@ -64,9 +64,8 @@ _rsGetLimitedPassword( rsComm_t *rsComm,
     myGetLimitedPasswordOut = ( getLimitedPasswordOut_t* )malloc( sizeof( getLimitedPasswordOut_t ) );
 
     // parse here to convert to seconds. This is a double-parse situation, but the interface is maintained.
-    const auto ttl_str =
-        fmt::format(
-            "{}{}", getLimitedPasswordInp->ttl, getLimitedPasswordInp->unused1 ? getLimitedPasswordInp->unused1 : "h");
+    const auto ttl_str = fmt::format(
+        "{}{}", getLimitedPasswordInp->ttl, getLimitedPasswordInp->unused1 ? getLimitedPasswordInp->unused1 : "h");
 
     int ttl = convert_time_str_to_epoch_seconds(ttl_str.c_str());
 
@@ -74,7 +73,7 @@ _rsGetLimitedPassword( rsComm_t *rsComm,
         return ttl;
     }
 
-    status = chlMakeLimitedPw( rsComm, ttl, myGetLimitedPasswordOut->stringToHashWith );
+    status = chlMakeLimitedPw(rsComm, ttl, myGetLimitedPasswordOut->stringToHashWith);
     if ( status < 0 ) {
         rodsLog( LOG_NOTICE,
                  "_rsGetLimitedPassword: getLimitedPassword, status = %d",

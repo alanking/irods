@@ -6487,9 +6487,9 @@ irods::error db_check_auth_op(
         memset( md5Buf, 0, sizeof( md5Buf ) );
         strncpy( md5Buf, _challenge, CHALLENGE_LEN );
         rstrcpy( lastPw, cpw, MAX_PASSWORD_LEN );
-        log_db::info("lastPw:[{}]",lastPw);
+        log_db::info("lastPw:[{}]", lastPw);
         icatDescramble( cpw );
-        log_db::info("cpw:[{}]",cpw);
+        log_db::info("cpw:[{}]", cpw);
         strncpy( md5Buf + CHALLENGE_LEN, cpw, MAX_PASSWORD_LEN );
 
         obfMakeOneWayHash( hashType,
@@ -6514,7 +6514,7 @@ irods::error db_check_auth_op(
         memset( md5Buf, 0, sizeof( md5Buf ) );
         if ( OK == 1 ) {
             rstrcpy( goodPw, cpw, MAX_PASSWORD_LEN );
-            log_db::info("goodPw:[{}]",goodPw);
+            log_db::info("goodPw:[{}]", goodPw);
             cpw += MAX_PASSWORD_LEN;
             rstrcpy( goodPwExpiry, cpw, MAX_PASSWORD_LEN );
             cpw += MAX_PASSWORD_LEN;
@@ -6620,7 +6620,6 @@ irods::error db_check_auth_op(
         if ( createTime + expireTime < nowTime ) {
             returnExpired = 1;
         }
-
 
 #if 0
         /* Remove this temporary, one-time password */
@@ -7058,7 +7057,7 @@ irods::error db_make_limited_pw_op(
     }
 
     /* Insert the limited password */
-    snprintf( expTime, sizeof expTime, "%d", _ttl );
+    snprintf(expTime, sizeof expTime, "%d", _ttl);
     cllBindVars[cllBindVarCount++] = _ctx.comm()->clientUser.userName;
     cllBindVars[cllBindVarCount++] = _ctx.comm()->clientUser.rodsZone,
                                      cllBindVars[cllBindVarCount++] = newPw;
