@@ -67,13 +67,13 @@ _rsGetLimitedPassword( rsComm_t *rsComm,
         return ttl;
     }
 
-    getLimitedPasswordOut_t *myGetLimitedPasswordOut;
+    getLimitedPasswordOut_t* myGetLimitedPasswordOut;
     // NOLINTNEXTLINE(cppcoreguidelines-owning-memory, cppcoreguidelines-no-malloc)
-    myGetLimitedPasswordOut = static_cast<getLimitedPasswordOut_t*>(std::malloc( sizeof( getLimitedPasswordOut_t ) ));
+    myGetLimitedPasswordOut = static_cast<getLimitedPasswordOut_t*>(std::malloc(sizeof(getLimitedPasswordOut_t)));
 
     const int status = chlMakeLimitedPw(rsComm, ttl, myGetLimitedPasswordOut->stringToHashWith);
-    if ( status < 0) {
-        rodsLog( LOG_NOTICE, "_rsGetLimitedPassword: getLimitedPassword, status = %d", status );
+    if (status < 0) {
+        rodsLog(LOG_NOTICE, "_rsGetLimitedPassword: getLimitedPassword, status = %d", status);
     }
 
     *getLimitedPasswordOut = myGetLimitedPasswordOut;
