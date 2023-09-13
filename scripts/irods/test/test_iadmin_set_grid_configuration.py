@@ -1,19 +1,9 @@
 from __future__ import print_function
 
-import copy
-import json
-import os
-import tempfile
-import textwrap
 import unittest
 
 from . import session
 from .. import lib
-from .. import test
-from ..configuration import IrodsConfig
-from ..controller import IrodsController
-from ..core_file import temporary_core_file
-from ..test.command import assert_command
 
 
 class test_get_grid_configuration(unittest.TestCase):
