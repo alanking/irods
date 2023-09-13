@@ -2,14 +2,14 @@
 #define RS_GET_LIMITED_PASSWORD_HPP
 
 struct RsComm;
-struct getLimitedPasswordInp_t;
-struct getLimitedPasswordOut_t;
+struct GetLimitedPasswordInp;
+struct GetLimitedPasswordOut;
 
 int rsGetLimitedPassword(RsComm* rsComm,
-                         getLimitedPasswordInp_t* getLimitedPasswordInp,
-                         getLimitedPasswordOut_t** getLimitedPasswordOut);
+                         GetLimitedPasswordInp* getLimitedPasswordInp,
+                         GetLimitedPasswordOut** getLimitedPasswordOut);
 int _rsGetLimitedPassword(RsComm* rsComm,
-                          getLimitedPasswordInp_t* getLimitedPasswordInp,
-                          getLimitedPasswordOut_t** getLimitedPasswordOut);
+                          GetLimitedPasswordInp* getLimitedPasswordInp,
+                          GetLimitedPasswordOut** getLimitedPasswordOut);
 
 #endif

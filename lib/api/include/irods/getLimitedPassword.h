@@ -4,13 +4,13 @@
 #include "irods/rcConnect.h"
 #include "irods/authenticate.h"
 
-typedef struct {
+typedef struct GetLimitedPasswordInp {
     int  ttl;
     char *unused1;  // currently unused, but available without protocol change if needed
 } getLimitedPasswordInp_t;
 #define getLimitedPasswordInp_PI "int ttl; str *unused1;"
 
-typedef struct {
+typedef struct GetLimitedPasswordOut {
     char stringToHashWith[MAX_PASSWORD_LEN];
 } getLimitedPasswordOut_t;
 #define getLimitedPasswordOut_PI "str stringToHashWith[MAX_PASSWORD_LEN];"
