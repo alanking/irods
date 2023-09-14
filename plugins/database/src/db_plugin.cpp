@@ -125,14 +125,16 @@ irods::error db_get_grid_configuration_value_op(irods::plugin_context& _ctx,
 namespace
 {
     constexpr std::size_t grid_configuration_size = 2700;
+	constexpr rodsLong_t default_password_max_time = 1209600;
+	constexpr rodsLong_t default_password_min_time = 121;
     struct auth_config
     {
         bool password_extend_lifetime = true;
 
-        rodsLong_t password_max_time = 1209600;
+        rodsLong_t password_max_time = default_password_max_time;
         std::array<char, grid_configuration_size + 1> password_max_time_str{};
 
-        rodsLong_t password_min_time = 121;
+        rodsLong_t password_min_time = default_password_min_time;
         std::array<char, grid_configuration_size + 1> password_min_time_str{};
     };
 
@@ -145,7 +147,6 @@ namespace
                                                           _out.password_min_time_str.data(),
                                                           _out.password_min_time_str.size());
             if (err.ok()) {
-                // TODO: try/catch
                 _out.password_min_time = std::stoll(_out.password_min_time_str.data());
             }
 
@@ -155,7 +156,6 @@ namespace
                                                      _out.password_max_time_str.data(),
                                                      _out.password_max_time_str.size());
             if (err.ok()) {
-                // TODO: try/catch
                 _out.password_max_time = std::stoll(_out.password_max_time_str.data());
             }
 
@@ -172,12 +172,23 @@ namespace
                 else if (0 == std::strcmp(extend_lifetime_buf.data(), "0")) {
                     _out.password_extend_lifetime = false;
                 }
-                // Use default if it's neither... probably print an error message too
+				else {
+                    // Use default if it's neither, and print an annoying error message.
+					log_db::error("Grid configuration [{}] in namespace [{}] is invalid.", irods::KW_CFG_PAM_PASSWORD_EXTEND_LIFETIME, _namespace);
+				}
+
             }
         }
-        catch (...) {
-            return ERROR(SYS_UNKNOWN_ERROR, "aaaaahhhhh");
-        }
+		catch (const std::invalid_argument& e) {
+			const auto msg = fmt::format("Grid configuration value in namespace [{}] is invalid: [{}]", _namespace, e.what());
+			log_db::error(msg);
+			return ERROR(CONFIGURATION_ERROR, msg);
+		}
+		catch (const std::out_of_range& e) {
+			const auto msg = fmt::format("Grid configuration value in namespace [{}] is out of range: [{}]", _namespace, e.what());
+			log_db::error(msg);
+			return ERROR(CONFIGURATION_ERROR, msg);
+		}
 
         return SUCCESS();
     } // get_auth_config
@@ -6982,7 +6993,6 @@ irods::error db_make_limited_pw_op(
     char hashValue[50];
     int j = 0;
     char tSQL[MAX_SQL_SIZE];
-    char expTime[50];
 
     if ( logSQL != 0 ) {
         log_sql::debug("chlMakeLimitedPw");
@@ -7052,17 +7062,23 @@ irods::error db_make_limited_pw_op(
     }
 
     if (_ttl < ac.password_min_time || _ttl > ac.password_max_time) {
-        log_db::error("min time: [{}] max time:[{}] ttl: [{}]", ac.password_min_time, ac.password_max_time, _ttl);
+        log_db::error("Invalid TTL - min time: [{}] max time:[{}] ttl: [{}]", ac.password_min_time, ac.password_max_time, _ttl);
         return ERROR( PAM_AUTH_PASSWORD_INVALID_TTL, "invalid ttl" );
     }
 
-    /* Insert the limited password */
-    snprintf(expTime, sizeof expTime, "%d", _ttl);
+	const auto password_expiry_ts = std::to_string(_ttl);
+
+	// NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
     cllBindVars[cllBindVarCount++] = _ctx.comm()->clientUser.userName;
-    cllBindVars[cllBindVarCount++] = _ctx.comm()->clientUser.rodsZone,
-                                     cllBindVars[cllBindVarCount++] = newPw;
-    cllBindVars[cllBindVarCount++] = expTime;
+	// NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
+    cllBindVars[cllBindVarCount++] = _ctx.comm()->clientUser.rodsZone;
+	// NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
+	cllBindVars[cllBindVarCount++] = newPw;
+	// NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
+    cllBindVars[cllBindVarCount++] = password_expiry_ts.c_str();
+	// NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
     cllBindVars[cllBindVarCount++] = myTime;
+	// NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
     cllBindVars[cllBindVarCount++] = myTime;
     if ( logSQL != 0 ) {
         log_sql::debug("chlMakeLimitedPw SQL 2");
@@ -7210,7 +7226,9 @@ auto db_update_pam_password_op(irods::plugin_context& _ctx,
     if ( logSQL != 0 ) {
         log_sql::debug("chlUpdateIrodsPamPassword SQL 2");
     }
+	// NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
     cllBindVars[cllBindVarCount++] = ac.password_min_time_str.data();
+	// NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
     cllBindVars[cllBindVarCount++] = ac.password_max_time_str.data();
     cllBindVars[cllBindVarCount++] = myTime;
 #if MY_ICAT
@@ -7236,9 +7254,9 @@ auto db_update_pam_password_op(irods::plugin_context& _ctx,
     iVal[1] = sizeof( passwordModifyTime );
     {
         std::vector<std::string> bindVars;
-        bindVars.push_back( selUserId );
-        bindVars.push_back(ac.password_min_time_str.data());
-        bindVars.push_back(ac.password_max_time_str.data());
+        bindVars.emplace_back(selUserId);
+        bindVars.emplace_back(ac.password_min_time_str.data());
+        bindVars.emplace_back(ac.password_max_time_str.data());
         status = cmlGetStringValuesFromSql(
 #if MY_ICAT
                      "select rcat_password, modify_ts from R_USER_PASSWORD where user_id=? and pass_expiry_ts not like '9999%' and cast(pass_expiry_ts as signed integer) >= ? and cast (pass_expiry_ts as signed integer) <= ?",
@@ -7502,7 +7520,9 @@ irods::error db_mod_user_op(
         }
 
         rstrcpy( tSQL, form7, MAX_SQL_SIZE );
+		// NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
         cllBindVars[cllBindVarCount++] = ac.password_min_time_str.data();
+		// NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
         cllBindVars[cllBindVarCount++] = ac.password_max_time_str.data();
         cllBindVars[cllBindVarCount++] = userName2;
         cllBindVars[cllBindVarCount++] = zoneName;

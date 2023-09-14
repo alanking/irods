@@ -51,23 +51,28 @@ namespace
 
     auto is_grid_configuration_allowed_to_be_modified(const char* _namespace, const char* _option_name) -> bool
     {
-        constexpr auto protected_config_list = std::to_array<std::pair<std::string_view, std::string_view>>(
+        constexpr auto protected_config_list = std::to_array<std::map<std::string_view, std::vector<std::string_view>>>(
             {{"database", "schema_version"}, {"delay_server", ""}});
 
-        for (const auto& [protected_namespace, protected_option_name] : protected_config_list) {
-            if (protected_namespace != _namespace) {
-                continue;
-            }
+        // If none of the namespace/option name combinations in the protected list match the passed in namespace and
+        // option name, it is allowed to be modified and so the function should return true. If any instance returns
+        // true, that means a match was found in the list of protected configurations, so we should return false in this
+        // function because that means the grid configuration is not allowed to be modified.
+        return std::none_of(std::begin(protected_config_list), std::end(protected_config_list),
+            [&_namespace, &_option_name] (const auto& _pair) {
+                const auto& protected_namespace = _pair.first;
+                const auto& protected_option_name = _pair.second;
 
-            // Empty string indicates that modifications for all options in the namespace are forbidden.
-            // If the namespace and option name combo is found in the protected config list, modification is forbidden.
-            if (protected_option_name.empty() || protected_option_name == _option_name) {
-                return false;
-            }
-        }
+                // If this evaluates to true, this a protected option and is not allowed to be modified.
+                if (protected_namespace != _namespace) {
+                    return false;
+                }
 
-        // If the namespace/option_name combo isn't found in the protected config list, modifying the option is allowed.
-        return true;
+                // Empty string indicates that modifications for all options in the namespace are forbidden.
+                // If this evaluates to true, this a protected option and is not allowed to be modified.
+                return protected_option_name.empty() || protected_option_name == _option_name;
+            }
+        );
     } // is_grid_configuration_allowed_to_be_modified
 
     auto call_set_grid_configuration_value(irods::api_entry* _api,

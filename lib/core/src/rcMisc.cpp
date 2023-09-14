@@ -58,6 +58,7 @@
     #include "irods/Unix2Nt.hpp"
 #endif
 
+#include <cstdint>
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
@@ -1894,16 +1895,15 @@ getLocalTimeStr( struct tm *mytm, char *timeStr ) {
 /* Get the current time + offset , and store to timeStr (understood max length TIME_LEN) in epoch seconds.
     OffSet is a string of the form nnnn<Unit> with Unit in {'','s','m','h','d','y'}.
     An empty Unit field implies seconds. */
-int
-getOffsetTimeStr( char *timeStr, const char *offSet )
+auto getOffsetTimeStr(char *timeStr, const char *offSet) -> int
 {
     const auto epoch_seconds = convert_time_str_to_epoch_seconds(offSet);
     if (epoch_seconds < 0) {
         return epoch_seconds;
     }
 
-    time_t myTime = time(NULL) + epoch_seconds;
-    snprintf(timeStr, TIME_LEN, "%ld", (long) myTime);
+    std::strncpy(timeStr, std::to_string(time(nullptr) + epoch_seconds).c_str(), TIME_LEN);
+
     return 0;
 }
 
@@ -1938,7 +1938,21 @@ auto convert_time_str_to_epoch_seconds(const char* _time_str) -> int
         rodsLog(LOG_ERROR, "Incorrect delay interval '%s'.  Reason:  %s.", lTrimOffSet, error_type);
         return INPUT_ARG_NOT_WELL_FORMED_ERR;
     }
-    return atol(lTrimOffSet) * std::max(1L, seconds_multiplier); // max function prevents zeroing or negation
+
+    try {
+        // max function prevents zeroing or negation
+        const auto epoch_seconds = std::stol(lTrimOffSet) * std::max(1L, seconds_multiplier);
+
+        // We want to prevent wrapping here, so return an error when the input value results in too large of a value.
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+        return (epoch_seconds > INT32_MAX) ? USER_OPTION_INPUT_ERR : epoch_seconds;
+    }
+    catch (const std::invalid_argument& e) {
+        return USER_OPTION_INPUT_ERR;
+    }
+    catch (const std::out_of_range& e) {
+        return USER_OPTION_INPUT_ERR;
+    }
 } // convert_time_str_to_epoch_seconds
 
 /* Update the input time string to be offset minutes ahead of the
