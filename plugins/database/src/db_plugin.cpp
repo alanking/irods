@@ -101,13 +101,6 @@ static rodsLong_t MAX_PASSWORDS = 40;
 
 #define MAX_HOST_STR             2700
 
-// =-=-=-=-=-=-=-
-// local variables externed for config file setting in
-bool irods_pam_auth_no_extend = false;
-char irods_pam_password_min_time[ NAME_LEN ]     = { "121" };
-char irods_pam_password_max_time[ NAME_LEN ]     = { "1209600" };
-char irods_pam_password_default_time[ NAME_LEN ] = { "1209600" };
-
 size_t log_sql_flg = 0;
 icatSessionStruct icss; // JMC :: only for testing!!!
 extern int logSQL;
@@ -122,6 +115,92 @@ const std::string ICSS_PROP( "irods_icss_property" );
 const std::string ZONE_PROP( "irods_zone_property" );
 
 static const auto intermediate_replica_status_str = std::to_string(INTERMEDIATE_REPLICA);
+
+namespace
+{
+    constexpr std::size_t grid_configuration_size = 2700;
+    constexpr rodsLong_t default_password_max_time = 1209600;
+    constexpr rodsLong_t default_password_min_time = 121;
+    struct auth_config
+    {
+        bool initialized = false;
+
+        bool password_extend_lifetime = true;
+
+        rodsLong_t password_max_time = default_password_max_time;
+        std::array<char, grid_configuration_size + 1> password_max_time_str{};
+
+        rodsLong_t password_min_time = default_password_min_time;
+        std::array<char, grid_configuration_size + 1> password_min_time_str{};
+    };
+
+    auto get_auth_config(const char* _namespace, auth_config& _out) -> irods::error
+    {
+        // Initializing the auth configs incurs several queries. We only need to do this once per agent lifetime, so a
+        // member variable has been provided to prevent extraneous initializations.
+        if (_out.initialized) {
+            return SUCCESS();
+        }
+
+        auto [db_instance, db_conn] = irods::experimental::catalog::new_database_connection();
+        nanodbc::statement stmt{db_conn};
+
+        nanodbc::prepare(stmt, "select option_name, option_value from R_GRID_CONFIGURATION where namespace = ?");
+        stmt.bind(0, _namespace);
+
+        for (auto result = nanodbc::execute(stmt); result.next();) {
+            const auto option_name = result.get<std::string>(0);
+
+            if (option_name == irods::KW_CFG_PAM_PASSWORD_MIN_TIME) {
+                std::strncpy(_out.password_min_time_str.data(),
+                             result.get<std::string>(1).c_str(),
+                             _out.password_min_time_str.size());
+                try {
+                    _out.password_min_time = std::stoll(_out.password_min_time_str.data());
+                }
+                catch (...) {
+                    log_db::error("Grid configuration value [{}] in namespace [{}] is invalid. Using default.",
+                                  option_name,
+                                  _namespace);
+                }
+            }
+
+            if (option_name == irods::KW_CFG_PAM_PASSWORD_MAX_TIME) {
+                std::strncpy(_out.password_max_time_str.data(),
+                             result.get<std::string>(1).c_str(),
+                             _out.password_max_time_str.size());
+                try {
+                    _out.password_max_time = std::stoll(_out.password_max_time_str.data());
+                }
+                catch (...) {
+                    log_db::error("Grid configuration value [{}] in namespace [{}] is invalid. Using default.",
+                                  option_name,
+                                  _namespace);
+                }
+            }
+
+            if (option_name == irods::KW_CFG_PAM_PASSWORD_EXTEND_LIFETIME) {
+                const auto option_value = result.get<std::string>(1);
+                if (option_value == "1") {
+                    _out.password_extend_lifetime = true;
+                }
+                else if (option_value == "0") {
+                    _out.password_extend_lifetime = false;
+                }
+                else {
+                    // Use default if it's neither, and print an annoying error message.
+                    log_db::error("Grid configuration value [{}] in namespace [{}] is invalid. Using default.",
+                                  option_name,
+                                  _namespace);
+                }
+            }
+        }
+
+        _out.initialized = true;
+
+        return SUCCESS();
+    } // get_auth_config
+} // anonymous namespace
 
 // =-=-=-=-=-=-=-
 // virtual path management
@@ -2001,41 +2080,6 @@ irods::error db_open_op(
 #else
     irods::catalog_properties::instance().capture_if_needed( &icss );
 #endif
-
-    // =-=-=-=-=-=-=-
-    // set pam properties
-    try {
-        // clang-format off
-        namespace auth_scheme = irods::experimental::auth::scheme;
-
-        irods_pam_auth_no_extend = irods::get_server_property<const bool>(
-            std::vector<std::string>{irods::KW_CFG_PLUGIN_TYPE_AUTHENTICATION,
-                                     auth_scheme::pam_password,
-                                     irods::KW_CFG_PAM_NO_EXTEND});
-
-        snprintf(irods_pam_password_min_time, NAME_LEN, "%s",
-                 irods::get_server_property<const std::string>(
-                     std::vector<std::string>{irods::KW_CFG_PLUGIN_TYPE_AUTHENTICATION,
-                                              auth_scheme::pam_password,
-                                              irods::KW_CFG_PAM_PASSWORD_MIN_TIME}).c_str());
-
-        snprintf(irods_pam_password_max_time, NAME_LEN, "%s",
-                 irods::get_server_property<const std::string>(
-                     std::vector<std::string>{irods::KW_CFG_PLUGIN_TYPE_AUTHENTICATION,
-                                              auth_scheme::pam_password,
-                                              irods::KW_CFG_PAM_PASSWORD_MAX_TIME}).c_str());
-        // clang-format on
-    }
-    catch (const irods::exception& e) {
-        log_db::debug("[{}:{}] PAM property not found [{}]", __func__, __LINE__, e.client_display_what());
-        return CODE(status);
-    }
-
-    if ( irods_pam_auth_no_extend ) {
-        snprintf( irods_pam_password_default_time,
-                  sizeof( irods_pam_password_default_time ),
-                  "%s", "28800" );
-    }
 
     return CODE( status );
 
@@ -6323,14 +6367,15 @@ irods::error db_check_auth_op(
     char myUserZone[MAX_NAME_LEN];
     char userName2[NAME_LEN + 2];
     char userZone[NAME_LEN + 2];
-    rodsLong_t pamMinTime = 0;
-    rodsLong_t pamMaxTime = 0;
     int hashType = 0;
     char lastPwModTs[MAX_PASSWORD_LEN + 10];
     snprintf( lastPwModTs, sizeof( lastPwModTs ), "0" );
     char *cPwTs = NULL;
     int iTs1 = 0, iTs2 = 0;
     std::vector<char> pwInfoArray( MAX_PASSWORD_LEN * MAX_PASSWORDS * 4 );
+
+    // This function uses goto statements. You cannot initialize variables after a goto statement.
+    static auth_config ac{};
 
     if ( logSQL != 0 ) {
         log_sql::debug("chlCheckAuth");
@@ -6520,12 +6565,14 @@ irods::error db_check_auth_op(
     getNowStr( myTime );
 
     /* Check for PAM_AUTH type passwords */
-    pamMaxTime = atoll( irods_pam_password_max_time );
-    pamMinTime = atoll( irods_pam_password_min_time );
 
-    if ( ( strncmp( goodPwExpiry, "9999", 4 ) != 0 ) &&
-            expireTime >=  pamMinTime &&
-            expireTime <= pamMaxTime ) {
+    if (const auto err = get_auth_config("authentication::pam_password", ac); !err.ok()) {
+        irods::log(err);
+        log_db::warn("Failed to get password configuration - using defaults.");
+    }
+
+    if ((strncmp(goodPwExpiry, "9999", 4) != 0) && expireTime >= ac.password_min_time &&
+        expireTime <= ac.password_max_time) {
         time_t modTime;
         /* The used pw is an iRODS-PAM type, so now check if it's expired */
         getNowStr( myTime );
@@ -6951,9 +6998,6 @@ irods::error db_make_limited_pw_op(
     int j = 0;
     char tSQL[MAX_SQL_SIZE];
     char expTime[50];
-    int timeToLive;
-    rodsLong_t pamMinTime;
-    rodsLong_t pamMaxTime;
 
     if ( logSQL != 0 ) {
         log_sql::debug("chlMakeLimitedPw");
@@ -7016,20 +7060,30 @@ irods::error db_make_limited_pw_op(
 
     getNowStr( myTime );
 
-    timeToLive = _ttl * 3600; /* convert input hours to seconds */
-    pamMaxTime = atoll( irods_pam_password_max_time );
-    pamMinTime = atoll( irods_pam_password_min_time );
-    if ( timeToLive < pamMinTime ||
-            timeToLive > pamMaxTime ) {
+    static auth_config ac{};
+    if (const auto err = get_auth_config("authentication::native", ac); !err.ok()) {
+        irods::log(err);
+        log_db::warn("Failed to get password configuration - using defaults.");
+    }
+
+    if (_ttl < ac.password_min_time || _ttl > ac.password_max_time) {
+        log_db::error(
+            "Invalid TTL - min time: [{}] max time:[{}] ttl: [{}]", ac.password_min_time, ac.password_max_time, _ttl);
         return ERROR( PAM_AUTH_PASSWORD_INVALID_TTL, "invalid ttl" );
     }
 
     /* Insert the limited password */
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
+    int timeToLive = _ttl * 3600; /* convert input hours to seconds */
     snprintf( expTime, sizeof expTime, "%d", timeToLive );
     cllBindVars[cllBindVarCount++] = _ctx.comm()->clientUser.userName;
-    cllBindVars[cllBindVarCount++] = _ctx.comm()->clientUser.rodsZone,
-                                     cllBindVars[cllBindVarCount++] = newPw;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
+    cllBindVars[cllBindVarCount++] = _ctx.comm()->clientUser.rodsZone;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
+    cllBindVars[cllBindVarCount++] = newPw;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
     cllBindVars[cllBindVarCount++] = expTime;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
     cllBindVars[cllBindVarCount++] = myTime;
     cllBindVars[cllBindVarCount++] = myTime;
     if ( logSQL != 0 ) {
@@ -7048,8 +7102,10 @@ irods::error db_make_limited_pw_op(
     if ( logSQL != 0 ) {
         log_sql::debug("chlMakeLimitedPw SQL 3");
     }
-    cllBindVars[cllBindVarCount++] = irods_pam_password_min_time;
-    cllBindVars[cllBindVarCount++] = irods_pam_password_max_time;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
+    cllBindVars[cllBindVarCount++] = ac.password_min_time_str.data();
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
+    cllBindVars[cllBindVarCount++] = ac.password_max_time_str.data();
     cllBindVars[cllBindVarCount++] = myTime;
 #if MY_ICAT
     status = cmlExecuteNoAnswerSql( "delete from R_USER_PASSWORD where pass_expiry_ts not like '9999%' and cast(pass_expiry_ts as signed integer)>=? and cast(pass_expiry_ts as signed integer)<=? and (cast(pass_expiry_ts as signed integer) + cast(modify_ts as signed integer) < ?)",
@@ -7138,18 +7194,20 @@ auto db_update_pam_password_op(irods::plugin_context& _ctx,
 
     getNowStr( myTime );
 
-    /* if ttl is unset, use the default */
+    static auth_config ac{};
+    if (const auto err = get_auth_config("authentication::pam_password", ac); !err.ok()) {
+        irods::log(err);
+        log_db::warn("Failed to get password configuration - using defaults.");
+    }
+
+    /* if ttl is unset, use the default (minimum password lifetime) */
     if ( _ttl == 0 ) {
-        rstrcpy( expTime, irods_pam_password_default_time, sizeof expTime );
+        rstrcpy(expTime, std::to_string(ac.password_min_time).c_str(), sizeof expTime);
     }
     else {
         /* convert ttl to seconds and make sure ttl is within the limits */
-        rodsLong_t pamMinTime, pamMaxTime;
-        pamMinTime = atoll( irods_pam_password_min_time );
-        pamMaxTime = atoll( irods_pam_password_max_time );
         _ttl = _ttl * 3600;
-        if ( _ttl < pamMinTime ||
-                _ttl > pamMaxTime ) {
+        if (_ttl < ac.password_min_time || _ttl > ac.password_max_time) {
             return ERROR( PAM_AUTH_PASSWORD_INVALID_TTL, "pam ttl invalid" );
         }
         snprintf( expTime, sizeof expTime, "%d", _ttl );
@@ -7178,8 +7236,10 @@ auto db_update_pam_password_op(irods::plugin_context& _ctx,
     if ( logSQL != 0 ) {
         log_sql::debug("chlUpdateIrodsPamPassword SQL 2");
     }
-    cllBindVars[cllBindVarCount++] = irods_pam_password_min_time;
-    cllBindVars[cllBindVarCount++] = irods_pam_password_max_time;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
+    cllBindVars[cllBindVarCount++] = ac.password_min_time_str.data();
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
+    cllBindVars[cllBindVarCount++] = ac.password_max_time_str.data();
     cllBindVars[cllBindVarCount++] = myTime;
 #if MY_ICAT
     status = cmlExecuteNoAnswerSql( "delete from R_USER_PASSWORD where pass_expiry_ts not like '9999%' and cast(pass_expiry_ts as signed integer)>=? and cast(pass_expiry_ts as signed integer)<=? and (cast(pass_expiry_ts as signed integer) + cast(modify_ts as signed integer) < ?)",
@@ -7204,9 +7264,9 @@ auto db_update_pam_password_op(irods::plugin_context& _ctx,
     iVal[1] = sizeof( passwordModifyTime );
     {
         std::vector<std::string> bindVars;
-        bindVars.push_back( selUserId );
-        bindVars.push_back( irods_pam_password_min_time );
-        bindVars.push_back( irods_pam_password_max_time );
+        bindVars.emplace_back(selUserId);
+        bindVars.emplace_back(ac.password_min_time_str.data());
+        bindVars.emplace_back(ac.password_max_time_str.data());
         status = cmlGetStringValuesFromSql(
 #if MY_ICAT
                      "select rcat_password, modify_ts from R_USER_PASSWORD where user_id=? and pass_expiry_ts not like '9999%' and cast(pass_expiry_ts as signed integer) >= ? and cast (pass_expiry_ts as signed integer) <= ?",
@@ -7217,7 +7277,7 @@ auto db_update_pam_password_op(irods::plugin_context& _ctx,
     }
 
     if ( status == 0 ) {
-        if ( !irods_pam_auth_no_extend ) {
+        if (ac.password_extend_lifetime) {
             if ( logSQL != 0 ) {
                 log_sql::debug("chlUpdateIrodsPamPassword SQL 4");
             }
@@ -7237,7 +7297,7 @@ auto db_update_pam_password_op(irods::plugin_context& _ctx,
                 log_db::info("chlUpdateIrodsPamPassword cmlExecuteNoAnswerSql commit failure {}", status);
                 return ERROR( status, "commit failure" );
             }
-        } // if !irods_pam_auth_no_extend
+        }
 
         // random_password is the randomly generated password (see while loop below) in a scrambled form.
         icatDescramble(random_password.data());
@@ -7463,9 +7523,17 @@ irods::error db_mod_user_op(
     }
 
     if ( strncmp( _option, "rmPamPw", 9 ) == 0 ) {
+        static auth_config ac{};
+        if (const auto err = get_auth_config("authentication::pam_password", ac); !err.ok()) {
+            irods::log(err);
+            log_db::warn("Failed to get password configuration - using defaults.");
+        }
+
         rstrcpy( tSQL, form7, MAX_SQL_SIZE );
-        cllBindVars[cllBindVarCount++] = irods_pam_password_min_time;
-        cllBindVars[cllBindVarCount++] = irods_pam_password_max_time;
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
+        cllBindVars[cllBindVarCount++] = ac.password_min_time_str.data();
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
+        cllBindVars[cllBindVarCount++] = ac.password_max_time_str.data();
         cllBindVars[cllBindVarCount++] = userName2;
         cllBindVars[cllBindVarCount++] = zoneName;
         if ( logSQL != 0 ) {
