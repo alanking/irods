@@ -64,8 +64,8 @@ foreach(plugin IN LISTS IRODS_DATABASE_PLUGINS)
     ${plugin_target}
     PRIVATE
     irods_common
-    irods_server
     irods_plugin_dependencies
+    irods_server
     "${IRODS_EXTERNALS_FULLPATH_BOOST}/lib/libboost_filesystem.so"
     "${IRODS_EXTERNALS_FULLPATH_BOOST}/lib/libboost_system.so"
     "${IRODS_EXTERNALS_FULLPATH_BOOST}/lib/libboost_regex.so"
@@ -77,7 +77,6 @@ foreach(plugin IN LISTS IRODS_DATABASE_PLUGINS)
     ${plugin_target}
     PRIVATE
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
-    "$<BUILD_INTERFACE:${CMAKE_IRODS_SOURCE_DIR}/plugins/auth/include>"
     "${IRODS_EXTERNALS_FULLPATH_BOOST}/include"
     "${IRODS_EXTERNALS_FULLPATH_FMT}/include"
     "${IRODS_EXTERNALS_FULLPATH_NANODBC}/include"
