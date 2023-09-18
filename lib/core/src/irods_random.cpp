@@ -7,6 +7,7 @@
 #include <fmt/format.h>
 #include <openssl/rand.h>
 
+#include <cctype>
 #include <ctime>
 #include <random>
 #include <string>
@@ -23,7 +24,7 @@ namespace
         static std::uniform_int_distribution<> d{min_char, max_char};
 
         char c{};
-        while (!std::isalnum(c)) {
+        while (!std::isalnum(static_cast<unsigned char>(c))) {
             c = static_cast<char>(d(e));
         }
         return c;
@@ -41,13 +42,17 @@ void irods::getRandomBytes( void * buf, int bytes ) {
     }
 }
 
-auto irods::generate_random_alphanumeric_string(std::size_t _length) -> std::string
+auto irods::generate_random_alphanumeric_string(std::int32_t _length) -> std::string
 {
+    if (_length < 0) {
+        THROW(SYS_INVALID_INPUT_PARAM, fmt::format("{}: _length must be non-negative.", __func__));
+    }
+
     try {
         std::string s;
         s.reserve(_length);
 
-        for (std::size_t i = 0; i < _length; ++i) {
+        for (std::int32_t i = 0; i < _length; ++i) {
             s += generate_random_alphanumeric_character();
         }
 

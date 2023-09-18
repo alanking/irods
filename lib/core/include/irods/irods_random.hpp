@@ -10,10 +10,11 @@ namespace irods {
     ///
     /// \param[in] _length Desired length of the generated string.
     ///
-    /// \throws irods::exception If \p _length exceeds max_size or on allocation failure.
+    /// \throws irods::exception If \p _length is negative or exceeds std::basic_string::max_size (for details, see:
+    ///         https://en.cppreference.com/w/cpp/string/basic_string/max_size), or on allocation failure.
     ///
     /// \since 4.3.1
-    auto generate_random_alphanumeric_string(std::size_t _length) -> std::string;
+    auto generate_random_alphanumeric_string(std::int32_t _length) -> std::string;
 
     template <typename T>
     T
