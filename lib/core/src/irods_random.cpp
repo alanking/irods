@@ -42,7 +42,7 @@ void irods::getRandomBytes( void * buf, int bytes ) {
     }
 }
 
-auto irods::generate_random_alphanumeric_string(std::int32_t _length) -> std::string
+auto irods::generate_random_alphanumeric_string(std::int16_t _length) -> std::string
 {
     if (_length < 0) {
         THROW(SYS_INVALID_INPUT_PARAM, fmt::format("{}: _length must be non-negative.", __func__));
@@ -52,7 +52,7 @@ auto irods::generate_random_alphanumeric_string(std::int32_t _length) -> std::st
         std::string s;
         s.reserve(_length);
 
-        for (std::int32_t i = 0; i < _length; ++i) {
+        for (std::int16_t i = 0; i < _length; ++i) {
             s += generate_random_alphanumeric_character();
         }
 
