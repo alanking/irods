@@ -136,48 +136,56 @@ namespace
 
     auto get_auth_config(const char* _namespace, auth_config& _out) -> irods::error
     {
-        auto [db_instance, db_conn] = irods::experimental::catalog::new_database_connection();
-        nanodbc::statement stmt{db_conn};
+        try {
+            auto [db_instance, db_conn] = irods::experimental::catalog::new_database_connection();
+            nanodbc::statement stmt{db_conn};
 
-        nanodbc::prepare(stmt, "select option_name, option_value from R_GRID_CONFIGURATION where namespace = ?");
-        stmt.bind(0, _namespace);
+            nanodbc::prepare(stmt, "select option_name, option_value from R_GRID_CONFIGURATION where namespace = ?");
+            stmt.bind(0, _namespace);
 
-        for (auto result = nanodbc::execute(stmt); result.next();) {
-            const auto option_name = result.get<std::string>(0);
+            for (auto result = nanodbc::execute(stmt); result.next();) {
+                const auto option_name = result.get<std::string>(0);
 
-            if (option_name == irods::KW_CFG_PAM_PASSWORD_MIN_TIME ||
-                option_name == irods::KW_CFG_PAM_PASSWORD_MAX_TIME) {
-                auto& option = (option_name == irods::KW_CFG_PAM_PASSWORD_MIN_TIME) ? _out.password_min_time
-                                                                                    : _out.password_max_time;
-                try {
-                    option = std::stoll(result.get<std::string>(1));
+                if (option_name == irods::KW_CFG_PAM_PASSWORD_MIN_TIME ||
+                    option_name == irods::KW_CFG_PAM_PASSWORD_MAX_TIME) {
+                    auto& option = (option_name == irods::KW_CFG_PAM_PASSWORD_MIN_TIME) ? _out.password_min_time
+                                                                                        : _out.password_max_time;
+                    try {
+                        option = std::stoll(result.get<std::string>(1));
+                    }
+                    catch (...) {
+                        log_db::warn("Grid configuration value [{}] in namespace [{}] is invalid. Using default.",
+                                     option_name,
+                                     _namespace);
+                    }
+
+                    continue;
                 }
-                catch (...) {
-                    log_db::error("Grid configuration value [{}] in namespace [{}] is invalid. Using default.",
-                                  option_name,
-                                  _namespace);
-                }
 
-                continue;
+                if (option_name == irods::KW_CFG_PAM_PASSWORD_EXTEND_LIFETIME) {
+                    const auto option_value = result.get<std::string>(1);
+                    if (option_value == "1") {
+                        _out.password_extend_lifetime = true;
+                    }
+                    else if (option_value == "0") {
+                        _out.password_extend_lifetime = false;
+                    }
+                    else {
+                        // Use default if it's neither, and print an annoying error message.
+                        log_db::warn("Grid configuration value [{}] in namespace [{}] is invalid. Using default.",
+                                     option_name,
+                                     _namespace);
+                    }
+
+                    continue;
+                }
             }
-
-            if (option_name == irods::KW_CFG_PAM_PASSWORD_EXTEND_LIFETIME) {
-                const auto option_value = result.get<std::string>(1);
-                if (option_value == "1") {
-                    _out.password_extend_lifetime = true;
-                }
-                else if (option_value == "0") {
-                    _out.password_extend_lifetime = false;
-                }
-                else {
-                    // Use default if it's neither, and print an annoying error message.
-                    log_db::error("Grid configuration value [{}] in namespace [{}] is invalid. Using default.",
-                                  option_name,
-                                  _namespace);
-                }
-
-                continue;
-            }
+        }
+        catch (const std::exception& e) {
+            return ERROR(SYS_LIBRARY_ERROR, fmt::format("Error occurred getting grid configurations. [{}]", e.what()));
+        }
+        catch (...) {
+            return ERROR(SYS_UNKNOWN_ERROR, "Unknown error occurred getting grid configurations.");
         }
 
         return SUCCESS();
@@ -6549,8 +6557,8 @@ irods::error db_check_auth_op(
     /* Check for PAM_AUTH type passwords */
 
     if (const auto err = get_auth_config("authentication::pam_password", ac); !err.ok()) {
-        irods::log(err);
-        log_db::warn("Failed to get password configuration - using defaults.");
+        log_db::warn("Failed to get auth configuration. Using default values. [{}]", err.result());
+        ac = auth_config{};
     }
 
     if ((strncmp(goodPwExpiry, "9999", 4) != 0) && expireTime >= ac.password_min_time &&
@@ -7044,8 +7052,8 @@ irods::error db_make_limited_pw_op(
 
     auth_config ac{};
     if (const auto err = get_auth_config("authentication::native", ac); !err.ok()) {
-        irods::log(err);
-        log_db::warn("Failed to get password configuration - using defaults.");
+        log_db::warn("Failed to get auth configuration. Using default values. [{}]", err.result());
+        ac = auth_config{};
     }
 
     if (_ttl < ac.password_min_time || _ttl > ac.password_max_time) {
@@ -7182,8 +7190,8 @@ auto db_update_pam_password_op(irods::plugin_context& _ctx,
 
     auth_config ac{};
     if (const auto err = get_auth_config("authentication::pam_password", ac); !err.ok()) {
-        irods::log(err);
-        log_db::warn("Failed to get password configuration - using defaults.");
+        log_db::warn("Failed to get auth configuration. Using default values. [{}]", err.result());
+        ac = auth_config{};
     }
 
     /* if ttl is unset, use the default (minimum password lifetime) */
@@ -7520,8 +7528,8 @@ irods::error db_mod_user_op(
     if ( strncmp( _option, "rmPamPw", 9 ) == 0 ) {
         auth_config ac{};
         if (const auto err = get_auth_config("authentication::pam_password", ac); !err.ok()) {
-            irods::log(err);
-            log_db::warn("Failed to get password configuration - using defaults.");
+            log_db::warn("Failed to get auth configuration. Using default values. [{}]", err.result());
+            ac = auth_config{};
         }
 
         const auto password_min_time_str = std::to_string(ac.password_min_time);
