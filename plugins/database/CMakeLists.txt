@@ -64,8 +64,8 @@ foreach(plugin IN LISTS IRODS_DATABASE_PLUGINS)
     ${plugin_target}
     PRIVATE
     irods_common
-    irods_plugin_dependencies
     irods_server
+    irods_plugin_dependencies
     "${IRODS_EXTERNALS_FULLPATH_BOOST}/lib/libboost_filesystem.so"
     "${IRODS_EXTERNALS_FULLPATH_BOOST}/lib/libboost_system.so"
     "${IRODS_EXTERNALS_FULLPATH_BOOST}/lib/libboost_regex.so"
