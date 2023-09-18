@@ -122,12 +122,7 @@ namespace
     // This structure holds authentication configuration values.
     struct auth_config
     {
-        // Signifies that the structure has been initialized and does not need to be initialized again. The process for
-        // populating members of this struct involves a database query, so we do not need to update that in the
-        // lifetime of an agent.
-        bool initialized = false;
-
-        // Holds the value for the irods::KW_CFG_PAM_PASSWORD_EXTEND_LIFETIME configuration value.
+        // Holds the value for the irods::KW_CFG_PAM_PASSWORD_EXTEND_LIFETIME configuration.
         bool password_extend_lifetime = true;
 
         static constexpr rodsLong_t default_password_max_time = 1209600;
@@ -141,12 +136,6 @@ namespace
 
     auto get_auth_config(const char* _namespace, auth_config& _out) -> irods::error
     {
-        // Initializing the auth configs incurs a query. We only need to do this once per agent lifetime, so a member
-        // variable has been provided to prevent extraneous initializations.
-        if (_out.initialized) {
-            return SUCCESS();
-        }
-
         auto [db_instance, db_conn] = irods::experimental::catalog::new_database_connection();
         nanodbc::statement stmt{db_conn};
 
@@ -190,8 +179,6 @@ namespace
                 continue;
             }
         }
-
-        _out.initialized = true;
 
         return SUCCESS();
     } // get_auth_config
@@ -6370,7 +6357,7 @@ irods::error db_check_auth_op(
     std::vector<char> pwInfoArray( MAX_PASSWORD_LEN * MAX_PASSWORDS * 4 );
 
     // This function uses goto statements. You cannot initialize variables after a goto statement.
-    static auth_config ac{};
+    auth_config ac{};
 
     if ( logSQL != 0 ) {
         log_sql::debug("chlCheckAuth");
@@ -7055,7 +7042,7 @@ irods::error db_make_limited_pw_op(
 
     getNowStr( myTime );
 
-    static auth_config ac{};
+    auth_config ac{};
     if (const auto err = get_auth_config("authentication::native", ac); !err.ok()) {
         irods::log(err);
         log_db::warn("Failed to get password configuration - using defaults.");
@@ -7098,8 +7085,8 @@ irods::error db_make_limited_pw_op(
         log_sql::debug("chlMakeLimitedPw SQL 3");
     }
 
-    static const auto password_min_time_str = std::to_string(ac.password_min_time);
-    static const auto password_max_time_str = std::to_string(ac.password_max_time);
+    const auto password_min_time_str = std::to_string(ac.password_min_time);
+    const auto password_max_time_str = std::to_string(ac.password_max_time);
 
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
     cllBindVars[cllBindVarCount++] = password_min_time_str.c_str();
@@ -7193,7 +7180,7 @@ auto db_update_pam_password_op(irods::plugin_context& _ctx,
 
     getNowStr( myTime );
 
-    static auth_config ac{};
+    auth_config ac{};
     if (const auto err = get_auth_config("authentication::pam_password", ac); !err.ok()) {
         irods::log(err);
         log_db::warn("Failed to get password configuration - using defaults.");
@@ -7236,8 +7223,8 @@ auto db_update_pam_password_op(irods::plugin_context& _ctx,
         log_sql::debug("chlUpdateIrodsPamPassword SQL 2");
     }
 
-    static const auto password_min_time_str = std::to_string(ac.password_min_time);
-    static const auto password_max_time_str = std::to_string(ac.password_max_time);
+    const auto password_min_time_str = std::to_string(ac.password_min_time);
+    const auto password_max_time_str = std::to_string(ac.password_max_time);
 
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
     cllBindVars[cllBindVarCount++] = password_min_time_str.c_str();
@@ -7531,14 +7518,14 @@ irods::error db_mod_user_op(
     }
 
     if ( strncmp( _option, "rmPamPw", 9 ) == 0 ) {
-        static auth_config ac{};
+        auth_config ac{};
         if (const auto err = get_auth_config("authentication::pam_password", ac); !err.ok()) {
             irods::log(err);
             log_db::warn("Failed to get password configuration - using defaults.");
         }
 
-        static const auto password_min_time_str = std::to_string(ac.password_min_time);
-        static const auto password_max_time_str = std::to_string(ac.password_max_time);
+        const auto password_min_time_str = std::to_string(ac.password_min_time);
+        const auto password_max_time_str = std::to_string(ac.password_max_time);
 
         rstrcpy( tSQL, form7, MAX_SQL_SIZE );
         // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
