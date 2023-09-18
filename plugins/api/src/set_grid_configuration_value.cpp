@@ -61,8 +61,7 @@ namespace
         return std::none_of(std::begin(protected_config_list),
                             std::end(protected_config_list),
                             [&_namespace, &_option_name](const auto& _pair) {
-                                const auto& protected_namespace = _pair.first;
-                                const auto& protected_option_name = _pair.second;
+                                const auto& [protected_namespace, protected_option_name] = _pair;
 
                                 // If this evaluates to true, this is not a protected option and is allowed to be
                                 // modified. Return false because this is not a match.
