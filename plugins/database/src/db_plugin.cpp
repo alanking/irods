@@ -119,20 +119,24 @@ static const auto intermediate_replica_status_str = std::to_string(INTERMEDIATE_
 
 namespace
 {
-    constexpr std::size_t grid_configuration_size = 2700;
+    // This structure holds authentication configuration values.
     struct auth_config
     {
+        // Signifies that the structure has been initialized and does not need to be initialized again. The process for
+        // populating members of this struct involves a database query, so we do not need to update that in the
+        // lifetime of an agent.
         bool initialized = false;
 
+        // Holds the value for the irods::KW_CFG_PAM_PASSWORD_EXTEND_LIFETIME configuration value.
         bool password_extend_lifetime = true;
 
         static constexpr rodsLong_t default_password_max_time = 1209600;
+        // Holds the value for the irods::KW_CFG_PAM_PASSWORD_MAX_TIME configuration.
         rodsLong_t password_max_time = default_password_max_time;
-        std::array<char, grid_configuration_size + 1> password_max_time_str{};
 
         static constexpr rodsLong_t default_password_min_time = 121;
+        // Holds the value for the irods::KW_CFG_PAM_PASSWORD_MIN_TIME configuration.
         rodsLong_t password_min_time = default_password_min_time;
-        std::array<char, grid_configuration_size + 1> password_min_time_str{};
     };
 
     auto get_auth_config(const char* _namespace, auth_config& _out) -> irods::error
@@ -152,28 +156,12 @@ namespace
         for (auto result = nanodbc::execute(stmt); result.next();) {
             const auto option_name = result.get<std::string>(0);
 
-            if (option_name == irods::KW_CFG_PAM_PASSWORD_MIN_TIME) {
-                std::strncpy(_out.password_min_time_str.data(),
-                             result.get<std::string>(1).c_str(),
-                             _out.password_min_time_str.size());
+            if (option_name == irods::KW_CFG_PAM_PASSWORD_MIN_TIME ||
+                option_name == irods::KW_CFG_PAM_PASSWORD_MAX_TIME) {
+                auto& option = (option_name == irods::KW_CFG_PAM_PASSWORD_MIN_TIME) ? _out.password_min_time
+                                                                                    : _out.password_max_time;
                 try {
-                    _out.password_min_time = std::stoll(_out.password_min_time_str.data());
-                }
-                catch (...) {
-                    log_db::error("Grid configuration value [{}] in namespace [{}] is invalid. Using default.",
-                                  option_name,
-                                  _namespace);
-                }
-
-                continue;
-            }
-
-            if (option_name == irods::KW_CFG_PAM_PASSWORD_MAX_TIME) {
-                std::strncpy(_out.password_max_time_str.data(),
-                             result.get<std::string>(1).c_str(),
-                             _out.password_max_time_str.size());
-                try {
-                    _out.password_max_time = std::stoll(_out.password_max_time_str.data());
+                    option = std::stoll(result.get<std::string>(1));
                 }
                 catch (...) {
                     log_db::error("Grid configuration value [{}] in namespace [{}] is invalid. Using default.",
@@ -7109,10 +7097,14 @@ irods::error db_make_limited_pw_op(
     if ( logSQL != 0 ) {
         log_sql::debug("chlMakeLimitedPw SQL 3");
     }
+
+    static const auto password_min_time_str = std::to_string(ac.password_min_time);
+    static const auto password_max_time_str = std::to_string(ac.password_max_time);
+
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
-    cllBindVars[cllBindVarCount++] = ac.password_min_time_str.data();
+    cllBindVars[cllBindVarCount++] = password_min_time_str.c_str();
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
-    cllBindVars[cllBindVarCount++] = ac.password_max_time_str.data();
+    cllBindVars[cllBindVarCount++] = password_max_time_str.c_str();
     cllBindVars[cllBindVarCount++] = myTime;
 #if MY_ICAT
     status = cmlExecuteNoAnswerSql( "delete from R_USER_PASSWORD where pass_expiry_ts not like '9999%' and cast(pass_expiry_ts as signed integer)>=? and cast(pass_expiry_ts as signed integer)<=? and (cast(pass_expiry_ts as signed integer) + cast(modify_ts as signed integer) < ?)",
@@ -7243,10 +7235,14 @@ auto db_update_pam_password_op(irods::plugin_context& _ctx,
     if ( logSQL != 0 ) {
         log_sql::debug("chlUpdateIrodsPamPassword SQL 2");
     }
+
+    static const auto password_min_time_str = std::to_string(ac.password_min_time);
+    static const auto password_max_time_str = std::to_string(ac.password_max_time);
+
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
-    cllBindVars[cllBindVarCount++] = ac.password_min_time_str.data();
+    cllBindVars[cllBindVarCount++] = password_min_time_str.c_str();
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
-    cllBindVars[cllBindVarCount++] = ac.password_max_time_str.data();
+    cllBindVars[cllBindVarCount++] = password_max_time_str.c_str();
     cllBindVars[cllBindVarCount++] = myTime;
 #if MY_ICAT
     status = cmlExecuteNoAnswerSql( "delete from R_USER_PASSWORD where pass_expiry_ts not like '9999%' and cast(pass_expiry_ts as signed integer)>=? and cast(pass_expiry_ts as signed integer)<=? and (cast(pass_expiry_ts as signed integer) + cast(modify_ts as signed integer) < ?)",
@@ -7272,8 +7268,8 @@ auto db_update_pam_password_op(irods::plugin_context& _ctx,
     {
         std::vector<std::string> bindVars;
         bindVars.emplace_back(selUserId);
-        bindVars.emplace_back(ac.password_min_time_str.data());
-        bindVars.emplace_back(ac.password_max_time_str.data());
+        bindVars.emplace_back(password_min_time_str.c_str());
+        bindVars.emplace_back(password_max_time_str.c_str());
         status = cmlGetStringValuesFromSql(
 #if MY_ICAT
                      "select rcat_password, modify_ts from R_USER_PASSWORD where user_id=? and pass_expiry_ts not like '9999%' and cast(pass_expiry_ts as signed integer) >= ? and cast (pass_expiry_ts as signed integer) <= ?",
@@ -7541,11 +7537,14 @@ irods::error db_mod_user_op(
             log_db::warn("Failed to get password configuration - using defaults.");
         }
 
+        static const auto password_min_time_str = std::to_string(ac.password_min_time);
+        static const auto password_max_time_str = std::to_string(ac.password_max_time);
+
         rstrcpy( tSQL, form7, MAX_SQL_SIZE );
         // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
-        cllBindVars[cllBindVarCount++] = ac.password_min_time_str.data();
+        cllBindVars[cllBindVarCount++] = password_min_time_str.c_str();
         // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
-        cllBindVars[cllBindVarCount++] = ac.password_max_time_str.data();
+        cllBindVars[cllBindVarCount++] = password_max_time_str.c_str();
         cllBindVars[cllBindVarCount++] = userName2;
         cllBindVars[cllBindVarCount++] = zoneName;
         if ( logSQL != 0 ) {
@@ -11973,6 +11972,7 @@ irods::error db_set_grid_configuration_value_op(
         return ERROR(CATALOG_NOT_CONNECTED, "catalog not connected");
     }
 
+    constexpr std::size_t grid_configuration_size = 2700;
     std::vector<std::string> bindVars{_namespace, _option_name};
     std::array<char, grid_configuration_size + 1> config_value{};
     int status = cmlGetStringValueFromSql(
