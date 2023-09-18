@@ -176,7 +176,7 @@ def run_update(irods_config, cursor):
         }
 
         scheme_namespaces = ['authentication::pam_password', 'authentication::native']
-        statement_str = "insert into R_GRID_CONFIGURATION values ('{}','{}','{}');"
+        statement_str = "insert into R_GRID_CONFIGURATION (namespace, option_name, option_value) values ('{}','{}','{}');"
         # pam_password configurations for password lifetime have always been used with native authentication as well.
         # The configurations are now separately configurable.
         for scheme in scheme_namespaces:
