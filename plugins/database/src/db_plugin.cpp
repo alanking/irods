@@ -146,19 +146,27 @@ namespace
             for (auto result = nanodbc::execute(stmt); result.next();) {
                 const auto option_name = result.get<std::string>(0);
 
-                if (option_name == irods::KW_CFG_PAM_PASSWORD_MIN_TIME ||
-                    option_name == irods::KW_CFG_PAM_PASSWORD_MAX_TIME) {
-                    auto& option = (option_name == irods::KW_CFG_PAM_PASSWORD_MIN_TIME) ? _out.password_min_time
-                                                                                        : _out.password_max_time;
-                    try {
-                        option = std::stoll(result.get<std::string>(1));
+                if (option_name == irods::KW_CFG_PAM_PASSWORD_MIN_TIME) {
+                    _out.password_min_time = std::stoll(result.get<std::string>(1));
+                    if (_out.password_min_time < 0) {
+                        return ERROR(CONFIGURATION_ERROR,
+                                     fmt::format("Invalid configuration for option [{}] in namespace [{}]: [{}]",
+                                                 option_name,
+                                                 _namespace,
+                                                 _out.password_min_time));
                     }
-                    catch (...) {
-                        log_db::warn("Grid configuration value [{}] in namespace [{}] is invalid. Using default.",
-                                     option_name,
-                                     _namespace);
-                    }
+                    continue;
+                }
 
+                if (option_name == irods::KW_CFG_PAM_PASSWORD_MAX_TIME) {
+                    _out.password_max_time = std::stoll(result.get<std::string>(1));
+                    if (_out.password_max_time < 0) {
+                        return ERROR(CONFIGURATION_ERROR,
+                                     fmt::format("Invalid configuration for option [{}] in namespace [{}]: [{}]",
+                                                 option_name,
+                                                 _namespace,
+                                                 _out.password_max_time));
+                    }
                     continue;
                 }
 
@@ -171,10 +179,11 @@ namespace
                         _out.password_extend_lifetime = false;
                     }
                     else {
-                        // Use default if it's neither, and print an annoying error message.
-                        log_db::warn("Grid configuration value [{}] in namespace [{}] is invalid. Using default.",
-                                     option_name,
-                                     _namespace);
+                        return ERROR(CONFIGURATION_ERROR,
+                                     fmt::format("Invalid configuration for option [{}] in namespace [{}]: [{}]",
+                                                 option_name,
+                                                 _namespace,
+                                                 option_value));
                     }
 
                     continue;
@@ -182,10 +191,19 @@ namespace
             }
         }
         catch (const std::exception& e) {
-            return ERROR(SYS_LIBRARY_ERROR, fmt::format("Error occurred getting grid configurations. [{}]", e.what()));
+            return ERROR(
+                SYS_LIBRARY_ERROR,
+                fmt::format(
+                    "Error occurred getting grid configurations. Check R_GRID_CONFIGURATION namespace [{}]. error:[{}]",
+                    _namespace,
+                    e.what()));
         }
         catch (...) {
-            return ERROR(SYS_UNKNOWN_ERROR, "Unknown error occurred getting grid configurations.");
+            return ERROR(
+                SYS_UNKNOWN_ERROR,
+                fmt::format(
+                    "Unknown error occurred getting grid configurations. Check R_GRID_CONFIGURATION namespace [{}].",
+                    _namespace));
         }
 
         return SUCCESS();
@@ -6557,8 +6575,8 @@ irods::error db_check_auth_op(
     /* Check for PAM_AUTH type passwords */
 
     if (const auto err = get_auth_config("authentication::pam_password", ac); !err.ok()) {
-        log_db::warn("Failed to get auth configuration. Using default values. [{}]", err.result());
-        ac = auth_config{};
+        log_db::error("Failed to get auth configuration. [{}]", err.result());
+        return err;
     }
 
     if ((strncmp(goodPwExpiry, "9999", 4) != 0) && expireTime >= ac.password_min_time &&
@@ -7052,8 +7070,8 @@ irods::error db_make_limited_pw_op(
 
     auth_config ac{};
     if (const auto err = get_auth_config("authentication::native", ac); !err.ok()) {
-        log_db::warn("Failed to get auth configuration. Using default values. [{}]", err.result());
-        ac = auth_config{};
+        log_db::error("Failed to get auth configuration. [{}]", err.result());
+        return err;
     }
 
     if (_ttl < ac.password_min_time || _ttl > ac.password_max_time) {
@@ -7190,8 +7208,8 @@ auto db_update_pam_password_op(irods::plugin_context& _ctx,
 
     auth_config ac{};
     if (const auto err = get_auth_config("authentication::pam_password", ac); !err.ok()) {
-        log_db::warn("Failed to get auth configuration. Using default values. [{}]", err.result());
-        ac = auth_config{};
+        log_db::error("Failed to get auth configuration. [{}]", err.result());
+        return err;
     }
 
     /* if ttl is unset, use the default (minimum password lifetime) */
@@ -7528,8 +7546,8 @@ irods::error db_mod_user_op(
     if ( strncmp( _option, "rmPamPw", 9 ) == 0 ) {
         auth_config ac{};
         if (const auto err = get_auth_config("authentication::pam_password", ac); !err.ok()) {
-            log_db::warn("Failed to get auth configuration. Using default values. [{}]", err.result());
-            ac = auth_config{};
+            log_db::error("Failed to get auth configuration. [{}]", err.result());
+            return err;
         }
 
         const auto password_min_time_str = std::to_string(ac.password_min_time);
