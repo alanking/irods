@@ -131,7 +131,8 @@ class test_configurations(unittest.TestCase):
 
                     # Make sure the settings applied correctly...
                     self.admin.assert_icommand(
-                        ['iadmin', 'get_grid_configuration', self.configuration_namespace, _option_name], 'STDOUT')
+                        ['iadmin', 'get_grid_configuration', self.configuration_namespace, max_time_option_name],
+                        'STDOUT', original_max_time)
 
                     self.auth_session.assert_icommand(
                         ['iinit'], 'STDOUT', 'PAM password', input=f'{self.auth_session.password}\n')
@@ -198,8 +199,12 @@ class test_configurations(unittest.TestCase):
 
                     # Make sure the settings applied correctly...
                     self.admin.assert_icommand(
-                        ['iadmin', 'get_grid_configuration', self.configuration_namespace, max_time_option_name], 'STDOUT')
+                        ['iadmin', 'get_grid_configuration', self.configuration_namespace, max_time_option_name],
+                        'STDOUT', original_max_time)
 
+                    # Try a few different values here that are in the range of overall acceptable values:
+                    #     - 2 hours allows us to go up OR down by 1 hour (boundary case).
+                    #     - 336 hours is 1209600 seconds (or 2 weeks) which is the default maximum allowed TTL value.
                     for base_ttl_in_hours in [2, 336]:
                         with self.subTest(f'test with TTL of [{base_ttl_in_hours}] hours'):
                             base_ttl_in_seconds = base_ttl_in_hours * 3600
@@ -292,7 +297,8 @@ class test_configurations(unittest.TestCase):
 
                     # Make sure the settings applied correctly...
                     self.admin.assert_icommand(
-                        ['iadmin', 'get_grid_configuration', self.configuration_namespace, max_time_option_name], 'STDOUT')
+                        ['iadmin', 'get_grid_configuration', self.configuration_namespace, max_time_option_name],
+                        'STDOUT', original_max_time)
 
                     # When no TTL is specified, the default value is the minimum password lifetime as configured in
                     # R_GRID_CONFIGURATION.
