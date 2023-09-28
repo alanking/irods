@@ -131,8 +131,8 @@ class test_configurations(unittest.TestCase):
 
                     # Make sure the settings applied correctly...
                     self.admin.assert_icommand(
-                        ['iadmin', 'get_grid_configuration', self.configuration_namespace, max_time_option_name],
-                        'STDOUT', original_max_time)
+                        ['iadmin', 'get_grid_configuration', self.configuration_namespace, _option_name],
+                        'STDOUT', original_config)
 
                     self.auth_session.assert_icommand(
                         ['iinit'], 'STDOUT', 'PAM password', input=f'{self.auth_session.password}\n')
