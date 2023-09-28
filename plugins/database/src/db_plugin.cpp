@@ -149,12 +149,17 @@ namespace
                 const auto option_name = result.get<std::string>(0);
                 const auto option_value = result.get<std::string>(1);
 
-                if (option_name == irods::KW_CFG_PAM_PASSWORD_MIN_TIME ||
-                    option_name == irods::KW_CFG_PAM_PASSWORD_MAX_TIME) {
-                    const bool min = (option_name == irods::KW_CFG_PAM_PASSWORD_MIN_TIME);
+                // Given the level of nesting that occurs here to maintain specificity in the error messages, the logic
+                // has been condensed for reuse. The option_name still needs to be differentiated to apply the correct
+                // setting, and given that there are only two alternatives for this case, it is sufficient to use only
+                // one for a boolean flag. Therefore, check for the password_min_time option_name once to determine
+                // which option_name this is and avoid duplicating the string comparison.
+                if (const bool is_min_option = (option_name == irods::KW_CFG_PAM_PASSWORD_MIN_TIME);
+                    is_min_option || option_name == irods::KW_CFG_PAM_PASSWORD_MAX_TIME)
+                {
                     const auto default_value =
-                        min ? auth_config::default_password_min_time : auth_config::default_password_max_time;
-                    auto& config = min ? _out.password_min_time : _out.password_max_time;
+                        is_min_option ? auth_config::default_password_min_time : auth_config::default_password_max_time;
+                    auto& config = is_min_option ? _out.password_min_time : _out.password_max_time;
                     try {
                         config = std::stoll(option_value);
                         if (config < 0) {
