@@ -24,18 +24,6 @@ namespace irods
     /// \since 4.3.0
     extern const std::string_view PID_FILENAME_DELAY_SERVER;
 
-    /// A utility function primarily meant to be used with ::rsDataObjPut and ::rsDataObjCopy.
-    ///
-    /// \param[in] _comm  A reference to the communication object.
-    /// \param[in] _input A reference to the ::DataObjInp containing the ::KeyValPair.
-    ///
-    /// \return A boolean value indicating whether the FORCE_FLAG_KW is required or not.
-    /// \retval true  If the keyword is required.
-    /// \retval false If the keyword is not required.
-    ///
-    /// \since 4.2.9
-    auto is_force_flag_required(RsComm& _comm, const DataObjInp& _input) -> bool;
-
     /// Checks if the provided rule text contains session variables.
     ///
     /// This function will reject any text that contains a session variable. This includes text
@@ -82,6 +70,24 @@ namespace irods
     ///
     /// \since 4.3.0
     auto get_pid_from_file(const std::string_view _pid_filename) noexcept -> std::optional<pid_t>;
+
+    /// \brief Returns the resolved resource hierarchy for any object-level overwrite.
+    ///
+    /// This function is meant primarily for use with \p rsDataObjPut and \p rsDataObjCopy.
+    ///
+    /// Data object overwrites must conform to a set of rules to be valid:
+    ///  - If the data object does not exist, it is not an overwrite.
+    ///  - If the data object exists, any targeted resource using e.g. DEST_RESC_NAME_KW must have a replica.
+    ///  - The force flag must be present in the input as explicit signal to overwrite the data object.
+    ///
+    /// \throws irods::exception If any of the data object overwrite rules listed above is violated.
+    ///
+    /// \return The fully resolved resource hierarchy for the given \p DataObjInp.
+    ///
+    /// \since 4.3.2
+    auto get_resource_hierarchy_for_data_object_overwrite(RsComm& _comm,
+                                                          DataObjInp& _inp,
+                                                          std::string_view _hier_keyword) -> std::string;
 } // namespace irods
 
 #endif // IRODS_SERVER_UTILITIES_HPP

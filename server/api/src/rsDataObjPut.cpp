@@ -70,6 +70,7 @@ namespace
     namespace ir = irods::experimental::replica;
     namespace ill = irods::logical_locking;
     namespace rst = irods::replica_state_table;
+    using log_api = irods::experimental::log::api;
 
     auto apply_static_peps(RsComm& _comm, l1desc& _l1desc, const int _operation_status) -> void
     {
@@ -507,51 +508,12 @@ namespace
         return SYS_NO_HANDLER_REPLY_MSG;
     } // parallel_transfer_put
 
-    void throw_if_force_put_to_new_resource(
-        const DataObjInp& _inp,
-        const irods::file_object_ptr file_obj)
-    {
-        const auto cond_input = irods::experimental::make_key_value_proxy(_inp.condInput);
-
-        if (file_obj->replicas().empty() || !cond_input.contains(FORCE_FLAG_KW) || !cond_input.contains(DEST_RESC_NAME_KW)) {
-            return;
-        }
-
-        const auto destination_resource = cond_input.at(DEST_RESC_NAME_KW).value();
-
-        const auto hier_match{
-            [&destination_resource, &replicas = file_obj->replicas()]()
-            {
-                return std::any_of(replicas.cbegin(), replicas.cend(),
-                [&destination_resource](const auto& r) {
-                    return irods::hierarchy_parser{r.resc_hier()}.first_resc() == destination_resource;
-                });
-            }()
-        };
-
-        if (!hier_match) {
-            THROW(HIERARCHY_ERROR, fmt::format(
-                "cannot force put [{}] to a different resource [{}]",
-                _inp.objPath, destination_resource));
-        }
-    } // throw_if_force_put_to_new_resource
-
     int rsDataObjPut_impl(
         rsComm_t *rsComm,
         dataObjInp_t *dataObjInp,
         bytesBuf_t *dataObjInpBBuf,
         portalOprOut_t **portalOprOut)
     {
-        try {
-            if (irods::is_force_flag_required(*rsComm, *dataObjInp)) {
-                return OVERWRITE_WITHOUT_FORCE_FLAG;
-            }
-        }
-        catch (const irods::experimental::filesystem::filesystem_error& e) {
-            irods::experimental::log::api::error(e.what());
-            return e.code().value();
-        }
-
         rodsServerHost_t *rodsServerHost{};
         specCollCache_t *specCollCache{};
 
@@ -603,39 +565,18 @@ namespace
         }
 
         try {
-            dataObjInfo_t* dataObjInfoHead{};
-            irods::at_scope_exit free_data_object_info{[&dataObjInfoHead] { freeAllDataObjInfo(dataObjInfoHead); }};
-
-            irods::file_object_ptr file_obj(new irods::file_object());
-            file_obj->logical_path(dataObjInp->objPath);
-            irods::error fac_err = irods::file_object_factory(rsComm, dataObjInp, file_obj, &dataObjInfoHead);
-
-            throw_if_force_put_to_new_resource(*dataObjInp, file_obj);
-
-            std::string hier{};
+            const auto hier = irods::get_resource_hierarchy_for_data_object_overwrite(*rsComm, *dataObjInp, RESC_HIER_STR_KW);
             auto cond_input = irods::experimental::make_key_value_proxy(dataObjInp->condInput);
             if (!cond_input.contains(RESC_HIER_STR_KW)) {
-                auto fobj_tuple = std::make_tuple(file_obj, fac_err);
-
-                std::tie(file_obj, hier) = irods::resolve_resource_hierarchy(
-                    rsComm, irods::CREATE_OPERATION, *dataObjInp, fobj_tuple);
-
                 cond_input[RESC_HIER_STR_KW] = hier;
             }
-            else {
-                if (!fac_err.ok() && CAT_NO_ROWS_FOUND != fac_err.code()) {
-                    irods::log(fac_err);
-                }
-                hier = cond_input.at(RESC_HIER_STR_KW).value().data();
-            }
-
-            if (irods::hierarchy_has_replica(file_obj, cond_input.at(RESC_HIER_STR_KW).value()) &&
-                !cond_input.contains(FORCE_FLAG_KW)) {
-                return OVERWRITE_WITHOUT_FORCE_FLAG;
-            }
+        }
+        catch (const irods::experimental::filesystem::filesystem_error& e) {
+            log_api::error(e.what());
+            return e.code().value();
         }
         catch (const irods::exception& e) {
-            irods::log(LOG_ERROR, fmt::format("[{}:{}] - [{}]", __FUNCTION__, __LINE__, e.client_display_what()));
+            log_api::error("[{}:{}] - [{}]", __FUNCTION__, __LINE__, e.client_display_what());
             return e.code();
         }
 

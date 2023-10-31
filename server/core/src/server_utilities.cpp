@@ -1,8 +1,12 @@
 #include "irods/server_utilities.hpp"
 
 #include "irods/dataObjInpOut.h"
-#include "irods/key_value_proxy.hpp"
+#include "irods/irods_at_scope_exit.hpp"
+#include "irods/irods_error.hpp"
+#include "irods/irods_file_object.hpp"
 #include "irods/irods_logger.hpp"
+#include "irods/irods_resource_redirect.hpp"
+#include "irods/key_value_proxy.hpp"
 
 #define IRODS_FILESYSTEM_ENABLE_SERVER_SIDE_API
 #include "irods/filesystem.hpp"
@@ -16,21 +20,40 @@
 #include <regex>
 #include <fstream>
 
+namespace
+{
+    auto throw_if_force_overwrite_to_new_resource(const DataObjInp& _inp, const irods::file_object_ptr _file_obj)
+        -> void
+    {
+        const auto cond_input = irods::experimental::make_key_value_proxy(_inp.condInput);
+
+        if (_file_obj->replicas().empty() || !cond_input.contains(FORCE_FLAG_KW) ||
+            !cond_input.contains(DEST_RESC_NAME_KW)) {
+            return;
+        }
+
+        const auto destination_resource = cond_input.at(DEST_RESC_NAME_KW).value();
+
+        const auto hierarchy_with_replica_exists{[&destination_resource, &replicas = _file_obj->replicas()]() {
+            return std::any_of(replicas.cbegin(), replicas.cend(), [&destination_resource](const auto& r) {
+                return irods::hierarchy_parser{r.resc_hier()}.first_resc() == destination_resource;
+            });
+        }()};
+
+        if (!hierarchy_with_replica_exists) {
+            THROW(
+                HIERARCHY_ERROR,
+                fmt::format("cannot force put [{}] to a different resource [{}]", _inp.objPath, destination_resource));
+        }
+    } // throw_if_force_overwrite_to_new_resource
+} // anonymous namespace
+
 namespace irods
 {
     // clang-format off
     const std::string_view PID_FILENAME_MAIN_SERVER  = "irods.pid";
     const std::string_view PID_FILENAME_DELAY_SERVER = "irods_delay_server.pid";
     // clang-format on
-
-    auto is_force_flag_required(RsComm& _comm, const DataObjInp& _input) -> bool
-    {
-        namespace ix = irods::experimental;
-        namespace fs = irods::experimental::filesystem;
-
-        return fs::server::exists(_comm, _input.objPath) &&
-               !ix::key_value_proxy{_input.condInput}.contains(FORCE_FLAG_KW);
-    }
 
     auto contains_session_variables(const std::string_view _rule_text) -> bool
     {
@@ -168,5 +191,47 @@ namespace irods
 
         return std::nullopt;
     } // get_pid_from_file
+
+    auto get_resource_hierarchy_for_data_object_overwrite(RsComm& _comm,
+                                                          DataObjInp& _inp,
+                                                          std::string_view _hier_keyword) -> std::string
+    {
+        // Construct a file object first so that there's only one query for the data object information as it relates
+        // to resolving the hierarchy.
+        dataObjInfo_t* dataObjInfoHead{};
+        irods::at_scope_exit free_data_object_info{[&dataObjInfoHead] { freeAllDataObjInfo(dataObjInfoHead); }};
+
+        irods::file_object_ptr file_obj(new irods::file_object());
+        file_obj->logical_path(_inp.objPath);
+        irods::error fac_err = irods::file_object_factory(&_comm, &_inp, file_obj, &dataObjInfoHead);
+
+        throw_if_force_overwrite_to_new_resource(_inp, file_obj);
+
+        std::string hier;
+        const auto cond_input = irods::experimental::make_key_value_proxy(_inp.condInput);
+        if (!cond_input.contains(_hier_keyword)) {
+            auto fobj_tuple = std::make_tuple(file_obj, fac_err);
+
+            std::tie(file_obj, hier) =
+                irods::resolve_resource_hierarchy(&_comm, irods::CREATE_OPERATION, _inp, fobj_tuple);
+        }
+        else {
+            if (!fac_err.ok() && CAT_NO_ROWS_FOUND != fac_err.code()) {
+                irods::log(fac_err);
+            }
+            hier = cond_input.at(_hier_keyword).value().data();
+        }
+
+        if (irods::hierarchy_has_replica(file_obj, hier) &&
+            !cond_input.contains(FORCE_FLAG_KW))
+        {
+            THROW(OVERWRITE_WITHOUT_FORCE_FLAG,
+                  fmt::format("Object-level overwrite of [{}] requires use of the force flag keyword [{}]",
+                              _inp.objPath,
+                              FORCE_FLAG_KW));
+        }
+
+        return hier;
+    } // get_resource_hierarchy_for_object_level_operation
 } // namespace irods
 

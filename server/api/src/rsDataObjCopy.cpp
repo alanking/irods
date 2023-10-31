@@ -222,18 +222,23 @@ namespace
         dataObjInp_t* srcDataObjInp = &dataObjCopyInp->srcDataObjInp;
         dataObjInp_t* destDataObjInp = &dataObjCopyInp->destDataObjInp;
         try {
-            if (!fs::server::is_data_object(*rsComm, srcDataObjInp->objPath) ||
-                fs::path{destDataObjInp->objPath}.is_relative()) {
-                return USER_INPUT_PATH_ERR;
-            }
-
-            if (irods::is_force_flag_required(*rsComm, *destDataObjInp)) {
-                return OVERWRITE_WITHOUT_FORCE_FLAG;
+            const auto hier =
+                irods::get_resource_hierarchy_for_data_object_overwrite(*rsComm, *destDataObjInp, DEST_RESC_HIER_STR_KW);
+            auto cond_input = irods::experimental::make_key_value_proxy(destDataObjInp->condInput);
+            if (!cond_input.contains(DEST_RESC_HIER_STR_KW)) {
+                // Populate RESC_HIER_STR_KW for the destDataObjInp because the open API is looking for this keyword
+                // even though DEST_RESC_HIER_STR_KW is used by the copy API to indicate the resolved resource
+                // hierarchy of the destination object.
+                cond_input[RESC_HIER_STR_KW] = hier;
             }
         }
-        catch (const fs::filesystem_error& e) {
-            irods::experimental::log::api::error(e.what());
+        catch (const irods::experimental::filesystem::filesystem_error& e) {
+            log_api::error(e.what());
             return e.code().value();
+        }
+        catch (const irods::exception& e) {
+            log_api::error("[{}:{}] - [{}]", __FUNCTION__, __LINE__, e.client_display_what());
+            return e.code();
         }
 
         specCollCache_t *specCollCache{};
