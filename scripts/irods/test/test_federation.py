@@ -1943,3 +1943,168 @@ class test_compound_resource_operations(SessionsMixin, unittest.TestCase):
 			self.remote_admin.run_icommand(
 				['iadmin', 'modrepl', 'logical_path', logical_path, 'resource_hierarchy', archive_hierarchy, 'DATA_REPL_STATUS', '0'])
 			self.remote_admin.run_icommand(['irm', '-f', logical_path])
+
+
+class test_icp_overwrite_with_target_resource(unittest.TestCase):
+	@classmethod
+	def setUpClass(self):
+		# Create a session as the administrator for the remote zone so we can do things in the remote zone.
+		self.remote_admin = session.make_session_for_existing_user(
+			test.settings.PREEXISTING_ADMIN_PASSWORD,
+			test.settings.PREEXISTING_ADMIN_PASSWORD,
+			test.settings.FEDERATION.REMOTE_HOST,
+			test.settings.FEDERATION.REMOTE_ZONE)
+
+		# Create a regular user local to the remote zone in the remote zone and create a session for it.
+		remote_user_name = 'smeagol'
+		remote_user_password = 'spass'
+		self.remote_admin.assert_icommand(['iadmin', 'mkuser', remote_user_name, 'rodsuser'])
+		self.remote_admin.assert_icommand(['iadmin', 'moduser', remote_user_name, 'password', remote_user_password])
+		self.remote_user = session.IrodsSession(
+			lib.make_environment_dict(
+				remote_user_name,
+				test.settings.FEDERATION.REMOTE_HOST,
+				test.settings.FEDERATION.REMOTE_ZONE,
+				use_ssl=test.settings.USE_SSL
+			),
+			remote_user_password,
+			manage_irods_data=True)
+
+		# Create a user for testing in the local zone and a local user to represent the user in the remote zone created
+		# above.
+		local_user_name = 'qwerty'
+		local_user_password = 'qpass'
+		self.local_user = session.mkuser_and_return_session(
+			'rodsuser', local_user_name, local_user_password, lib.get_hostname())
+		self.remote_user_local_name = '#'.join([self.remote_user.username, self.remote_user.zone_name])
+		with session.make_session_for_existing_admin() as admin_session:
+			admin_session.assert_icommand(['iadmin', 'mkuser', self.remote_user_local_name, 'rodsuser'])
+
+		# Create a user in the remote zone for use with the local zone's user. Don't give the user a password.
+		self.local_user_remote_name = '#'.join([self.local_user.username, self.local_user.zone_name])
+		self.remote_admin.assert_icommand(['iadmin', 'mkuser', self.local_user_remote_name, 'rodsuser'])
+
+		# Create a couple of resources in the local and remote zone for testing.
+		self.remote_target_resource = 'remote_target_resource'
+		self.remote_other_resource = 'remote_other_resource'
+		lib.create_ufs_resource(
+			self.remote_admin, self.remote_target_resource, hostname=test.settings.FEDERATION.REMOTE_HOST)
+		lib.create_ufs_resource(
+			self.remote_admin, self.remote_other_resource, hostname=test.settings.FEDERATION.REMOTE_HOST)
+
+		self.local_target_resource = 'local_target_resource'
+		self.local_other_resource = 'local_other_resource'
+		with session.make_session_for_existing_admin() as admin_session:
+			lib.create_ufs_resource(admin_session, self.local_target_resource, hostname=test.settings.HOSTNAME_2)
+			lib.create_ufs_resource(admin_session, self.local_other_resource, hostname=test.settings.HOSTNAME_3)
+
+	@classmethod
+	def tearDownClass(self):
+		# Clean up remote users, sessions, and resources.
+		remote_user_name = self.remote_user.username
+		self.remote_user.__exit__()
+		self.remote_admin.assert_icommand(['iadmin', 'rmuser', remote_user_name])
+		self.remote_admin.assert_icommand(['iadmin', 'rmuser', self.local_user_remote_name])
+		lib.remove_resource(self.remote_admin, self.remote_target_resource)
+		lib.remove_resource(self.remote_admin, self.remote_other_resource)
+		self.remote_admin.__exit__()
+
+		# Clean up local users, sessions, and resources.
+		self.local_user.__exit__()
+		with session.make_session_for_existing_admin() as admin_session:
+			admin_session.assert_icommand(['iadmin', 'rmuser', self.local_user.username])
+			admin_session.assert_icommand(['iadmin', 'rmuser', self.remote_user_local_name])
+			lib.remove_resource(admin_session, self.local_target_resource)
+			lib.remove_resource(admin_session, self.local_other_resource)
+
+	def successfully_overwrite_replica_on_target_resource_test_impl(self, copy_to, copy_from):
+		"""A test which successfully overwrites a replica with icp while targeting a resource.
+
+		Arguments:
+		self - The test class.
+		copy_to - The zone to copy to and overwrite a data object. Either "local" or "remote".
+		copy_from - The zone from which a data object will be copied. Either "local" or "remote".
+		"""
+		# Use the session collection for the user in the appropriate "from" zone.
+		user_session = self.local_user if copy_from == 'local' else self.remote_user
+		copy_from_collection = user_session.session_collection
+
+		if copy_to == 'local':
+			target_resource = self.local_target_resource
+			other_resource = self.local_other_resource
+		else:
+			target_resource = self.remote_target_resource
+			other_resource = self.remote_other_resource
+
+		if copy_to == 'local' and copy_from == 'remote':
+			# If copying to the local zone from the remote zone, use the remote home collection of the remote user,
+			# which would be the home collection of the user in the local zone representing the user from the remote
+			# zone.
+			copy_to_collection = self.remote_user.remote_home_collection(self.local_user.zone_name)
+		elif copy_to == 'remote' and copy_from == 'local':
+			# If copying to the remote zone from the local zone, use the remote home collection of the local user,
+			# which would be the home collection of the user in the remote zone representing the user from the local
+			# zone.
+			copy_to_collection = self.local_user.remote_home_collection(self.remote_user.zone_name)
+		else:
+			# If copying to the remote zone from the remote zone or copying to the local zone from the local zone,
+			# just use the session collection of the user session.
+			copy_to_collection = user_session.session_collection
+
+		copy_to_object_name = 'copy_to_object'
+		copy_from_object_name = 'copy_from_object'
+		copy_to_logical_path = os.path.join(copy_to_collection, copy_to_object_name)
+		copy_from_logical_path = os.path.join(copy_from_collection, copy_from_object_name)
+
+		original_content = 'the thing that bothers me is'
+		new_content = 'someone keeps moving my chair'
+
+		try:
+			# Make an object and replicate to some target resource...
+			user_session.assert_icommand(['istream', 'write', copy_to_logical_path], 'STDOUT', input=original_content)
+			user_session.assert_icommand(['irepl', '-R', target_resource, copy_to_logical_path])
+
+			self.assertTrue(lib.replica_exists_on_resource(user_session, copy_to_logical_path, user_session.default_resource))
+			self.assertTrue(lib.replica_exists_on_resource(user_session, copy_to_logical_path, target_resource))
+			self.assertFalse(lib.replica_exists_on_resource(user_session, copy_to_logical_path, other_resource))
+
+			# Make a new object with different content and copy over the first object (the copy should succeed).
+			user_session.assert_icommand(['istream', 'write', copy_from_logical_path], 'STDOUT', input=new_content)
+			user_session.assert_icommand(['icp', '-f', '-R', target_resource, copy_from_logical_path, copy_to_logical_path])
+
+			# Assert that the copy occurred and the existing replicas have been updated appropriately.
+			self.assertTrue(lib.replica_exists_on_resource(user_session, copy_to_logical_path, user_session.default_resource))
+			self.assertTrue(lib.replica_exists_on_resource(user_session, copy_to_logical_path, target_resource))
+			self.assertFalse(lib.replica_exists_on_resource(user_session, copy_to_logical_path, other_resource))
+
+			self.assertEqual(
+				str(0), lib.get_replica_status_for_resource(user_session, copy_to_logical_path, user_session.default_resource))
+			self.assertEqual(str(1), lib.get_replica_status_for_resource(user_session, copy_to_logical_path, target_resource))
+
+			self.assertEqual(
+				original_content,
+				user_session.assert_icommand(
+					['istream', '-R', user_session.default_resource, 'read', copy_to_logical_path], 'STDOUT')[1].strip())
+
+			self.assertEqual(
+				new_content,
+				user_session.assert_icommand(
+					['istream', '-R', target_resource, 'read', copy_to_logical_path], 'STDOUT')[1].strip())
+
+		finally:
+			print(user_session.run_icommand(['ils', '-lr', copy_to_collection])[0].strip())
+			print(user_session.run_icommand(['ils', '-lr', copy_from_collection])[0].strip())
+			user_session.assert_icommand(['irm', '-f', copy_to_logical_path])
+			user_session.assert_icommand(['irm', '-f', copy_from_logical_path])
+
+	def test_to_remote_from_remote__issue_6497(self):
+		self.successfully_overwrite_replica_on_target_resource_test_impl(copy_to='remote', copy_from='remote')
+
+	def test_to_remote_from_local__issue_6497(self):
+		self.successfully_overwrite_replica_on_target_resource_test_impl(copy_to='remote', copy_from='local')
+
+	def test_to_local_from_remote__issue_6497(self):
+		self.successfully_overwrite_replica_on_target_resource_test_impl(copy_to='local', copy_from='remote')
+
+	def test_to_local_from_local__issue_6497(self):
+		self.successfully_overwrite_replica_on_target_resource_test_impl(copy_to='local', copy_from='local')
