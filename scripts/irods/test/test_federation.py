@@ -1955,30 +1955,12 @@ class test_icp_overwrite_with_target_resource(unittest.TestCase):
 			test.settings.FEDERATION.REMOTE_HOST,
 			test.settings.FEDERATION.REMOTE_ZONE)
 
-		# Create a regular user local to the remote zone in the remote zone and create a session for it.
-		remote_user_name = 'smeagol'
-		remote_user_password = 'spass'
-		self.remote_admin.assert_icommand(['iadmin', 'mkuser', remote_user_name, 'rodsuser'])
-		self.remote_admin.assert_icommand(['iadmin', 'moduser', remote_user_name, 'password', remote_user_password])
-		self.remote_user = session.IrodsSession(
-			lib.make_environment_dict(
-				remote_user_name,
-				test.settings.FEDERATION.REMOTE_HOST,
-				test.settings.FEDERATION.REMOTE_ZONE,
-				use_ssl=test.settings.USE_SSL
-			),
-			remote_user_password,
-			manage_irods_data=True)
-
 		# Create a user for testing in the local zone and a local user to represent the user in the remote zone created
 		# above.
 		local_user_name = 'qwerty'
 		local_user_password = 'qpass'
 		self.local_user = session.mkuser_and_return_session(
 			'rodsuser', local_user_name, local_user_password, lib.get_hostname())
-		self.remote_user_local_name = '#'.join([self.remote_user.username, self.remote_user.zone_name])
-		with session.make_session_for_existing_admin() as admin_session:
-			admin_session.assert_icommand(['iadmin', 'mkuser', self.remote_user_local_name, 'rodsuser'])
 
 		# Create a user in the remote zone for use with the local zone's user. Don't give the user a password.
 		self.local_user_remote_name = '#'.join([self.local_user.username, self.local_user.zone_name])
@@ -2001,9 +1983,6 @@ class test_icp_overwrite_with_target_resource(unittest.TestCase):
 	@classmethod
 	def tearDownClass(self):
 		# Clean up remote users, sessions, and resources.
-		remote_user_name = self.remote_user.username
-		self.remote_user.__exit__()
-		self.remote_admin.assert_icommand(['iadmin', 'rmuser', remote_user_name])
 		self.remote_admin.assert_icommand(['iadmin', 'rmuser', self.local_user_remote_name])
 		lib.remove_resource(self.remote_admin, self.remote_target_resource)
 		lib.remove_resource(self.remote_admin, self.remote_other_resource)
@@ -2013,7 +1992,6 @@ class test_icp_overwrite_with_target_resource(unittest.TestCase):
 		self.local_user.__exit__()
 		with session.make_session_for_existing_admin() as admin_session:
 			admin_session.assert_icommand(['iadmin', 'rmuser', self.local_user.username])
-			admin_session.assert_icommand(['iadmin', 'rmuser', self.remote_user_local_name])
 			lib.remove_resource(admin_session, self.local_target_resource)
 			lib.remove_resource(admin_session, self.local_other_resource)
 
@@ -2026,30 +2004,21 @@ class test_icp_overwrite_with_target_resource(unittest.TestCase):
 		copy_from - The zone from which a data object will be copied. Either "local" or "remote".
 		"""
 		# Use the session collection for the user in the appropriate "from" zone.
-		user_session = self.local_user if copy_from == 'local' else self.remote_user
-		copy_from_collection = user_session.session_collection
+		user_session = self.local_user
+
+		if copy_from == 'local':
+			copy_from_collection = user_session.home_collection
+		else:
+			copy_from_collection = user_session.remote_home_collection(test.settings.FEDERATION.REMOTE_ZONE)
 
 		if copy_to == 'local':
+			copy_to_collection = user_session.home_collection
 			target_resource = self.local_target_resource
 			other_resource = self.local_other_resource
 		else:
+			copy_to_collection = user_session.remote_home_collection(test.settings.FEDERATION.REMOTE_ZONE)
 			target_resource = self.remote_target_resource
 			other_resource = self.remote_other_resource
-
-		if copy_to == 'local' and copy_from == 'remote':
-			# If copying to the local zone from the remote zone, use the remote home collection of the remote user,
-			# which would be the home collection of the user in the local zone representing the user from the remote
-			# zone.
-			copy_to_collection = self.remote_user.remote_home_collection(self.local_user.zone_name)
-		elif copy_to == 'remote' and copy_from == 'local':
-			# If copying to the remote zone from the local zone, use the remote home collection of the local user,
-			# which would be the home collection of the user in the remote zone representing the user from the local
-			# zone.
-			copy_to_collection = self.local_user.remote_home_collection(self.remote_user.zone_name)
-		else:
-			# If copying to the remote zone from the remote zone or copying to the local zone from the local zone,
-			# just use the session collection of the user session.
-			copy_to_collection = user_session.session_collection
 
 		copy_to_object_name = 'copy_to_object'
 		copy_from_object_name = 'copy_from_object'
