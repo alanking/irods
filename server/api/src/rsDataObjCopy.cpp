@@ -244,14 +244,30 @@ namespace
         }
 
         try {
-            const auto hier =
-                irods::get_resource_hierarchy_for_data_object_overwrite(*rsComm, *destDataObjInp, DEST_RESC_HIER_STR_KW);
-            auto cond_input = irods::experimental::make_key_value_proxy(destDataObjInp->condInput);
-            if (!cond_input.contains(DEST_RESC_HIER_STR_KW)) {
-                // Populate RESC_HIER_STR_KW for the destDataObjInp because the open API is looking for this keyword
-                // even though DEST_RESC_HIER_STR_KW is used by the copy API to indicate the resolved resource
-                // hierarchy of the destination object.
-                cond_input[RESC_HIER_STR_KW] = hier;
+            // Construct a file object first so that there's only one query for the data object information as it relates
+            // to resolving the hierarchy.
+            dataObjInfo_t* dataObjInfoHead{};
+            irods::at_scope_exit free_data_object_info{[&dataObjInfoHead] { freeAllDataObjInfo(dataObjInfoHead); }};
+
+            irods::file_object_ptr file_obj(new irods::file_object());
+            file_obj->logical_path(destDataObjInp->objPath);
+            irods::error fac_err = irods::file_object_factory(rsComm, destDataObjInp, file_obj, &dataObjInfoHead);
+
+            irods::throw_if_force_overwrite_to_new_resource(*destDataObjInp, file_obj);
+            //const auto hier =
+                //irods::get_resource_hierarchy_for_data_object_overwrite(*rsComm, *destDataObjInp, DEST_RESC_HIER_STR_KW);
+            //auto cond_input = irods::experimental::make_key_value_proxy(destDataObjInp->condInput);
+            //if (!cond_input.contains(DEST_RESC_HIER_STR_KW)) {
+                //// Populate RESC_HIER_STR_KW for the destDataObjInp because the open API is looking for this keyword
+                //// even though DEST_RESC_HIER_STR_KW is used by the copy API to indicate the resolved resource
+                //// hierarchy of the destination object.
+                //cond_input[RESC_HIER_STR_KW] = hier;
+            //}
+            if (fs::server::exists(*rsComm, destDataObjInp->objPath) && !getValByKey(&destDataObjInp->condInput, FORCE_FLAG_KW)) {
+                THROW(OVERWRITE_WITHOUT_FORCE_FLAG,
+                      fmt::format("Object-level overwrite of [{}] requires use of the force flag keyword [{}]",
+                                  destDataObjInp->objPath,
+                                  FORCE_FLAG_KW));
             }
         }
         catch (const irods::experimental::filesystem::filesystem_error& e) {

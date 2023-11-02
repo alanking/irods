@@ -3,6 +3,8 @@
 
 /// \file
 
+#include "irods/irods_file_object.hpp"
+
 #include <sys/types.h>
 
 #include <string_view>
@@ -80,14 +82,37 @@ namespace irods
     ///  - If the data object exists, any targeted resource using e.g. DEST_RESC_NAME_KW must have a replica.
     ///  - The force flag must be present in the input as explicit signal to overwrite the data object.
     ///
-    /// \throws irods::exception If any of the data object overwrite rules listed above is violated.
+    /// \param[in] _comm Server communication object.
+    /// \param[in] _inp Input structure for the data object operation.
+    /// \param[in] _hier_keyword Which hierarchy keyword to check for (DEST_RESC_HIER_STR_KW or RESC_HIER_STR_KW).
     ///
     /// \return The fully resolved resource hierarchy for the given \p DataObjInp.
+    ///
+    /// \throws irods::exception If any of the data object overwrite rules listed above is violated.
     ///
     /// \since 4.3.2
     auto get_resource_hierarchy_for_data_object_overwrite(RsComm& _comm,
                                                           DataObjInp& _inp,
                                                           std::string_view _hier_keyword) -> std::string;
+
+    /// \brief Throw if force overwrite of data object to resource with no replica is indicated by the \p DataObjInp.
+    ///
+    /// The DEST_RESC_NAME_KW is checked as the target/destination resource.
+    ///
+    /// \param[in] _inp Input structure for the data object operation.
+    /// \param[in] _file_obj Object containing data object information.
+    ///
+    /// \throws irods::exception If all of the following conditions are met: \parblock 
+    ///   - The data object exists.
+    ///   - \p _inp has FORCE_FLAG_KW in its \p DataObjInp::condInput.
+    ///   - No hierarchy under the resource indicated by DEST_RESC_NAME_KW has a replica of the data object.
+    ///
+    /// If any of these conditions is not met, this function does nothing.
+    /// \endparblock
+    ///
+    /// \since 4.3.2
+    auto throw_if_force_overwrite_to_new_resource(const DataObjInp& _inp, const irods::file_object_ptr _file_obj)
+        -> void;
 } // namespace irods
 
 #endif // IRODS_SERVER_UTILITIES_HPP

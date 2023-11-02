@@ -22,30 +22,6 @@
 
 namespace
 {
-    auto throw_if_force_overwrite_to_new_resource(const DataObjInp& _inp, const irods::file_object_ptr _file_obj)
-        -> void
-    {
-        const auto cond_input = irods::experimental::make_key_value_proxy(_inp.condInput);
-
-        if (_file_obj->replicas().empty() || !cond_input.contains(FORCE_FLAG_KW) ||
-            !cond_input.contains(DEST_RESC_NAME_KW)) {
-            return;
-        }
-
-        const auto destination_resource = cond_input.at(DEST_RESC_NAME_KW).value();
-
-        const auto hierarchy_with_replica_exists{[&destination_resource, &replicas = _file_obj->replicas()]() {
-            return std::any_of(replicas.cbegin(), replicas.cend(), [&destination_resource](const auto& r) {
-                return irods::hierarchy_parser{r.resc_hier()}.first_resc() == destination_resource;
-            });
-        }()};
-
-        if (!hierarchy_with_replica_exists) {
-            THROW(
-                HIERARCHY_ERROR,
-                fmt::format("cannot force put [{}] to a different resource [{}]", _inp.objPath, destination_resource));
-        }
-    } // throw_if_force_overwrite_to_new_resource
 } // anonymous namespace
 
 namespace irods
@@ -233,5 +209,30 @@ namespace irods
 
         return hier;
     } // get_resource_hierarchy_for_object_level_operation
+
+    auto throw_if_force_overwrite_to_new_resource(const DataObjInp& _inp, const irods::file_object_ptr _file_obj)
+        -> void
+    {
+        const auto cond_input = irods::experimental::make_key_value_proxy(_inp.condInput);
+
+        if (_file_obj->replicas().empty() || !cond_input.contains(FORCE_FLAG_KW) ||
+            !cond_input.contains(DEST_RESC_NAME_KW)) {
+            return;
+        }
+
+        const auto destination_resource = cond_input.at(DEST_RESC_NAME_KW).value();
+
+        const auto hierarchy_with_replica_exists{[&destination_resource, &replicas = _file_obj->replicas()]() {
+            return std::any_of(replicas.cbegin(), replicas.cend(), [&destination_resource](const auto& r) {
+                return irods::hierarchy_parser{r.resc_hier()}.first_resc() == destination_resource;
+            });
+        }()};
+
+        if (!hierarchy_with_replica_exists) {
+            THROW(
+                HIERARCHY_ERROR,
+                fmt::format("cannot force put [{}] to a different resource [{}]", _inp.objPath, destination_resource));
+        }
+    } // throw_if_force_overwrite_to_new_resource
 } // namespace irods
 
