@@ -221,6 +221,28 @@ namespace
 
         dataObjInp_t* srcDataObjInp = &dataObjCopyInp->srcDataObjInp;
         dataObjInp_t* destDataObjInp = &dataObjCopyInp->destDataObjInp;
+
+        if (strcmp(srcDataObjInp->objPath, destDataObjInp->objPath) == 0) {
+            rodsLog(LOG_ERROR,
+                    "%s: same src and dest objPath [%s] not allowed",
+                    __FUNCTION__, srcDataObjInp->objPath );
+            return USER_INPUT_PATH_ERR;
+        }
+
+        specCollCache_t *specCollCache{};
+        resolveLinkedPath(rsComm, srcDataObjInp->objPath, &specCollCache, &srcDataObjInp->condInput);
+        resolveLinkedPath(rsComm, destDataObjInp->objPath, &specCollCache, &destDataObjInp->condInput);
+
+        rodsServerHost_t* rodsServerHost = nullptr;
+        int remoteFlag = connect_to_remote_zone( rsComm, dataObjCopyInp, &rodsServerHost );
+        if (remoteFlag < 0) {
+            return remoteFlag;
+        }
+        else if ( remoteFlag == REMOTE_HOST ) {
+            // It is not possible to reach this case with rodsServerHost being nullptr, so no check is needed.
+            return _rcDataObjCopy(rodsServerHost->conn, dataObjCopyInp, transStat);
+        }
+
         try {
             const auto hier =
                 irods::get_resource_hierarchy_for_data_object_overwrite(*rsComm, *destDataObjInp, DEST_RESC_HIER_STR_KW);
@@ -239,27 +261,6 @@ namespace
         catch (const irods::exception& e) {
             log_api::error("[{}:{}] - [{}]", __FUNCTION__, __LINE__, e.client_display_what());
             return e.code();
-        }
-
-        specCollCache_t *specCollCache{};
-        resolveLinkedPath(rsComm, srcDataObjInp->objPath, &specCollCache, &srcDataObjInp->condInput);
-        resolveLinkedPath(rsComm, destDataObjInp->objPath, &specCollCache, &destDataObjInp->condInput);
-
-        rodsServerHost_t* rodsServerHost = nullptr;
-        int remoteFlag = connect_to_remote_zone( rsComm, dataObjCopyInp, &rodsServerHost );
-        if (remoteFlag < 0) {
-            return remoteFlag;
-        }
-        else if ( remoteFlag == REMOTE_HOST ) {
-            // It is not possible to reach this case with rodsServerHost being nullptr, so no check is needed.
-            return _rcDataObjCopy(rodsServerHost->conn, dataObjCopyInp, transStat);
-        }
-
-        if (strcmp(srcDataObjInp->objPath, destDataObjInp->objPath) == 0) {
-            rodsLog(LOG_ERROR,
-                    "%s: same src and dest objPath [%s] not allowed",
-                    __FUNCTION__, srcDataObjInp->objPath );
-            return USER_INPUT_PATH_ERR;
         }
 
         const int srcL1descInx = open_source_data_obj(rsComm, *srcDataObjInp);
