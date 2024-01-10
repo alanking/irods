@@ -102,21 +102,21 @@ TEST_CASE("truncate_locked_data_object__issue_7104")
 			RcComm& comm2 = static_cast<RcComm&>(conn2);
 
 			DataObjInp truncate_doi{};
-			std::strncpy(doi.objPath, target_object.c_str(), MAX_NAME_LEN);
+			std::strncpy(truncate_doi.objPath, target_object.c_str(), MAX_NAME_LEN);
 
 			SECTION("same size")
 			{
-				doi.dataSize = contents.size();
+				truncate_doi.dataSize = contents.size();
 			}
 
 			SECTION("larger size")
 			{
-				doi.dataSize = contents.size() + 1;
+				truncate_doi.dataSize = contents.size() + 1;
 			}
 
 			SECTION("smaller size")
 			{
-				doi.dataSize = contents.size() - 1;
+				truncate_doi.dataSize = contents.size() - 1;
 			}
 
 			// Attempt to truncate the object using the size specified for each section, and fail.
