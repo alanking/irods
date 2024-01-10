@@ -33,6 +33,118 @@ namespace fs	  = irods::experimental::filesystem;
 namespace replica = irods::experimental::replica;
 // clang-format on
 
+TEST_CASE("basic_truncation_tests")
+{
+	try {
+		load_client_api_plugins();
+
+		const std::string test_resc = "test_resc";
+		const std::string vault_name = "test_resc_vault";
+
+		// Create a new resource
+		{
+			irods::experimental::client_connection conn;
+			RcComm& comm = static_cast<RcComm&>(conn);
+			unit_test_utils::add_ufs_resource(comm, test_resc, vault_name);
+		}
+
+		irods::experimental::client_connection conn;
+		RcComm& comm = static_cast<RcComm&>(conn);
+
+		rodsEnv env;
+		_getRodsEnv(env);
+
+		const auto sandbox = fs::path{env.rodsHome} / "test_rc_data_obj_truncate";
+		if (!fs::client::exists(comm, sandbox)) {
+			REQUIRE(fs::client::create_collection(comm, sandbox));
+		}
+
+		irods::at_scope_exit remove_sandbox{[&sandbox, &test_resc] {
+			irods::experimental::client_connection conn;
+			RcComm& comm = static_cast<RcComm&>(conn);
+
+			REQUIRE(fs::client::remove_all(comm, sandbox, fs::remove_options::no_trash));
+
+			adm::client::remove_resource(comm, test_resc);
+		}};
+
+		const auto target_object = sandbox / "target_object";
+
+		static constexpr auto contents = std::string_view{"content!"};
+
+		// Create a new data object.
+		{
+			irods::experimental::io::client::native_transport tp{conn};
+			irods::experimental::io::odstream{tp, target_object} << contents;
+		}
+
+		// Show that the replica is in a good state.
+		REQUIRE(GOOD_REPLICA == replica::replica_status(comm, target_object, 0));
+		REQUIRE(contents.size() == replica::replica_size(comm, target_object, 0));
+
+		SECTION("single replica")
+		{
+            // Sleep here so that the mtime on the replica we open CAN be different (but we don't expect it to be).
+			const auto original_mtime = replica::last_write_time(comm, target_object, 0);
+            std::this_thread::sleep_for(2s);
+
+			DataObjInp truncate_doi{};
+			std::strncpy(trucate_doi.objPath, target_object.c_str(), MAX_NAME_LEN);
+
+			SECTION("same size")
+			{
+				constexpr auto new_size = contents.size();
+				//constexpr auto new_contents = std::string_view{contents.data(), new_size};
+				trucate_doi.dataSize = new_size;
+
+				// Attempt to truncate the object.
+				CHECK(0 == rcDataObjTruncate(&comm, &truncate_doi));
+
+				// Ensure that the object was updated.
+				CHECK(GOOD_REPLICA == replica::replica_status(comm, target_object, 0));
+				CHECK(new_size == replica::replica_size(comm, target_object, 0));
+				CHECK(original_mtime != replica::last_write_time(comm, target_object, 0));
+			}
+
+			SECTION("larger size")
+			{
+				constexpr auto new_size = contents.size() + 1;
+				//constexpr auto new_contents = std::string_view{contents.data(), new_size};
+				trucate_doi.dataSize = new_size;
+
+				// Attempt to truncate the object.
+				CHECK(0 == rcDataObjTruncate(&comm, &truncate_doi));
+
+				// Ensure that the object was updated.
+				CHECK(GOOD_REPLICA == replica::replica_status(comm, target_object, 0));
+				CHECK(new_size == replica::replica_size(comm, target_object, 0));
+				CHECK(original_mtime != replica::last_write_time(comm, target_object, 0));
+			}
+
+			SECTION("smaller size")
+			{
+				constexpr auto new_size = contents.size() - 1;
+				//constexpr auto new_contents = std::string_view{contents.data(), new_size};
+				trucate_doi.dataSize = new_size;
+
+				// Attempt to truncate the object.
+				CHECK(0 == rcDataObjTruncate(&comm, &truncate_doi));
+
+				// Ensure that the object was updated.
+				CHECK(GOOD_REPLICA == replica::replica_status(comm, target_object, 0));
+				CHECK(new_size == replica::replica_size(comm, target_object, 0));
+				CHECK(original_mtime != replica::last_write_time(comm, target_object, 0));
+			}
+		}
+	}
+	catch (const irods::exception& e) {
+		fmt::print(stderr, "irods::exception occurred: [{}]", e.what());
+	}
+	catch (const std::exception& e) {
+		fmt::print(stderr, "std::exception occurred: [{}]", e.what());
+	}
+} // basic_truncation_tests
+
 TEST_CASE("truncate_locked_data_object__issue_7104")
 {
 	try {
