@@ -132,6 +132,13 @@ namespace irods::experimental {
             /// \since 4.2.9
             key_type key_;
 
+            handle()
+                : kvp_{}
+                , index_{}
+                , key_{}
+            {
+            }
+
             /// \brief Constructs handle for specified key in the specified kvp
             ///
             /// Sets the index of the specified key in the map. If no such key exists and
@@ -227,6 +234,7 @@ namespace irods::experimental {
             iterator()
                 : index_{-1}
                 , kvp_{}
+                , handle_{}
             {
             }
 
@@ -236,9 +244,11 @@ namespace irods::experimental {
             explicit iterator(kvp_type& _kvp)
                 : index_{0}
                 , kvp_{&_kvp}
+                , handle_{kvp_->keyWord[index_], *kvp_}
             {
                 if (!kvp_->keyWord || !kvp_->value) {
-                    throw std::invalid_argument{"cannot construct key_value_proxy::iterator"};
+                    throw std::invalid_argument{
+                        "cannot construct key_value_proxy::iterator with uninitialized KeyValPair"};
                 }
             }
 
@@ -284,17 +294,27 @@ namespace irods::experimental {
             /// \see https://en.cppreference.com/w/cpp/iterator/iterator
             /// \returns handle - See handle class for details
             /// \since 4.2.8
-            auto operator*() -> handle
+            auto operator*() -> handle&
             {
-                return {kvp_->keyWord[index_], *kvp_};
+                return handle_;
             }
 
             /// \see https://en.cppreference.com/w/cpp/iterator/iterator
             /// \returns handle - See handle class for details
             /// \since 4.2.8
-            auto operator*() const -> const handle
+            auto operator*() const -> const handle&
             {
-                return {kvp_->keyWord[index_], *kvp_};
+                return handle_;
+            }
+
+            auto operator->() -> handle*
+            {
+                return &handle_;
+            }
+
+            auto operator->() const -> const handle*
+            {
+                return &handle_;
             }
 
         private:
@@ -305,6 +325,8 @@ namespace irods::experimental {
             /// \brief Pointer to proxy object's underlying kvp_type
             /// \since 4.2.8
             kvp_type* kvp_;
+
+            handle handle_;
         }; // class iterator
 
         /// \brief Constructs proxy using an existing kvp_type

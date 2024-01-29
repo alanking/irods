@@ -568,3 +568,36 @@ TEST_CASE("test_key_value_proxy_iterator_throws_on_invalid_KeyValPair__issue_586
     }(), "cannot construct key_value_proxy::iterator");
 } // test_key_value_proxy_iterator_throws_on_invalid_KeyValPair__issue_5865
 
+TEST_CASE("test_iterator_arrow_operator__issue_7472")
+{
+	// Create a test struct so that we have something to iterate over.
+	auto [p, kvp] = irods::experimental::make_key_value_proxy({{KEY1, VAL1}, {KEY2, VAL2}});
+	
+	SECTION("const")
+	{
+		const auto v = p.find(VAL2);
+		REQUIRE(v != p.cend());
+		REQUIRE((*v).value() == VAL2);
+		REQUIRE(v->value() == VAL2);
+
+		const auto v2 = p.find("nope");
+		REQUIRE(v2 == p.cend());
+		REQUIRE_THROWS(*v);
+		REQUIRE_THROWS(v->value());
+	}
+	
+	SECTION("mutable")
+	{
+		auto v = p.find(VAL2);
+		REQUIRE(v != p.cend());
+		REQUIRE((*v).value() == VAL2);
+		REQUIRE(v->value() == VAL2);
+		*v = VAL1;
+		REQUIRE(v->value() == VAL1);
+
+		auto v2 = p.find("nope");
+		REQUIRE(v2 == p.cend());
+		REQUIRE_THROWS(*v);
+		REQUIRE_THROWS(v->value());
+	}
+} // test_iterator_arrow_operator__issue_7472
