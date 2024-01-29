@@ -750,11 +750,18 @@ namespace
 
             // Verify that replication is allowed
             const auto destination_hierarchy = irods::experimental::key_value_proxy{destination_inp.condInput}.at(RESC_HIER_STR_KW).value();
-            auto maybe_destination_replica = destination_obj->get_replica(destination_hierarchy);
-            if (maybe_destination_replica) {
-                const auto& destination_replica = *maybe_destination_replica;
 
-                if (!irods::replication::is_allowed(_comm, source_replica, destination_replica, log_errors)) {
+            // If the destination replica exists, ensure that it is okay to overwrite it. If it does not exist, the
+            // phymv is allowed to proceed.
+            if (const auto maybe_replica = destination_obj->get_replica(destination_hierarchy); maybe_replica) {
+                const auto& destination_replica = maybe_replica->get();
+
+                // While replication is allowed for a marked-good destination replica, it is not allowed for phymv. This
+                // is because the result is purely destructive and can be achieved by simply trimming the source
+                // replica.
+                if (!irods::replication::is_allowed(_comm, source_replica, destination_replica, log_errors) ||
+                    GOOD_REPLICA == destination_replica.replica_status())
+                {
                     return SYS_NOT_ALLOWED;
                 }
             }

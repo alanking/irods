@@ -46,20 +46,24 @@ namespace irods::replication
             return false;
         }
 
-        if (STALE_REPLICA != _destination_replica.replica_status()) {
-            const std::string msg = fmt::format(
-                "selected destination hierarchy [{}] is not stale; replication is not allowed.",
-                _destination_replica.resc_hier());
-
-            irods::log(LOG_DEBUG, fmt::format("[{}:{}] - [{}]", __FUNCTION__, __LINE__, msg));
-
-            if (log_errors::yes == _log_errors) {
-                addRErrorMsg(&_comm.rError, SYS_NOT_ALLOWED, msg.data());
-            }
-
-            return false;
+        if (STALE_REPLICA == _destination_replica.replica_status()) {
+            return true;
         }
 
-        return true;
+        if (GOOD_REPLICA == _destination_replica.replica_status()) {
+            return true;
+        }
+
+        const std::string msg =
+            fmt::format("selected destination replica on hierarchy [{}] is not at rest; replication is not allowed.",
+                        _destination_replica.resc_hier());
+
+        irods::log(LOG_DEBUG, fmt::format("[{}:{}] - [{}]", __FUNCTION__, __LINE__, msg));
+
+        if (log_errors::yes == _log_errors) {
+            addRErrorMsg(&_comm.rError, SYS_NOT_ALLOWED, msg.data());
+        }
+
+        return false;
     } // replication_is_allowed
 } // namespace irods::replication
