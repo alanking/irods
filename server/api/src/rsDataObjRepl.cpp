@@ -742,13 +742,39 @@ namespace
         }
 
         try {
-            // Get the keyword from the original user input to ensure that the client explicitly requested this
-            // destination resource.
+            // The client can specify a destination resource in two ways: via the DEST_RESC_NAME_KW or by a
+            // DEF_RESC_NAME_KW supplied through the client environment (for iCommands) or via a keyword. 
+            // DEF_RESC_NAME_KW can and will be supplied by the server side if the client did not supply one. We need to
+            // determine whether the client supplied DEF_RESC_NAME_KW and treat that the same as if DEST_RESC_NAME_KW
+            // had been supplied (except for some cases). DEST_RESC_NAME_KW takes precedence. Get the keywords from the
+            // original clent input to ensure that the client explicitly requested this destination resource.
             const auto* destination_resource_input = getValByKey(&_inp.condInput, DEST_RESC_NAME_KW);
+            bool destination_resource_was_specified_explicitly = true;
+            const auto* default_resource_input = getValByKey(&_inp.condInput, DEF_RESC_NAME_KW);
+            if (!destination_resource_input || std::strlen(destination_resource_input) <= 0) {
+                // We now have to separately track whether the destination resource input was from DEST_RESC_NAME_KW or
+                // DEF_RESC_NAME_KW. The destination resource input is treated the same whether indicated by
+                // DEST_RESC_NAME_KW or DEF_RESC_NAME_KW for most cases. Because the DEST_RESC_NAME_KW did not have a
+                // value, we specify that the destination resource was not indicated by DEST_RESC_NAME_KW for cases
+                // where the difference matters.
+                destination_resource_was_specified_explicitly = false;
+                if (default_resource_input && std::strlen(default_resource_input) > 0) {
+                    destination_resource_input = default_resource_input;
+                }
+            }
+
             if (destination_resource_input && std::strlen(destination_resource_input) > 0) {
                 // If the resolved resource hierarchy does not have the requested destination resource in it, this is
-                // considered an error because the user's directive could not be carried out as requested.
-                if (!irods::hierarchy_parser{destination_hierarchy}.resc_in_hier(destination_resource_input)) {
+                // considered an error because the client's directive could not be carried out as requested. This should
+                // only be considered an error when the client actually specified the destination resource via the
+                // DEST_RESC_NAME_KW. If the client did not specify the destination resource but did supply a default
+                // resource, the client did not explicitly instruct the API to target a particular resource. Default
+                // resources are not directives like specifying a destination resource. That being said, if a default
+                // resource is supplied and the client directs the API to use a particular resource or replica as a
+                // source which would result in the source and destination being the same, this is considered an
+                // unserviceable directive and is handled by the two cases following this one.
+                if (destination_resource_was_specified_explicitly &&
+                    !irods::hierarchy_parser{destination_hierarchy}.resc_in_hier(destination_resource_input)) {
                     THROW(SYS_REPLICA_INACCESSIBLE,
                           fmt::format("hierarchy descending from specified destination resource name [{}] "
                                       "does not have a replica or the replica is inaccessible at this time; "
