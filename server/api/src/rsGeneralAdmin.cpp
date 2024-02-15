@@ -174,6 +174,23 @@ namespace
             THROW(err, msg);
         }
     } // throw_if_password_is_being_set_on_a_group
+
+    auto resource_parent_context_is_valid(const std::string& _context) -> bool
+    {
+        constexpr auto invalid_characters = std::to_array({';', '{', '}'});
+
+        return std::none_of(
+            invalid_characters.cbegin(), invalid_characters.cend(), [&_context](const char _invalid_character) {
+                const auto resource_parent_context_contains_invalid_character =
+                    _context.find(_invalid_character) != std::string::npos;
+                if (resource_parent_context_contains_invalid_character) {
+                    log_api::error("Invalid character '{}' not allowed in parent_context string [{}]",
+                                   _invalid_character,
+                                   _context);
+                }
+                return resource_parent_context_contains_invalid_character;
+            });
+    } // resource_parent_context_is_valid
 } // anonymous namespace
 
 int _check_rebalance_timestamp_avu_on_resource(
@@ -481,23 +498,7 @@ int _addChildToResource(generalAdminInp_t* _generalAdminInp, rsComm_t* _rsComm)
     std::string rescChild( _generalAdminInp->arg3 );
     std::string rescContext( _generalAdminInp->arg4 );
 
-    if (rescContext.find(';') != std::string::npos) {
-        log_api::error(
-            "_addChildToResource: semicolon ';' not allowed in child context string [{}]", rescContext.c_str());
-        return SYS_INVALID_INPUT_PARAM;
-    }
-
-    if (rescContext.find('{') != std::string::npos) {
-        log_api::error(
-            "_addChildToResource: open curly bracket '{{' not allowed in child context string [{}]",
-            rescContext.c_str());
-        return SYS_INVALID_INPUT_PARAM;
-    }
-
-    if (rescContext.find('}') != std::string::npos) {
-        log_api::error(
-            "_addChildToResource: close curly bracket '}}' not allowed in child context string [{}]",
-            rescContext.c_str());
+    if (!resource_parent_context_is_valid(rescContext)) {
         return SYS_INVALID_INPUT_PARAM;
     }
 
@@ -1055,6 +1056,15 @@ _rsGeneralAdmin( rsComm_t *rsComm, generalAdminInp_t *generalAdminInp ) {
 
                 new_resc_name = boost::algorithm::trim_copy(std::string{generalAdminInp->arg4});
                 args[2] = new_resc_name.c_str();
+            }
+            else if (std::strcmp(generalAdminInp->arg3, "parent_context") == 0) {
+                if (!generalAdminInp->arg4) {
+                    return USER__NULL_INPUT_ERR;
+                }
+                if (!resource_parent_context_is_valid(generalAdminInp->arg4)) {
+                    return SYS_INVALID_INPUT_PARAM;
+                }
+                args[2] = generalAdminInp->arg4;
             }
             else {
                 args[2] = generalAdminInp->arg4; // new value
