@@ -2748,22 +2748,19 @@ class test_resource_parent_context(unittest.TestCase):
 	def setUpClass(cls):
 	"""Set up the test class."""
 		cls.admin = session.mkuser_and_return_session('rodsadmin', 'otherrods', 'rods', lib.get_hostname())
-		lib.create_ufs_resource(cls.admin, self.resource_name)
-		lib.create_passthru_resource(cls.admin, self.parent_resource_name)
 
 	@classmethod
 	def tearDownClass(cls):
 	"""Tear down the test class."""
-		lib.remove_resource(cls.admin, self.resource_name)
-		lib.remove_resource(cls.admin, self.parent_resource_name)
 		with session.make_session_for_existing_admin() as admin_session:
 			cls.admin.__exit__()
 			admin_session.assert_icommand(['iadmin', 'rmuser', cls.admin.username])
 
 	def setUp(self):
-		# Set the parent_context to some known, good value.
-		self.admin.assert_icommand(
-			['iadmin', 'modresc', self.resource_name, 'parent_context', self.default_parent_context])
+		lib.create_ufs_resource(self.admin, self.resource_name)
+
+	def tearDown(self):
+		lib.remove_resource(self.admin, self.resource_name)
 
 	def get_resource_parent_context(self, resource_name):
     	return self.admin.run_icommand(['iquest', '%s',
@@ -2772,19 +2769,22 @@ class test_resource_parent_context(unittest.TestCase):
 
 	def test_modresc_update_good_value(self):
 		"""Update the parent_context with another good value via modresc."""
-		archive_context = 'archive'
-		self.admin.assert_icommand(['iadmin', 'modresc', self.resource_name, 'parent_context', archive_context])
-		self.assertEqual(archive_context, self.get_resource_parent_context(self.resource_name))
+		parent_context_str = 'archive'
+		self.admin.assert_icommand(['iadmin', 'modresc', self.resource_name, 'parent_context', parent_context_str])
+		self.assertEqual(parent_context_str, self.get_resource_parent_context(self.resource_name))
 
 	def test_addchildtoresc_update_good_value(self):
 		"""Update the parent_context with another good value via addchildtoresc."""
+		parent_context_str = 'archive'
+
 		try:
-			archive_context = 'archive'
+			lib.create_passthru_resource(cls.admin, self.parent_resource_name)
 			self.admin.assert_icommand(['iadmin', 'addchildtoresc', self.parent_resource_name, self.resource_name])
-			self.assertEqual(archive_context, self.get_resource_parent_context(self.resource_name))
+			self.assertEqual(parent_context_str, self.get_resource_parent_context(self.resource_name))
 
 		finally:
-			self.admin.assert_icommand(['iadmin', 'rmchildfromresc', self.parent_resource_name, self.resource_name])
+			self.admin.run_icommand(['iadmin', 'rmchildfromresc', self.parent_resource_name, self.resource_name])
+			lib.remove_resource(cls.admin, self.parent_resource_name)
 
 	def test_modresc_semicolon(self):
 		bad_context = 'semi;colon'
