@@ -412,7 +412,7 @@ class Test_Itrim(session.make_sessions_mixin([('otherrods', 'rods')], []), unitt
             lib.remove_resource(self.admin, resc2)
 
 
-class test_itrim_magic_with_four_replicas__issue_7468(unittest.TestCase):
+class test_itrim_target_replica_selection_decision_making(unittest.TestCase):
 
 	hostnames = [test.settings.ICAT_HOSTNAME, test.settings.HOSTNAME_1, test.settings.HOSTNAME_2, test.settings.HOSTNAME_3]
 	resource_names = [f'ufs{i}' for i in range(len(hostnames))]
@@ -445,7 +445,7 @@ class test_itrim_magic_with_four_replicas__issue_7468(unittest.TestCase):
 	def setUp(cls):
 		# Create a data object and replicate to each resource.
 		contents = 'trim-ly mcskimbly'
-		cls.data_name = 'test_itrim_magic_with_four_replicas.txt'
+		cls.data_name = 'test_itrim_target_replica_selection_decision_making.txt'
 		cls.logical_path = '/'.join([cls.user.session_collection, cls.data_name])
 		for i, resource_name in enumerate(cls.resource_names):
 			if i == 0:

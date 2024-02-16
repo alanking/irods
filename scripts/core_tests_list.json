@@ -92,7 +92,7 @@
     "test_itouch",
     "test_itree",
     "test_itrim.Test_Itrim",
-    "test_itrim.test_itrim_magic_with_four_replicas__issue_7468",
+    "test_itrim.test_itrim_target_replica_selection_decision_making",
     "test_iunreg",
     "test_iuserinfo",
     "test_izonereport",
