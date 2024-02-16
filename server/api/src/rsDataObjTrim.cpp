@@ -68,7 +68,7 @@ namespace
         }
 
         try {
-            const auto age_in_minutes = std::stol(age_kw);
+            const auto age_in_minutes = std::stoll(age_kw);
             if (age_in_minutes < 0) {
                 THROW(SYS_INVALID_INPUT_PARAM,
                       fmt::format("{}: {} value [{}] must be a non-negative value.", __func__, AGE_KW, age_kw));
@@ -172,7 +172,7 @@ namespace
 
         const auto* age_kw = getValByKey(&_inp.condInput, AGE_KW);
         const auto expiration_time = get_time_of_expiration(age_kw);
-        const auto expired = [&expiration_time](const irods::physical_object& _replica) {
+        const auto expired = [expiration_time](const irods::physical_object& _replica) {
             // Any replica with a last-modified time that is EARLIER than the expiration time (that is, less than) is
             // considered expired.
             return std::cmp_less(std::stoul(_replica.modify_ts()), expiration_time);
@@ -183,7 +183,7 @@ namespace
             try {
                 const auto num = std::stoi(repl_num);
 
-                const auto repl = std::find_if(replica_list.begin(), replica_list.end(), [&num](const auto& repl) {
+                const auto repl = std::find_if(replica_list.begin(), replica_list.end(), [num](const auto& repl) {
                     return num == repl.repl_num();
                 });
 
@@ -232,7 +232,7 @@ namespace
         }
 
         const char* resc_name = getValByKey(&_inp.condInput, RESC_NAME_KW);
-        const auto matches_target_resource = [&resc_name](const irods::physical_object& _replica) {
+        const auto matches_target_resource = [resc_name](const irods::physical_object& _replica) {
             return resc_name && irods::hierarchy_parser{_replica.resc_hier()}.first_resc() == resc_name;
         };
 
