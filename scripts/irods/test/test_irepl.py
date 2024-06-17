@@ -1880,7 +1880,7 @@ class test_irepl_replication_hierarchy(session.make_sessions_mixin([('otherrods'
            #{'start':{'a':'X', 'b':'X', 'c':'X', 'f':'X'}, 'end':{'a':'X', 'b':'X', 'c':'X', 'f':'X'}, 'output':{'out':None, 'err':None, 'rc':None}}  # dXXXfX
 
 
-class test_all_permission_levels__issue_7444_7465(unittest.TestCase):
+class test_all_permission_levels__issue_7444_7465_7816(unittest.TestCase):
     @classmethod
     def setUpClass(self):
         self.user0 = session.mkuser_and_return_session('rodsuser', 'smeagol', 'spass', lib.get_hostname())
@@ -1907,7 +1907,7 @@ class test_all_permission_levels__issue_7444_7465(unittest.TestCase):
             lib.remove_resource(admin_session, self.target_resource)
             lib.remove_resource(admin_session, self.other_resource)
 
-    def test_permissions_that_do_not_allow_user_to_see_object_results_in_no_replication_and_an_error(self):
+    def permissions_that_do_not_allow_seeing_object_results_in_no_replication_and_an_error_impl(self, user_or_group):
         logical_path = os.path.join(self.user0.session_collection, 'this_object_is_invisible')
         permissions = [None, 'null', 'read_metadata']
 
@@ -1920,7 +1920,7 @@ class test_all_permission_levels__issue_7444_7465(unittest.TestCase):
                     self.assertEqual(str(1), lib.get_replica_status(self.user0, os.path.basename(logical_path), 0))
 
                     if permission is not None:
-                        self.user0.assert_icommand(['ichmod', permission, self.user1.username, logical_path])
+                        self.user0.assert_icommand(['ichmod', permission, user_or_group, logical_path])
 
                     # Try to replicate the data object and fail because user1 cannot even see the data object.
                     self.user1.assert_icommand(
@@ -1959,7 +1959,30 @@ class test_all_permission_levels__issue_7444_7465(unittest.TestCase):
                             ])
                     self.user0.assert_icommand(['irm', '-f', logical_path])
 
-    def test_insufficient_permissions_results_in_no_replication_and_an_error(self):
+    def test_permissions_that_do_not_allow_user_to_see_object_results_in_no_replication_and_an_error(self):
+        user = self.user1.username
+        self.permissions_that_do_not_allow_seeing_object_results_in_no_replication_and_an_error_impl(user)
+
+    def test_permissions_that_do_not_allow_group_to_see_object_results_in_no_replication_and_an_error(self):
+        user = self.user1.username
+        group = 'testgroup'
+
+        try:
+            # Create a test group and add the test user to the group. The test group will have permissions on the data
+            # object while the user itself has none.
+            with session.make_session_for_existing_admin() as admin_session:
+                admin_session.assert_icommand(['iadmin', 'mkgroup', group])
+                admin_session.assert_icommand(['iadmin', 'atg', group, user])
+
+            self.permissions_that_do_not_allow_seeing_object_results_in_no_replication_and_an_error_impl(group)
+
+        finally:
+            # Clean up the test group.
+            with session.make_session_for_existing_admin() as admin_session:
+                admin_session.run_icommand(['iadmin', 'rfg', group, user])
+                admin_session.run_icommand(['iadmin', 'rmgroup', group])
+
+    def insufficient_permissions_results_in_no_replication_and_an_error_impl(self, user_or_group):
         logical_path = os.path.join(self.user0.session_collection, 'this_object_will_not_be_replicated')
         permissions = ['read_object', 'create_metadata', 'modify_metadata', 'delete_metadata', 'create_object']
 
@@ -1971,7 +1994,7 @@ class test_all_permission_levels__issue_7444_7465(unittest.TestCase):
                     self.assertTrue(lib.replica_exists_on_resource(self.user0, logical_path, self.target_resource))
                     self.assertEqual(str(1), lib.get_replica_status(self.user0, os.path.basename(logical_path), 0))
 
-                    self.user0.assert_icommand(['ichmod', permission, self.user1.username, logical_path])
+                    self.user0.assert_icommand(['ichmod', permission, user_or_group, logical_path])
 
                     # Try to replicate the data object and ensure that it fails with an error.
                     self.user1.assert_icommand(
@@ -2010,7 +2033,30 @@ class test_all_permission_levels__issue_7444_7465(unittest.TestCase):
                             ])
                     self.user0.assert_icommand(['irm', '-f', logical_path])
 
-    def test_sufficient_permissions_results_in_replication_and_no_error(self):
+    def test_insufficient_permissions_for_user_results_in_no_replication_and_an_error(self):
+        user = self.user1.username
+        self.insufficient_permissions_results_in_no_replication_and_an_error_impl(user)
+
+    def test_insufficient_permissions_for_group_results_in_no_replication_and_an_error(self):
+        user = self.user1.username
+        group = 'testgroup'
+
+        try:
+            # Create a test group and add the test user to the group. The test group will have permissions on the data
+            # object while the user itself has none.
+            with session.make_session_for_existing_admin() as admin_session:
+                admin_session.assert_icommand(['iadmin', 'mkgroup', group])
+                admin_session.assert_icommand(['iadmin', 'atg', group, user])
+
+            self.insufficient_permissions_results_in_no_replication_and_an_error_impl(group)
+
+        finally:
+            # Clean up the test group.
+            with session.make_session_for_existing_admin() as admin_session:
+                admin_session.run_icommand(['iadmin', 'rfg', group, user])
+                admin_session.run_icommand(['iadmin', 'rmgroup', group])
+
+    def sufficient_permissions_results_in_replication_and_no_error_impl(self, user_or_group):
         logical_path = os.path.join(self.user0.session_collection, 'this_object_will_be_replicated')
         permissions = ['modify_object', 'delete_object', 'own']
 
@@ -2022,7 +2068,7 @@ class test_all_permission_levels__issue_7444_7465(unittest.TestCase):
                     self.assertTrue(lib.replica_exists_on_resource(self.user0, logical_path, self.target_resource))
                     self.assertEqual(str(1), lib.get_replica_status(self.user0, os.path.basename(logical_path), 0))
 
-                    self.user0.assert_icommand(['ichmod', permission, self.user1.username, logical_path])
+                    self.user0.assert_icommand(['ichmod', permission, user_or_group, logical_path])
 
                     # Try to replicate the data object and ensure that it completes successfully.
                     self.user1.assert_icommand(['irepl', '-R', self.other_resource, logical_path])
@@ -2057,3 +2103,26 @@ class test_all_permission_levels__issue_7444_7465(unittest.TestCase):
                                 'DATA_REPL_STATUS', str(0)
                             ])
                     self.user0.assert_icommand(['irm', '-f', logical_path])
+
+    def test_sufficient_permissions_for_user_results_in_replication_and_no_error(self):
+        user = self.user1.username
+        self.sufficient_permissions_results_in_replication_and_no_error_impl(user)
+
+    def test_sufficient_permissions_for_group_results_in_replication_and_no_error(self):
+        user = self.user1.username
+        group = 'testgroup'
+
+        try:
+            # Create a test group and add the test user to the group. The test group will have permissions on the data
+            # object while the user itself has none.
+            with session.make_session_for_existing_admin() as admin_session:
+                admin_session.assert_icommand(['iadmin', 'mkgroup', group])
+                admin_session.assert_icommand(['iadmin', 'atg', group, user])
+
+            self.sufficient_permissions_results_in_replication_and_no_error_impl(group)
+
+        finally:
+            # Clean up the test group.
+            with session.make_session_for_existing_admin() as admin_session:
+                admin_session.run_icommand(['iadmin', 'rfg', group, user])
+                admin_session.run_icommand(['iadmin', 'rmgroup', group])
