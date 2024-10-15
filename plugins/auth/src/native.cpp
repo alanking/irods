@@ -49,10 +49,8 @@ namespace irods
             add_operation(AUTH_CLIENT_AUTH_REQUEST,  OPERATION(rcComm_t, native_auth_client_request));
             add_operation(AUTH_CLIENT_AUTH_RESPONSE, OPERATION(rcComm_t, native_auth_client_response));
 #ifdef RODS_SERVER
-            add_operation(AUTH_AGENT_START,          OPERATION(rsComm_t, native_auth_agent_start));
             add_operation(AUTH_AGENT_AUTH_REQUEST,   OPERATION(rsComm_t, native_auth_agent_request));
             add_operation(AUTH_AGENT_AUTH_RESPONSE,  OPERATION(rsComm_t, native_auth_agent_response));
-            add_operation(AUTH_AGENT_AUTH_VERIFY,    OPERATION(rsComm_t, native_auth_agent_verify));
 #endif
         } // ctor
 
@@ -66,6 +64,17 @@ namespace irods
 
             return resp;
         } // auth_client_start
+
+        json native_auth_client_request(rcComm_t& comm, const json& req)
+        {
+            json svr_req{req};
+            svr_req[irods_auth::next_operation] = AUTH_AGENT_AUTH_REQUEST;
+            auto resp = irods_auth::request(comm, svr_req);
+
+            resp[irods_auth::next_operation] = AUTH_ESTABLISH_CONTEXT;
+
+            return resp;
+        } // native_auth_client_request
 
         json native_auth_establish_context(rcComm_t& _comm, const json& req)
         {
@@ -160,17 +169,6 @@ namespace irods
 
             return resp;
         } // native_auth_establish_context
-
-        json native_auth_client_request(rcComm_t& comm, const json& req)
-        {
-            json svr_req{req};
-            svr_req[irods_auth::next_operation] = AUTH_AGENT_AUTH_REQUEST;
-            auto resp = irods_auth::request(comm, svr_req);
-
-            resp[irods_auth::next_operation] = AUTH_ESTABLISH_CONTEXT;
-
-            return resp;
-        } // native_auth_client_request
 
         json native_auth_client_response(rcComm_t& comm, const json& req)
         {
@@ -405,22 +403,6 @@ namespace irods
 
             return resp;
         } // native_auth_agent_response
-
-        // =-=-=-=-=-=-=-
-        // stub for ops that the native plug does
-        // not need to support
-        json native_auth_agent_verify(rsComm_t&, const json&)
-        {
-            return {};
-        } // native_auth_agent_verify
-
-        // =-=-=-=-=-=-=-
-        // stub for ops that the native plug does
-        // not need to support
-        json native_auth_agent_start(rsComm_t&, const json&)
-        {
-            return {};
-        } // native_auth_agent_start
 #endif
     }; // class native_authentication
 } // namespace irods
