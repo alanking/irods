@@ -428,11 +428,12 @@ def setup_database_values(irods_config, cursor=None, default_resource_directory=
     scrambled_password = password_obfuscation.scramble(irods_config.admin_password,
             key=irods_config.server_config.get('environment_variables', {}).get('IRODS_DATABASE_USER_PASSWORD_SALT', None))
     execute_sql_statement(cursor,
-            "insert into R_USER_PASSWORD values (?,?,'9999-12-31-23.59.00',?,?);",
+            "insert into R_USER_PASSWORD values (?,?,'9999-12-31-23.59.00',?,?,?);",
             admin_user_id,
             scrambled_password,
             timestamp,
             timestamp,
+            "", # Use empty password salt for now...
             log_params=False)
 
     #collections
