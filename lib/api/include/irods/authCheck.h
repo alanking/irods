@@ -3,10 +3,13 @@
 
 #include "irods/rcConnect.h"
 
+struct KeyValPair;
+
 typedef struct {
     char *challenge;
     char *response;
     char *username;
+    struct KeyValPair cond_input;
 } authCheckInp_t;
 
 typedef struct {
@@ -15,7 +18,7 @@ typedef struct {
     char *serverResponse;
 } authCheckOut_t;
 
-#define authCheckInp_PI "str *challenge; str *response; str *username;"
+#define authCheckInp_PI "str *challenge; str *response; str *username; struct KeyValPair_PI;"
 #define authCheckOut_PI "int privLevel; int clientPrivLevel; str *serverResponse;"
 
 

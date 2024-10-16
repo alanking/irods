@@ -4895,3 +4895,40 @@ auto chl_execute_genquery2_sql(RsComm& _comm, const char* _sql, const std::vecto
     // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     return ret.code();
 } // chl_execute_genquery2_sql
+
+auto chl_authenticate_client(RsComm* _comm,
+                             const char* _challenge,
+                             const char* _response,
+                             const char* _user_name,
+                             int* _user_priv_level,
+                             int* _client_priv_level) -> int
+{
+    irods::database_object_ptr db_obj_ptr;
+    if (const auto ret = irods::database_factory(database_plugin_type, db_obj_ptr); !ret.ok()) {
+        irods::log(PASS(ret));
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+        return ret.code();
+    }
+
+    irods::plugin_ptr db_plug_ptr;
+    if (const auto ret = db_obj_ptr->resolve(irods::DATABASE_INTERFACE, db_plug_ptr); !ret.ok()) {
+        irods::log(PASSMSG("failed to resolve database interface", ret));
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+        return ret.code();
+    }
+
+    irods::first_class_object_ptr ptr = boost::dynamic_pointer_cast<irods::first_class_object>(db_obj_ptr);
+    irods::database_ptr db = boost::dynamic_pointer_cast<irods::database>(db_plug_ptr);
+
+    const auto ret = db->call(_comm,
+                              irods::DATABASE_OP_AUTHENTICATE_CLIENT,
+                              ptr,
+                              _challenge,
+                              _response,
+                              _user_name,
+                              _user_priv_level,
+                              _client_priv_level);
+
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+    return ret.code();
+} // chl_authenticate_client

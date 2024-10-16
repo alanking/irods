@@ -1,14 +1,11 @@
-/*** Copyright (c), The Regents of the University of California            ***
- *** For more information please refer to files in the COPYRIGHT directory ***/
-
-/* See authCheck.h for a description of this API call.*/
+#include "irods/authCheck.h"
 
 #include "irods/authRequest.h"
-#include "irods/authCheck.h"
 #include "irods/icatHighLevelRoutines.hpp"
-#include "irods/miscServerFunct.hpp"
 #include "irods/irods_configuration_keywords.hpp"
 #include "irods/irods_logger.hpp"
+#include "irods/key_value_proxy.hpp"
+#include "irods/miscServerFunct.hpp"
 #include "irods/rsAuthCheck.hpp"
 
 // =-=-=-=-=-=-=-
@@ -81,17 +78,25 @@ int rsAuthCheck(
         }
         else {
             response.assign( authCheckInp->response, RESPONSE_LEN );
-
         }
 
-        status = chlCheckAuth(
-                     rsComm,
-                     scheme.c_str(),
-                     authCheckInp->challenge,
-                     const_cast< char* >( response.c_str() ),
-                     authCheckInp->username,
-                     &privLevel,
-                     &clientPrivLevel );
+        if (getValByKey(&authCheckInp->cond_input, "use_password_hash")) {
+            status = chl_authenticate_client(rsComm,
+                                             authCheckInp->challenge,
+                                             response.c_str(),
+                                             authCheckInp->username,
+                                             &privLevel,
+                                             &clientPrivLevel);
+        }
+        else {
+            status = chlCheckAuth(rsComm,
+                                  scheme.c_str(),
+                                  authCheckInp->challenge,
+                                  const_cast<char*>(response.c_str()),
+                                  authCheckInp->username,
+                                  &privLevel,
+                                  &clientPrivLevel);
+        }
         if ( status < 0 ) {
             log_api::info("rsAuthCheck: chlCheckAuth status = {}", status);
         }

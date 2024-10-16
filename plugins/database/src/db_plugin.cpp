@@ -60,6 +60,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <thread> // For std::this_thread::sleep_for
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -232,6 +233,14 @@ namespace
 
         return SUCCESS();
     } // get_auth_config
+
+    auto create_salted_password_hash(RsComm* _comm, const std::string& _password) -> std::pair<std::string, std::string>
+    {
+        const std::string salt = "something_random_one_day";
+        const auto salted_password = salt + _password;
+        const auto hashed_password = salted_password; // TODO: Pass to a hashing function!
+        return {hashed_password, salt};
+    } // create_salted_password_hash
 } // anonymous namespace
 
 // =-=-=-=-=-=-=-
@@ -7682,6 +7691,69 @@ irods::error db_mod_user_op(
             if ( logSQL != 0 ) {
                 log_sql::debug("chlModUser SQL 10");
             }
+        }
+    }
+    const char* password = _new_value;
+    const auto [password_hash, password_salt] = create_salted_password_hash(_ctx.comm(), password);
+    if (0 == strcmp(_option, "password_hash")) {
+        const int check_password_strength_ec = icatApplyRule(_ctx.comm(), const_cast<char*>("acCheckPasswordStrength"), const_cast<char*>(password));
+        if (check_password_strength_ec < 0) {
+            if (NO_RULE_OR_MSI_FUNCTION_FOUND_ERR == check_password_strength_ec) {
+                addRErrorMsg(&_ctx.comm()->rError, 0, "acCheckPasswordStrength rule not found.");
+            }
+            return ERROR(check_password_strength_ec, "icatApplyRule for acCheckPasswordStrength failed.");
+        }
+        try {
+            std::string user_id_string;
+            {
+                auto [db_instance, db_conn] = irods::experimental::catalog::new_database_connection();
+                nanodbc::statement stmt{db_conn};
+                nanodbc::prepare(
+                    stmt,
+                    "select R_USER_PASSWORD.user_id from R_USER_PASSWORD, R_USER_MAIN where R_USER_MAIN.user_name = ? "
+                    "and R_USER_MAIN.zone_name = ? and R_USER_MAIN.user_id = R_USER_PASSWORD.user_id");
+                stmt.bind(0, userName2);
+                stmt.bind(1, zoneName);
+                auto result = nanodbc::execute(stmt);
+                if (result.rows() > 0) {
+                    user_id_string = result.get<std::string>(0);
+                }
+            }
+            if (!user_id_string.empty()) {
+                std::strncpy(
+                    tSQL,
+                    "update R_USER_PASSWORD set rcat_password = ?, modify_ts = ?, password_salt = ? where user_id = ?",
+                    MAX_SQL_SIZE);
+                cllBindVars[cllBindVarCount++] = password_hash.c_str();
+                cllBindVars[cllBindVarCount++] = myTime;
+                cllBindVars[cllBindVarCount++] = password_salt.c_str();
+                cllBindVars[cllBindVarCount++] = user_id_string.c_str();
+            }
+            else {
+                opType = 4;
+                std::strncpy(tSQL,
+                             "insert into R_USER_PASSWORD (user_id, rcat_password, pass_expiry_ts, create_ts, "
+                             "modify_ts, password_salt) values ((select user_id from R_USER_MAIN where user_name = ? "
+                             "and zone_name = ?), ?, ?, ?, ?, ?)",
+                             MAX_SQL_SIZE);
+                cllBindVars[cllBindVarCount++] = userName2;
+                cllBindVars[cllBindVarCount++] = zoneName;
+                cllBindVars[cllBindVarCount++] = password_hash.c_str();
+                cllBindVars[cllBindVarCount++] = "9999-12-31-23.59.01";
+                cllBindVars[cllBindVarCount++] = myTime;
+                cllBindVars[cllBindVarCount++] = myTime;
+                cllBindVars[cllBindVarCount++] = password_salt.c_str();
+            }
+        }
+        catch (const std::exception& e) {
+            std::string msg = fmt::format("{}: Exception occurred: [{}]", __func__, e.what());
+            log_db::error(msg);
+            return ERROR(SYS_INTERNAL_ERR, std::move(msg));
+        }
+        catch (...) {
+            std::string msg = fmt::format("{}: Unknown error occurred.", __func__);
+            log_db::error(msg);
+            return ERROR(SYS_UNKNOWN_ERROR, std::move(msg));
         }
     }
 
@@ -15883,6 +15955,179 @@ auto db_execute_genquery2_sql(irods::plugin_context& _ctx,
     }
 } // db_execute_genquery2_sql
 
+auto db_authenticate_client_op(irods::plugin_context& _ctx,
+                               const char* _challenge,
+                               const char* _response,
+                               const char* _user_name,
+                               int* _user_priv_level,
+                               int* _client_priv_level) -> irods::error
+{
+    if (const auto ret = _ctx.valid(); !ret.ok()) {
+        return PASS(ret);
+    }
+    if (!_challenge || !_response || !_user_name || !_user_priv_level || !_client_priv_level) {
+        return ERROR(CAT_INVALID_ARGUMENT, fmt::format("{}: One or more input pointers are null.", __func__));
+    }
+    *_user_priv_level = NO_USER_AUTH;
+    *_client_priv_level = NO_USER_AUTH;
+    static int previous_authentication_failure_count = 0;
+    if (previous_authentication_failure_count > 1) {
+        // Somebody trying a dictionary attack? Slow it down a little...
+        if (previous_authentication_failure_count > 5) {
+            std::this_thread::sleep_for(std::chrono::seconds(20));
+        }
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+    }
+    // Get username and zone name from the _user_name input parameter.
+    std::array<char, NAME_LEN + 2> username_array{};
+    std::array<char, NAME_LEN + 2> zone_array{};
+    if (const auto ec = validateAndParseUserName(_user_name, username_array.data(), zone_array.data()); ec < 0) {
+        return ERROR(ec, fmt::format("{}: Invalid username format [{}]", __func__, _user_name));
+    }
+    if ('\0' == zone_array[0]) {
+        std::string zone;
+        if (const auto err = getLocalZone(_ctx.prop_map(), &icss, zone); !err.ok()) {
+            return PASS(err);
+        }
+        if (zone.length() > NAME_LEN) {
+            return ERROR(SYS_INVALID_ZONE_NAME, fmt::format("{}: Local zone name [{}] is too long.", __func__, zone));
+        }
+        std::strncpy(zone_array.data(), zone.c_str(), NAME_LEN);
+    }
+    const auto user_name = std::string_view{username_array.data()};
+    const auto zone_name = std::string_view{zone_array.data()};
+    // Anonymous user gets a pass on the password check.
+    if (ANONYMOUS_USER == user_name) {
+        *_user_priv_level = LOCAL_USER_AUTH;
+        previous_authentication_failure_count = 0;
+        return SUCCESS();
+    }
+    struct password_information
+    {
+        std::string user_id;
+        std::string user_type;
+        std::string password;
+        std::string expiration_timestamp;
+        std::string create_timestamp;
+        std::string modify_timestamp;
+        std::string salt;
+    };
+    std::vector<char> pwInfoArray(MAX_PASSWORD_LEN * MAX_PASSWORDS * 4);
+    try {
+        auto [db_instance, db_conn] = irods::experimental::catalog::new_database_connection();
+        nanodbc::statement stmt{db_conn};
+        nanodbc::prepare(stmt,
+                         "select R_USER_MAIN.user_id, R_USER_MAIN.user_type_name, R_USER_PASSWORD.rcat_password, "
+                         "R_USER_PASSWORD.pass_expiry_ts, R_USER_PASSWORD.create_ts, R_USER_PASSWORD.modify_ts, "
+                         "R_USER_PASSWORD.password_salt from R_USER_PASSWORD, R_USER_MAIN where user_name=? and "
+                         "zone_name=? and R_USER_MAIN.user_id = R_USER_PASSWORD.user_id");
+        stmt.bind(0, user_name.data());
+        stmt.bind(1, zone_name.data());
+        std::vector<password_information> password_infos;
+        for (auto result = nanodbc::execute(stmt); result.next();) {
+            password_infos.emplace_back(password_information{
+                result.get<std::string>(0),
+                result.get<std::string>(1),
+                result.get<std::string>(2),
+                result.get<std::string>(3),
+                result.get<std::string>(4),
+                result.get<std::string>(5),
+                result.get<std::string>(6)
+            });
+        }
+        // If no passwords are found for the user, that means the user either does not exist or has no password. Given
+        // that this database operation performs native authentication, the password must be set. For most cases, this
+        // simply means that the user does not exist, so that is the error that we return.
+        if (password_infos.empty()) {
+            return ERROR(
+                CAT_INVALID_USER,
+                fmt::format(
+                    "{}: Failed to retrieve password information for user [{}#{}].", __func__, user_name, zone_name));
+        }
+        auto password_found = false;
+        password_information matching_password_info;
+        for (auto&& password_info : password_infos) {
+            // TODO: hashem later -- for now, just compare the strings directly
+            const std::string to_hash = password_info.salt + _response;
+            auto input_hash = to_hash;
+            if (input_hash == password_info.password) {
+                matching_password_info = password_info;
+                password_found = true;
+                break;
+            }
+        }
+        if (!password_found) {
+            ++previous_authentication_failure_count;
+            // Do not indicate why the authentication failed because that would leak information to attackers.
+            return ERROR(
+                CAT_INVALID_AUTHENTICATION, fmt::format("{}: Authentication failed - invalid username or password.", __func__));
+        }
+        // This function uses goto statements. You cannot initialize variables after a goto statement.
+        auth_config ac{};
+        if (const auto err = get_auth_config("authentication", ac); !err.ok()) {
+            log_db::error("{}: Failed to get auth configuration. [{}]", __func__, err.result());
+            return PASS(err);
+        }
+        constexpr const char* no_expiration_time_str = "9999"; // 9999-12-31-23.59.00
+        const rodsLong_t expiration_time = std::stoll(matching_password_info.expiration_timestamp);
+        const auto password_expires = matching_password_info.expiration_timestamp.starts_with(no_expiration_time_str);
+        if (password_expires && expiration_time >= ac.password_min_time && expiration_time <= ac.password_max_time) {
+            const rodsLong_t modify_time = std::stoll(matching_password_info.modify_timestamp);
+            const rodsLong_t now = static_cast<rodsLong_t>(std::time(nullptr));
+            const auto password_is_expired = (modify_time + expiration_time < now);
+            if (password_is_expired) {
+                // TODO: Delete expired password from database...
+                return ERROR(CAT_PASSWORD_EXPIRED, fmt::format("{}: Password expired.", __func__));
+            }
+        }
+        // If the user being authenticated is not a rodsadmin, we are done.
+        // TODO: WHY are we done?? Because a non-rodsadmin cannot act on behalf of other users?
+        if ("rodsadmin" != matching_password_info.user_type) {
+            *_user_priv_level = LOCAL_USER_AUTH;
+            previous_authentication_failure_count = 0;
+            return SUCCESS();
+        }
+        *_user_priv_level = LOCAL_PRIV_USER_AUTH;
+        // Check to see if the client user information in the RsComm differs from the user being authenticatd.
+        // If the user and zone names match, it's the same user, so the client user has the same privileges.
+        const char* client_user_name = _ctx.comm()->clientUser.userName;
+        const char* client_zone_name = _ctx.comm()->clientUser.rodsZone;
+        if (user_name == client_user_name && zone_name == client_zone_name) {
+            *_client_priv_level = LOCAL_PRIV_USER_AUTH;
+            previous_authentication_failure_count = 0;
+            return SUCCESS();
+        }
+        {
+            nanodbc::statement stmt{db_conn};
+            nanodbc::prepare(stmt, "select user_type_name from R_USER_MAIN where user_name = ? and zone_name = ?");
+            stmt.bind(0, client_user_name);
+            stmt.bind(1, client_zone_name);
+            auto result = nanodbc::execute(stmt);
+            if (0 == result.rows()) {
+                return ERROR(
+                    CAT_INVALID_CLIENT_USER,
+                    fmt::format("{}: Invalid client user [{}#{}].", __func__, client_user_name, client_zone_name));
+            }
+            *_client_priv_level = ("rodsadmin" == result.get<std::string>(0)) ? LOCAL_PRIV_USER_AUTH : LOCAL_USER_AUTH;
+        }
+
+        previous_authentication_failure_count = 0;
+        return SUCCESS();
+    }
+    catch (const irods::exception& e) {
+        log_db::error("{}: {}", __func__, e.client_display_what());
+        return ERROR(SYS_LIBRARY_ERROR, e.what());
+    }
+    catch (const std::exception& e) {
+        log_db::error("{}: {}", __func__, e.what());
+        return ERROR(SYS_LIBRARY_ERROR, e.what());
+    }
+    catch (...) {
+        log_db::error("{}: An unknown error was caught.", __func__);
+        return ERROR(SYS_UNKNOWN_ERROR, "An unknown error was caught.");
+    }
+} // db_authenticate_client_op
+
 // =-=-=-=-=-=-=-
 //
 irods::error db_start_operation( irods::plugin_property_map& _props ) {
@@ -16298,6 +16543,9 @@ irods::database* plugin_factory(
         DATABASE_OP_EXECUTE_GENQUERY2_SQL,
         function<error(plugin_context&, const char*, const std::vector<std::string>*, char**)>(
             db_execute_genquery2_sql));
+    pg->add_operation(
+        DATABASE_OP_AUTHENTICATE_CLIENT,
+        function<error(plugin_context&, const char*, const char*, const char*, int*, int*)>(db_authenticate_client_op));
 
     return pg;
 } // plugin_factory
