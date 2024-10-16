@@ -111,6 +111,7 @@ def setup_server(irods_config, json_configuration_file=None, test_mode=False):
         irods_config.commit(json_configuration_dict['service_account_environment'], irods_config.client_environment_path)
         # password
         irods_config.admin_password = json_configuration_dict['admin_password']
+        irods_config.admin_secret = json_configuration_dict['admin_password']
     else:
         # role
         determine_server_role(irods_config)
@@ -456,6 +457,7 @@ def setup_client_environment(irods_config):
         'iRODS server\'s administrator password',
         input_filter=irods.lib.character_count_filter(minimum=3, maximum=maximum_password_length, field='Admin password'),
         echo=False)
+    irods_config.admin_secret = irods_config.admin_password
 
     print('\n', end='')
 

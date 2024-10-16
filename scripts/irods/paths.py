@@ -284,6 +284,15 @@ def _password_file_path():
 def password_file_path():
     return str(_password_file_path())
 
+# TODO: consider renaming to convey that this is specifically the service account's password file
+# TODO: cache this if we start caching _userconf_directory()
+def _secrets_file_path():
+    return _userconf_directory() / '.irods_secrets'
+
+# TODO: consider renaming to convey that this is specifically the service account's password file
+def secrets_file_path():
+    return str(_secrets_file_path())
+
 # TODO: consider renaming to convey that this is specifically the service account's environment file
 # TODO: cache this if we start caching _userconf_directory()
 def _default_client_environment_path():

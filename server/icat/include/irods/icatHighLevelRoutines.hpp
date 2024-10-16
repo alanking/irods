@@ -411,4 +411,10 @@ auto chl_check_auth_credentials(RsComm& _comm,
 auto chl_execute_genquery2_sql(RsComm& _comm, const char* _sql, const std::vector<std::string>* _values, char** _output)
     -> int;
 
+auto chl_check_password(RsComm* _comm,
+                        const char* _user_name,
+                        const char* _zone_name,
+                        const char* _password,
+                        int* _valid) -> int;
+
 #endif // IRODS_ICAT_HIGHLEVEL_ROUTINES_HPP
