@@ -15,6 +15,7 @@
 #include "irods/msParam.h"
 #include "irods/rcConnect.h"
 #include "irods/rodsDef.h"
+#include "irods/version.hpp"
 
 #ifdef RODS_SERVER
 #include "irods/irods_rs_comm_query.hpp"
@@ -35,9 +36,19 @@ int get64RandomBytes( char *buf );
 void setSessionSignatureClientside( char* _sig );
 void _rsSetAuthRequestGetChallenge( const char* _c );
 
-using json = nlohmann::json;
-using log_auth = irods::experimental::log::authentication;
-namespace irods_auth = irods::experimental::auth;
+namespace
+{
+    using json = nlohmann::json;
+    using log_auth = irods::experimental::log::authentication;
+    namespace irods_auth = irods::experimental::auth;
+
+    auto use_password_hash(const RcComm& _comm) -> bool
+    {
+        static const auto version_must_be_greater_than_this = irods::to_version("rods4.4.0");
+        const auto server_version = irods::to_version(_comm.svrVersion->relVersion);
+        return server_version && version_must_be_greater_than_this && *server_version > *version_must_be_greater_than_this;
+    } // use_password_hash
+} // anonymous namespace
 
 namespace irods
 {
@@ -77,8 +88,7 @@ namespace irods
             json svr_req{req};
             svr_req[irods_auth::next_operation] = AUTH_AGENT_AUTH_REQUEST;
             auto resp = irods_auth::request(comm, svr_req);
-            const auto password_hash_itr = req.find("use_password_hash");
-            if (req.end() != password_hash_itr && password_hash_itr->get<bool>()) {
+            if (use_password_hash(comm)) {
                 resp[irods_auth::next_operation] = client_prepare_auth_check;
             }
             else {
@@ -505,10 +515,8 @@ namespace irods
             authCheckInp.challenge = _rsAuthRequestGetChallenge();
             authCheckInp.response = response;
 
-            const auto password_hash_itr = req.find("use_password_hash");
-            if (req.end() != password_hash_itr && password_hash_itr->get<bool>()) {
-                addKeyVal(&authCheckInp.cond_input, "use_password_hash", "");
-            }
+            // TODO: This is obviously not necessary if we use a new API endpoint.
+            addKeyVal(&authCheckInp.cond_input, "use_password_hash", "");
 
             const std::string username =
                 fmt::format("{}#{}", req.at("user_name").get_ref<const std::string&>(), zone_name);
