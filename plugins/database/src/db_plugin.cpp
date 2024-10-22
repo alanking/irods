@@ -27,6 +27,7 @@
 #include "irods/miscServerFunct.hpp"
 #include "irods/modAccessControl.h"
 #include "irods/msParam.h"
+#include "irods/password_hash.hpp"
 #include "irods/private/irods_catalog_properties.hpp"
 #include "irods/private/irods_sql_logger.hpp"
 #include "irods/private/low_level.hpp"
@@ -60,6 +61,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <thread> // For std::this_thread::sleep_for
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -1091,67 +1093,6 @@ static int _delColl( rsComm_t *rsComm, collInfo_t *collInfo ) {
     return status;
 
 } // _delColl
-
-// The following is an artifact of the legacy authentication plugins. This operation is
-// only useful for certain plugins which are not supported in 4.3.0, so it is being
-// left out of compilation for now. Once we have determined that this is safe to do in
-// general, this section can be removed.
-#if 0
-// =-=-=-=-=-=-=-
-// local function to delegate the response
-// verification to an authentication plugin
-static
-irods::error verify_auth_response(
-    const char* _scheme,
-    const char* _challenge,
-    const char* _user_name,
-    const char* _response ) {
-    // =-=-=-=-=-=-=-
-    // validate incoming parameters
-    if ( !_scheme ) {
-        return ERROR( SYS_INVALID_INPUT_PARAM, "null _scheme ptr" );
-    }
-    else if ( !_challenge ) {
-        return ERROR( SYS_INVALID_INPUT_PARAM, "null _challenge ptr" );
-    }
-    else if ( !_user_name ) {
-        return ERROR( SYS_INVALID_INPUT_PARAM, "null _user_name ptr" );
-    }
-    else if ( !_response ) {
-        return ERROR( SYS_INVALID_INPUT_PARAM, "null _response ptr" );
-    }
-
-    // TODO: Is this an implicit dependence on the old auth plugins?
-
-    // =-=-=-=-=-=-=-
-    // construct an auth object given the scheme
-    irods::auth_object_ptr auth_obj;
-    irods::error ret = irods::auth_factory( _scheme, 0, auth_obj );
-    if ( !ret.ok() ) {
-        return ret;
-    }
-
-    // =-=-=-=-=-=-=-
-    // resolve an auth plugin given the auth object
-    irods::plugin_ptr ptr;
-    ret = auth_obj->resolve( irods::AUTH_INTERFACE, ptr );
-    if ( !ret.ok() ) {
-        return ret;
-    }
-    irods::auth_ptr auth_plugin = boost::dynamic_pointer_cast< irods::auth >( ptr );
-
-    // =-=-=-=-=-=-=-
-    // call auth verify on plugin
-    ret = auth_plugin->call <const char*, const char*, const char* > ( 0, irods::AUTH_AGENT_AUTH_VERIFY, auth_obj, _challenge, _user_name, _response );
-    if ( !ret.ok() ) {
-        irods::log( PASS( ret ) );
-        return ret;
-    }
-
-    return SUCCESS();
-
-} // verify_auth_response
-#endif
 
 /*
    Possibly descramble a password (for user passwords stored in the ICAT).
@@ -6461,20 +6402,6 @@ irods::error db_check_auth_op(
         snprintf( myUserZone, sizeof( myUserZone ), "%s", userZone );
     }
 
-    // The following is an artifact of the legacy authentication plugins. This operation is
-    // only useful for certain plugins which are not supported in 4.3.0, so it is being
-    // left out of compilation for now. Once we have determined that this is safe to do in
-    // general, this section can be removed.
-#if 0
-    if ( _scheme && strlen( _scheme ) > 0 ) {
-        irods::error ret = verify_auth_response( _scheme, _challenge, userName2, _response );
-        if ( !ret.ok() ) {
-            return PASS( ret );
-        }
-        goto checkLevel;
-    }
-#endif
-
     if ( logSQL != 0 ) {
         log_sql::debug("chlCheckAuth SQL 1 ");
     }
@@ -7451,7 +7378,9 @@ irods::error db_mod_user_op(
     char form1[] = "update R_USER_MAIN set %s=?, modify_ts=? where user_name=? and zone_name=?";
     char form2[] = "update R_USER_MAIN set %s=%s, modify_ts=? where user_name=? and zone_name=?";
     char form3[] = "update R_USER_PASSWORD set rcat_password=?, modify_ts=? where user_id=?";
-    char form4[] = "insert into R_USER_PASSWORD (user_id, rcat_password, pass_expiry_ts,  create_ts, modify_ts) values ((select user_id from R_USER_MAIN where user_name=? and zone_name=?), ?, ?, ?, ?)";
+    char form4[] =
+        "insert into R_USER_PASSWORD (user_id, rcat_password, pass_expiry_ts, create_ts, modify_ts, password_salt) "
+        "values ((select user_id from R_USER_MAIN where user_name=? and zone_name=?), ?, ?, ?, ?, ?)";
     char form5[] = "insert into R_USER_AUTH (user_id, user_auth_name, create_ts) values ((select user_id from R_USER_MAIN where user_name=? and zone_name=?), ?, ?)";
     char form6[] = "delete from R_USER_AUTH where user_id = (select user_id from R_USER_MAIN where user_name=? and zone_name=?) and user_auth_name = ?";
 #if MY_ICAT
@@ -7615,7 +7544,7 @@ irods::error db_mod_user_op(
             log_sql::debug("chlModUser SQL 7");
         }
     }
-    if ( strcmp( _option, "password" ) == 0 ) {
+    if (strcmp(_option, "obfuscated_password") == 0) {
         int i;
         char userIdStr[MAX_NAME_LEN];
         i = decodePw( _ctx.comm(), _new_value, decoded );
@@ -7679,9 +7608,67 @@ irods::error db_mod_user_op(
             cllBindVars[cllBindVarCount++] = "9999-12-31-23.59.01";
             cllBindVars[cllBindVarCount++] = myTime;
             cllBindVars[cllBindVarCount++] = myTime;
+            cllBindVars[cllBindVarCount++] = "";
             if ( logSQL != 0 ) {
                 log_sql::debug("chlModUser SQL 10");
             }
+        }
+    }
+    const char* password = _new_value;
+    const auto password_salt = irods::generate_salt();
+    const auto password_hash = irods::hash_password(password, password_salt);
+    if (0 == strcmp(_option, "password")) {
+        log_db::info("Setting password_hash for user [{}#{}]", userName2, zoneName);
+        const int check_password_strength_ec =
+            icatApplyRule(_ctx.comm(), const_cast<char*>("acCheckPasswordStrength"), const_cast<char*>(password));
+        if (check_password_strength_ec < 0) {
+            if (NO_RULE_OR_MSI_FUNCTION_FOUND_ERR == check_password_strength_ec) {
+                addRErrorMsg(&_ctx.comm()->rError, 0, "acCheckPasswordStrength rule not found.");
+            }
+            return ERROR(check_password_strength_ec, "icatApplyRule for acCheckPasswordStrength failed.");
+        }
+        char user_id[MAX_NAME_LEN]{};
+        log_db::info("getting user_id for [{}#{}]", userName2, zoneName);
+        int ec = 0;
+        {
+            std::vector<std::string> bindVars;
+            bindVars.push_back(userName2);
+            bindVars.push_back(zoneName);
+            ec = cmlGetStringValueFromSql(
+                "select R_USER_PASSWORD.user_id from R_USER_PASSWORD, R_USER_MAIN where R_USER_MAIN.user_name=? and "
+                "R_USER_MAIN.zone_name=? and R_USER_MAIN.user_id = R_USER_PASSWORD.user_id",
+                user_id,
+                MAX_NAME_LEN,
+                bindVars,
+                &icss);
+        }
+        if (0 != ec && CAT_NO_ROWS_FOUND != ec) {
+            return ERROR(ec, fmt::format("Failed to get user_id for user [{}#{}]", userName2, zoneName));
+        }
+        if (0 == ec) {
+            std::strncpy(
+                tSQL,
+                "update R_USER_PASSWORD set rcat_password = ?, modify_ts = ?, password_salt = ? where user_id = ?",
+                MAX_SQL_SIZE);
+            cllBindVars[cllBindVarCount++] = password_hash.c_str();
+            cllBindVars[cllBindVarCount++] = myTime;
+            cllBindVars[cllBindVarCount++] = password_salt.c_str();
+            cllBindVars[cllBindVarCount++] = user_id;
+        }
+        else {
+            opType = 4;
+            std::strncpy(tSQL,
+                         "insert into R_USER_PASSWORD (user_id, rcat_password, pass_expiry_ts, create_ts, "
+                         "modify_ts, password_salt) values ((select user_id from R_USER_MAIN where user_name = ? "
+                         "and zone_name = ?), ?, ?, ?, ?, ?)",
+                         MAX_SQL_SIZE);
+            cllBindVars[cllBindVarCount++] = userName2;
+            cllBindVars[cllBindVarCount++] = zoneName;
+            cllBindVars[cllBindVarCount++] = password_hash.c_str();
+            cllBindVars[cllBindVarCount++] = "9999-12-31-23.59.01";
+            cllBindVars[cllBindVarCount++] = myTime;
+            cllBindVars[cllBindVarCount++] = myTime;
+            cllBindVars[cllBindVarCount++] = password_salt.c_str();
         }
     }
 
@@ -15883,6 +15870,186 @@ auto db_execute_genquery2_sql(irods::plugin_context& _ctx,
     }
 } // db_execute_genquery2_sql
 
+auto db_check_password_op(irods::plugin_context& _ctx,
+                          const char* _user_name,
+                          const char* _zone_name,
+                          const char* _password,
+                          int* _valid) -> irods::error
+{
+    if (const auto ret = _ctx.valid(); !ret.ok()) {
+        return PASS(ret);
+    }
+    if (!_user_name || !_zone_name || !_password || !_valid) {
+        return ERROR(CAT_INVALID_ARGUMENT, fmt::format("{}: One or more input pointers are null.", __func__));
+    }
+    *_valid = 0;
+    // This should be fairly small, even if the user has 40 passwords stored due to PAM authentication.
+    struct auth_key
+    {
+        std::string key;
+        std::string salt;
+        std::string expiration_timestamp;
+    };
+    std::vector<auth_key> auth_keys;
+    try {
+        auto [db_instance, db_conn] = irods::experimental::catalog::new_database_connection();
+        nanodbc::statement stmt{db_conn};
+        nanodbc::prepare(
+            stmt,
+            "select R_USER_PASSWORD.rcat_password, R_USER_PASSWORD.password_salt from R_USER_PASSWORD, R_USER_MAIN "
+            "where user_name=? and zone_name=? and R_USER_MAIN.user_id = R_USER_PASSWORD.user_id");
+        stmt.bind(0, _user_name);
+        stmt.bind(1, _zone_name);
+        for (auto result = nanodbc::execute(stmt); result.next();) {
+            // Only consider keys with salts. If no salt is recorded, it is likely a legacy password. Regardless, we
+            // cannot match any passwords without a salt because the password is hashed with a salt at creation.
+            if (const auto salt = result.get<std::string>(1); !salt.empty()) {
+                const auto key = result.get<std::string>(0);
+                auth_keys.emplace_back(auth_key{key, salt, ""});
+            }
+        }
+    }
+    catch (const std::exception& e) {
+        log_db::error("{}: Error occurred fetching password information for user [{}#{}]: {}",
+                      __func__,
+                      _user_name,
+                      _zone_name,
+                      e.what());
+        return ERROR(SYS_LIBRARY_ERROR, e.what());
+    }
+    if (auth_keys.empty()) {
+        // The user does not have any stored keys. This operation does not care whether this is an invalid user or
+        // there are no keys stored for the user.
+        return SUCCESS();
+    }
+    for (const auto& auth_key : auth_keys) {
+        if (const auto hashed_password = irods::hash_password(_password, auth_key.salt);
+            hashed_password == auth_key.key) {
+            *_valid = 1;
+            return SUCCESS();
+        }
+    }
+    // Reaching this point means that the provided user and password combination did not match anything.
+    return SUCCESS();
+} // db_check_password_op
+
+auto db_check_session_token_op(irods::plugin_context& _ctx,
+                               const char* _user_name,
+                               const char* _zone_name,
+                               const char* _session_token,
+                               int* _valid) -> irods::error
+{
+    if (const auto ret = _ctx.valid(); !ret.ok()) {
+        return PASS(ret);
+    }
+    if (!_user_name || !_zone_name || !_session_token || !_valid) {
+        return ERROR(CAT_INVALID_ARGUMENT, fmt::format("{}: One or more input pointers are null.", __func__));
+    }
+    *_valid = 0;
+    struct auth_key
+    {
+        std::string key;
+        std::string salt;
+        std::string expiration_timestamp;
+    };
+    std::vector<auth_key> auth_keys;
+    try {
+        auto [db_instance, db_conn] = irods::experimental::catalog::new_database_connection();
+        nanodbc::statement stmt{db_conn};
+        nanodbc::prepare(stmt,
+                         "select R_USER_SESSION_KEY.session_key, R_USER_SESSION_KEY.session_info, "
+                         "R_USER_SESSION_KEY.session_expiry_ts from R_USER_SESSION_KEY, R_USER_MAIN where user_name=? "
+                         "and zone_name=? and R_USER_MAIN.user_id = R_USER_SESSION_KEY.user_id");
+        stmt.bind(0, _user_name);
+        stmt.bind(1, _zone_name);
+        for (auto result = nanodbc::execute(stmt); result.next();) {
+            auth_keys.emplace_back(
+                auth_key{result.get<std::string>(0), result.get<std::string>(1), result.get<std::string>(2)});
+        }
+    }
+    catch (const std::exception& e) {
+        log_db::error("{}: Error occurred fetching password information for user [{}#{}]: {}",
+                      __func__,
+                      _user_name,
+                      _zone_name,
+                      e.what());
+        return ERROR(SYS_LIBRARY_ERROR, e.what());
+    }
+    if (auth_keys.empty()) {
+        // The user does not have any stored keys. This operation does not care whether this is an invalid user or
+        // there are no keys stored for the user.
+        return SUCCESS();
+    }
+    for (auto&& auth_key : auth_keys) {
+        if (const auto hash = irods::hash_password(_session_token, auth_key.salt); hash == auth_key.key) {
+            // TODO
+            // Found a matching key. Now make sure it hasn't expired.
+            *_valid = 1;
+            return SUCCESS();
+        }
+    }
+    // Reaching this point means that the provided user and session_token combination did not match anything.
+    return SUCCESS();
+} // db_check_session_token_op
+
+auto db_create_session_token_op(irods::plugin_context& _ctx,
+                                const char* _user_name,
+                                const char* _zone_name,
+                                char** _session_token) -> irods::error
+{
+    if (const auto ret = _ctx.valid(); !ret.ok()) {
+        return PASS(ret);
+    }
+    if (!_user_name || !_zone_name || !_session_token) {
+        return ERROR(CAT_INVALID_ARGUMENT, fmt::format("{}: One or more input pointers are null.", __func__));
+    }
+    // Step 1: Get all existing session tokens for this user.
+    // TODO
+    // Step 2: If there are too many, drop the oldest one.
+    // TODO
+    // Step 3: Generate a new session token.
+    constexpr int plaintext_session_token_length = MAX_PASSWORD_LEN;
+    const auto plaintext_session_token = irods::generate_random_alphanumeric_string(plaintext_session_token_length);
+    const auto salt = irods::generate_salt();
+    const auto key = irods::hash_password(plaintext_session_token, salt);
+    // Step 4: Put the new session token into the catalog.
+    try {
+        using std::chrono::duration_cast;
+        using std::chrono::seconds;
+        using std::chrono::system_clock;
+        auto [db_instance, db_conn] = irods::experimental::catalog::new_database_connection();
+        nanodbc::statement stmt{db_conn};
+        nanodbc::prepare(stmt,
+                         "insert into R_USER_SESSION_KEY (user_id, session_key, session_info, auth_scheme, "
+                         "session_expiry_ts, create_ts, modify_ts) values ((select user_id from R_USER_MAIN where "
+                         "user_name = ? and zone_name = ?), ?, ?, ?, ?, ?, ?)");
+        stmt.bind(0, _user_name);
+        stmt.bind(1, _zone_name);
+        stmt.bind(2, key.c_str());
+        stmt.bind(3, salt.c_str());
+        stmt.bind(4, _ctx.comm()->auth_scheme);
+        const auto now = duration_cast<seconds>(system_clock::now().time_since_epoch()).count();
+        // TODO: Gotta get the actual expiration time using server configs and whatnot here.
+        const auto expiration_time_str = fmt::format("{:011}", now + 120);
+        stmt.bind(5, expiration_time_str.c_str());
+        const auto now_str = fmt::format("{:011}", now);
+        stmt.bind(6, now_str.c_str());
+        stmt.bind(7, now_str.c_str());
+        execute(stmt);
+    }
+    catch (const std::exception& e) {
+        log_db::error("{}: Error occurred creating session token for user [{}#{}]: {}",
+                      __func__,
+                      _user_name,
+                      _zone_name,
+                      e.what());
+        return ERROR(SYS_LIBRARY_ERROR, e.what());
+    }
+    // Step 5: Copy it into the output variable.
+    *_session_token = strdup(plaintext_session_token.c_str());
+    return SUCCESS();
+} // db_create_session_token_op
+
 // =-=-=-=-=-=-=-
 //
 irods::error db_start_operation( irods::plugin_property_map& _props ) {
@@ -16298,6 +16465,14 @@ irods::database* plugin_factory(
         DATABASE_OP_EXECUTE_GENQUERY2_SQL,
         function<error(plugin_context&, const char*, const std::vector<std::string>*, char**)>(
             db_execute_genquery2_sql));
+    pg->add_operation(
+        DATABASE_OP_CHECK_PASSWORD,
+        function<error(plugin_context&, const char*, const char*, const char*, int*)>(db_check_password_op));
+    pg->add_operation(
+        DATABASE_OP_CHECK_SESSION_TOKEN,
+        function<error(plugin_context&, const char*, const char*, const char*, int*)>(db_check_session_token_op));
+    pg->add_operation(DATABASE_OP_CREATE_SESSION_TOKEN,
+                      function<error(plugin_context&, const char*, const char*, char**)>(db_create_session_token_op));
 
     return pg;
 } // plugin_factory

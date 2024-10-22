@@ -411,4 +411,17 @@ auto chl_check_auth_credentials(RsComm& _comm,
 auto chl_execute_genquery2_sql(RsComm& _comm, const char* _sql, const std::vector<std::string>* _values, char** _output)
     -> int;
 
+auto chl_check_password(RsComm* _comm,
+                        const char* _user_name,
+                        const char* _zone_name,
+                        const char* _password,
+                        int* _valid) -> int;
+auto chl_check_session_token(RsComm* _comm,
+                             const char* _user_name,
+                             const char* _zone_name,
+                             const char* _session_token,
+                             int* _valid) -> int;
+auto chl_create_session_token(RsComm* _comm, const char* _user_name, const char* _zone_name, char** _session_token)
+    -> int;
+
 #endif // IRODS_ICAT_HIGHLEVEL_ROUTINES_HPP

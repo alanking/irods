@@ -9,6 +9,7 @@
 #include "irods/base64.hpp"
 #include "irods/irods_auth_constants.hpp"
 #include "irods/irods_auth_plugin.hpp"
+#include "irods/irods_exception.hpp"
 #include "irods/irods_logger.hpp"
 #include "irods/irods_stacktrace.hpp"
 #include "irods/miscServerFunct.hpp"
@@ -17,9 +18,13 @@
 #include "irods/rodsDef.h"
 
 #ifdef RODS_SERVER
+#include "irods/icatHighLevelRoutines.hpp"
+#include "irods/irods_logger.hpp"
 #include "irods/irods_rs_comm_query.hpp"
 #include "irods/rsAuthCheck.hpp"
 #include "irods/rsAuthRequest.hpp"
+#define IRODS_USER_ADMINISTRATION_ENABLE_SERVER_SIDE_API
+#include "irods/user_administration.hpp"
 #endif // RODS_SERVER
 
 #include <openssl/md5.h>
@@ -28,40 +33,242 @@
 #include <unistd.h>
 
 #include <cstring>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <optional>
 #include <sstream>
+
+#include <fmt/format.h>
 
 int get64RandomBytes( char *buf );
 void setSessionSignatureClientside( char* _sig );
 void _rsSetAuthRequestGetChallenge( const char* _c );
 
-using json = nlohmann::json;
-using log_auth = irods::experimental::log::authentication;
-namespace irods_auth = irods::experimental::auth;
+namespace
+{
+#ifdef RODS_SERVER
+    using log_auth = irods::experimental::log::authentication;
+    namespace adm = irods::experimental::administration;
+#endif // RODS_SERVER
+    using json = nlohmann::json;
+    namespace irods_auth = irods::experimental::auth;
+
+    auto get_password_from_client_stdin() -> std::string
+    {
+        struct termios tty;
+        tcgetattr(STDIN_FILENO, &tty);
+        tcflag_t oldflag = tty.c_lflag;
+        tty.c_lflag &= ~ECHO;
+        if (const auto error = tcsetattr(STDIN_FILENO, TCSANOW, &tty); error) {
+            const int errsv = errno;
+            fmt::print("WARNING: Error {} disabling echo mode. Password will be displayed in plaintext.\n", errsv);
+        }
+        printf("Enter your iRODS password:");
+        std::string password;
+        getline(std::cin, password);
+        printf("\n");
+        tty.c_lflag = oldflag;
+        if (tcsetattr(STDIN_FILENO, TCSANOW, &tty)) {
+            fmt::print("Error reinstating echo mode.\n");
+        }
+        return password;
+    } // get_password_from_client_stdin
+
+    auto get_session_token_file_path() -> std::optional<std::filesystem::path>
+    {
+        // TODO(#XXXX): Consider caching the path in a static variable once found.
+        // See whether the environment has a variable which specifies where the session token file is located.
+        constexpr const char* session_token_file_env_var = "IRODS_SESSION_TOKEN_FILE_PATH";
+        const char* env_var = std::getenv(session_token_file_env_var);
+        if (env_var && '\0' != *env_var) {
+            return std::filesystem::path{env_var};
+        }
+        // If no HOME environment variable is set, this is not an error. We just don't know where the session token
+        // file is located, so we must return nothing.
+        const char* home_var = std::getenv("HOME");
+        if (!home_var) {
+            return std::nullopt;
+        }
+        constexpr const char* session_token_filename_default = ".irods/irods_session_token";
+        return std::filesystem::path{home_var} / session_token_filename_default;
+    } // get_session_token_file_path
+
+    auto get_session_token_from_file() -> std::optional<std::string>
+    {
+        const auto session_token_file_path = get_session_token_file_path();
+        if (!session_token_file_path || !std::filesystem::exists(*session_token_file_path)) {
+            return std::nullopt;
+        }
+        std::ifstream session_token_file_stream{session_token_file_path->c_str()};
+        if (!session_token_file_stream.is_open()) {
+            const auto ec = UNIX_FILE_OPEN_ERR - errno;
+            THROW(ec,
+                  fmt::format(
+                      "Failed to open session token file [{}]. errno:[{}]", session_token_file_path->c_str(), errno));
+        }
+        // TODO(#XXXX): Limit the number of characters read in here. Session tokens should be a fixed length.
+        // TODO(#XXXX): Might also consider a JSON format. For now, just expect the contents to be the session token.
+        std::string session_token_file_contents;
+        session_token_file_stream >> session_token_file_contents;
+        return session_token_file_contents;
+    } // get_session_token_from_file
+
+    auto write_session_token_to_file(const std::string& _session_token) -> void
+    {
+        const auto session_token_file_path = get_session_token_file_path();
+        if (!session_token_file_path) {
+            return;
+        }
+        // TODO(#XXXX): Is it an error to record the session token to the file? What if the client doesn't want to do
+        // that? Should we just print a message?
+        std::ofstream session_token_file_stream{session_token_file_path->c_str()};
+        if (!session_token_file_stream.is_open()) {
+            const auto ec = UNIX_FILE_OPEN_ERR - errno;
+            THROW(ec,
+                  fmt::format(
+                      "Failed to open session token file [{}]. errno:[{}]", session_token_file_path->c_str(), errno));
+        }
+        // TODO(#XXXX): Limit the number of characters read in here. Session tokens should be a fixed length.
+        // TODO(#XXXX): Might also consider a JSON format. For now, just expect the contents to be the session token.
+        session_token_file_stream << _session_token;
+    } // write_session_token_to_file
+
+#ifdef RODS_SERVER
+    auto set_privileges_in_rs_comm(RsComm& _comm, const std::string& _user_name, const std::string& _zone_name) -> void
+    {
+        zoneInfo_t* local_zone_info{};
+        if (const auto ec = getLocalZoneInfo(&local_zone_info); ec < 0) {
+            THROW(ec, "getLocalZoneInfo failed.");
+        }
+        // First make sure the proxy and client user's zone information is populated. If not, set it to local zone.
+        if ('\0' == _comm.proxyUser.rodsZone[0]) {
+            std::strncpy(_comm.proxyUser.rodsZone, local_zone_info->zoneName, NAME_LEN);
+        }
+        if ('\0' == _comm.clientUser.rodsZone[0]) {
+            std::strncpy(_comm.clientUser.rodsZone, local_zone_info->zoneName, NAME_LEN);
+        }
+        // Get the user type of the user whose password was just verified.
+        const auto user = adm::user{_user_name, _zone_name};
+        const auto user_type = adm::server::type(_comm, user);
+        if (!user_type) {
+            THROW(CAT_INVALID_USER_TYPE, fmt::format("Failed to get user type for [{}#{}].", user.name, user.zone));
+        }
+        // Set the privilege level based on the returned user type and whether user is local to this zone.
+        // TODO: Might need to change this based on whether we are connected to "REMOTE_ICAT"?
+        int user_privilege_level = NO_USER_AUTH;
+        switch (*user_type) {
+            case adm::user_type::rodsadmin:
+                user_privilege_level =
+                    (user.zone != local_zone_info->zoneName) ? REMOTE_PRIV_USER_AUTH : LOCAL_PRIV_USER_AUTH;
+                break;
+            case adm::user_type::groupadmin:
+                [[fallthrough]];
+            case adm::user_type::rodsuser:
+                user_privilege_level = (user.zone != local_zone_info->zoneName) ? REMOTE_USER_AUTH : LOCAL_USER_AUTH;
+                break;
+            default:
+                THROW(CAT_INVALID_USER_TYPE,
+                      fmt::format("User [{}#{}] has invalid user type [{}].",
+                                  user.name,
+                                  user.zone,
+                                  static_cast<int>(*user_type)));
+        }
+        // Now set client user privilege level. If the user is acting on behalf of itself, just use the same
+        // privilege level for both the proxy and client users.
+        int client_user_privilege_level = NO_USER_AUTH;
+        if (0 == strcmp(_comm.proxyUser.userName, _comm.clientUser.userName) &&
+            0 == strcmp(_comm.proxyUser.rodsZone, _comm.clientUser.rodsZone))
+        {
+            client_user_privilege_level = user_privilege_level;
+        }
+        else {
+            const auto client_user = adm::user{_comm.clientUser.userName, _comm.clientUser.rodsZone};
+            const auto client_user_type = adm::server::type(_comm, client_user);
+            if (!client_user_type) {
+                THROW(CAT_INVALID_USER_TYPE,
+                      fmt::format(
+                          "Failed to get user type for client user [{}#{}].", client_user.name, client_user.zone));
+            }
+            switch (*client_user_type) {
+                case adm::user_type::rodsadmin:
+                    client_user_privilege_level =
+                        (client_user.zone != local_zone_info->zoneName) ? REMOTE_PRIV_USER_AUTH : LOCAL_PRIV_USER_AUTH;
+                    break;
+                case adm::user_type::groupadmin:
+                    [[fallthrough]];
+                case adm::user_type::rodsuser:
+                    client_user_privilege_level =
+                        (client_user.zone != local_zone_info->zoneName) ? REMOTE_USER_AUTH : LOCAL_USER_AUTH;
+                    break;
+                default:
+                    THROW(CAT_INVALID_USER_TYPE,
+                          fmt::format("Client user [{}#{}] has invalid user type [{}].",
+                                      client_user.name,
+                                      client_user.zone,
+                                      static_cast<int>(*client_user_type)));
+            }
+        }
+        irods::throw_on_insufficient_privilege_for_proxy_user(_comm, user_privilege_level);
+        _comm.proxyUser.authInfo.authFlag = user_privilege_level;
+        _comm.clientUser.authInfo.authFlag = client_user_privilege_level;
+    } // set_privileges_in_rs_comm
+#endif // RODS_SERVER
+} // anonymous namespace
 
 namespace irods
 {
     class native_authentication : public irods_auth::authentication_base {
+      private:
+        static constexpr const char* client_init_auth_with_server = "client_init_auth_with_server";
+        static constexpr const char* client_prepare_auth_check = "client_prepare_auth_check";
+        static constexpr const char* client_auth_with_password = "client_auth_with_password";
+        static constexpr const char* client_auth_with_session_token = "client_auth_with_session_token";
+        static constexpr const char* server_prepare_auth_check = "server_prepare_auth_check";
+        static constexpr const char* server_auth_with_password = "server_auth_with_password";
+        static constexpr const char* server_auth_with_session_token = "server_auth_with_session_token";
+
     public:
         native_authentication()
         {
+            // Old school
             add_operation(AUTH_ESTABLISH_CONTEXT,    OPERATION(rcComm_t, native_auth_establish_context));
             add_operation(AUTH_CLIENT_AUTH_REQUEST,  OPERATION(rcComm_t, native_auth_client_request));
             add_operation(AUTH_CLIENT_AUTH_RESPONSE, OPERATION(rcComm_t, native_auth_client_response));
+            // New school
+            add_operation(client_init_auth_with_server, OPERATION(RcComm, client_init_auth_with_server_op));
+            add_operation(client_prepare_auth_check, OPERATION(RcComm, client_prepare_auth_check_op));
+            add_operation(client_auth_with_password, OPERATION(RcComm, client_auth_with_password_op));
+            add_operation(client_auth_with_session_token, OPERATION(RcComm, client_auth_with_session_token_op));
 #ifdef RODS_SERVER
+            // Old school
             add_operation(AUTH_AGENT_AUTH_REQUEST,   OPERATION(rsComm_t, native_auth_agent_request));
             add_operation(AUTH_AGENT_AUTH_RESPONSE,  OPERATION(rsComm_t, native_auth_agent_response));
+            // New school
+            add_operation(server_prepare_auth_check, OPERATION(RsComm, server_prepare_auth_check_op));
+            add_operation(server_auth_with_password, OPERATION(RsComm, server_auth_with_password_op));
+            add_operation(server_auth_with_session_token, OPERATION(RsComm, server_auth_with_session_token_op));
 #endif
         } // ctor
 
     private:
         json auth_client_start(rcComm_t& comm, const json& req)
         {
+            if (!comm.svrVersion) {
+                THROW(USER__NULL_INPUT_ERR, "svrVersion in comm is null.");
+            }
             json resp{req};
-            resp[irods_auth::next_operation] = AUTH_CLIENT_AUTH_REQUEST;
             resp["user_name"] = comm.proxyUser.userName;
             resp["zone_name"] = comm.proxyUser.rodsZone;
-
+            constexpr auto minimum_version_for_hashed_passwords = irods::version{5, 0, 0};
+            const auto version = irods::to_version(comm.svrVersion->relVersion);
+            if (version < minimum_version_for_hashed_passwords) {
+                resp[irods_auth::next_operation] = AUTH_CLIENT_AUTH_REQUEST;
+            }
+            else {
+                resp[irods_auth::next_operation] = client_init_auth_with_server;
+            }
             return resp;
         } // auth_client_start
 
@@ -118,27 +325,8 @@ namespace irods
 
             // prompt for a password if necessary
             if (need_password) {
-                struct termios tty;
-                memset( &tty, 0, sizeof( tty ) );
-                tcgetattr( STDIN_FILENO, &tty );
-                tcflag_t oldflag = tty.c_lflag;
-                tty.c_lflag &= ~ECHO;
-                int error = tcsetattr( STDIN_FILENO, TCSANOW, &tty );
-                int errsv = errno;
-
-                if (error) {
-                    fmt::print("WARNING: Error {} disabling echo mode. "
-                               "Password will be displayed in plaintext.\n", errsv);
-                }
-                fmt::print("Enter your current iRODS password:");
-                std::string password{};
-                getline(std::cin, password);
+                const auto password = get_password_from_client_stdin();
                 strncpy(md5_buf + CHALLENGE_LEN, password.c_str(), MAX_PASSWORD_LEN);
-                fmt::print("\n");
-                tty.c_lflag = oldflag;
-                if (tcsetattr(STDIN_FILENO, TCSANOW, &tty)) {
-                    fmt::print("Error reinstating echo mode.");
-                }
             }
 
             // create a md5 hash of the challenge
@@ -187,7 +375,102 @@ namespace irods
             return resp;
         } // native_auth_client_response
 
+        auto client_init_auth_with_server_op(RcComm& _comm, const nlohmann::json& _request) -> nlohmann::json
+        {
+            nlohmann::json svr_req{_request};
+            svr_req[irods_auth::next_operation] = server_prepare_auth_check;
+            auto resp = irods_auth::request(_comm, svr_req);
+            resp[irods_auth::next_operation] = client_prepare_auth_check;
+            return resp;
+        } // client_init_auth_with_server_op
+
+        auto client_prepare_auth_check_op(RcComm& _comm, const nlohmann::json& _request) -> nlohmann::json
+        {
+            irods_auth::throw_if_request_message_is_missing_key(_request, {"user_name", "zone_name"});
+            nlohmann::json resp{_request};
+            const auto force_prompt = _request.find(irods_auth::force_password_prompt);
+            if (_request.end() != force_prompt && force_prompt->get<bool>()) {
+                resp["password"] = get_password_from_client_stdin();
+                resp[irods_auth::next_operation] = client_auth_with_password;
+                return resp;
+            }
+            // The anonymous user does not require a session token or password to authenticate.
+            if (ANONYMOUS_USER == _request.at("user_name").get_ref<const std::string&>()) {
+                resp["password"] = "";
+                resp[irods_auth::next_operation] = client_auth_with_password;
+                return resp;
+            }
+            // If a session token is provided by the client to the plugin, autheticate with that.
+            const auto provided_session_token = _request.find("session_token");
+            if (_request.end() != provided_session_token) {
+                resp["session_token"] = provided_session_token->get_ref<const std::string&>();
+                resp[irods_auth::next_operation] = client_auth_with_session_token;
+                return resp;
+            }
+            // If a password is provided by the client to the plugin, authenticate with that.
+            const auto provided_password = _request.find("password");
+            if (_request.end() != provided_password) {
+                resp["password"] = provided_password->get_ref<const std::string&>();
+                resp[irods_auth::next_operation] = client_auth_with_password;
+                return resp;
+            }
+            // If neither a session token nor a password was provided, look for a session token in a local file.
+            const auto discovered_session_token = get_session_token_from_file();
+            if (discovered_session_token && !discovered_session_token->empty()) {
+                resp["session_token"] = *discovered_session_token;
+                resp[irods_auth::next_operation] = client_auth_with_session_token;
+                return resp;
+            }
+            // If no session token was provided, no session token is found in the local file, no password is provided,
+            // AND the user is not anonymous, get the password from stdin. This is the last resort.
+            resp["password"] = get_password_from_client_stdin();
+            resp[irods_auth::next_operation] = client_auth_with_password;
+            return resp;
+        } // client_prepare_auth_check_op
+
+        auto client_auth_with_password_op(RcComm& _comm, const nlohmann::json& _request) -> nlohmann::json
+        {
+            irods_auth::throw_if_request_message_is_missing_key(_request, {"user_name", "zone_name", "password"});
+            nlohmann::json svr_req{_request};
+            svr_req[irods_auth::next_operation] = server_auth_with_password;
+            auto resp = irods_auth::request(_comm, svr_req);
+            const auto session_token = resp.find("session_token");
+            if (resp.end() != session_token) {
+                write_session_token_to_file(session_token->get_ref<const std::string&>());
+            }
+            _comm.loggedIn = 1;
+            resp[irods_auth::next_operation] = irods_auth::flow_complete;
+            return resp;
+        } // client_auth_with_password_op
+
+        auto client_auth_with_session_token_op(RcComm& _comm, const nlohmann::json& _request) -> nlohmann::json
+        {
+            irods_auth::throw_if_request_message_is_missing_key(_request, {"user_name", "zone_name", "session_token"});
+            nlohmann::json svr_req{_request};
+            svr_req[irods_auth::next_operation] = server_auth_with_session_token;
+            nlohmann::json resp;
+            try {
+                resp = irods_auth::request(_comm, svr_req);
+            }
+            catch (const irods::exception& e) {
+                if (AUTHENTICATION_ERROR == e.code()) {
+                    // Failing to authenticate with the session token is not a show-stopper. It just means that we need
+                    // to authenticate with a password instead. Authenticate by forcing a password prompt.
+                    nlohmann::json resp{_request};
+                    resp[irods_auth::force_password_prompt] = true;
+                    resp[irods_auth::next_operation] = client_prepare_auth_check;
+                    return resp;
+                }
+                throw;
+            }
+            _comm.loggedIn = 1;
+            resp[irods_auth::next_operation] = irods_auth::flow_complete;
+            return resp;
+        } // client_auth_with_session_token_op
+
 #ifdef RODS_SERVER
+        // Old school
+
         json native_auth_agent_request(rsComm_t& comm, const json& req)
         {
             json resp{req};
@@ -403,6 +686,102 @@ namespace irods
 
             return resp;
         } // native_auth_agent_response
+
+        // New school
+
+        auto server_prepare_auth_check_op(RsComm& _comm, const nlohmann::json& _request) -> nlohmann::json
+        {
+            nlohmann::json resp{_request};
+            if (_comm.auth_scheme) {
+                free(_comm.auth_scheme);
+            }
+            _comm.auth_scheme = strdup(irods_auth::scheme::native);
+            return resp;
+        } // server_prepare_auth_check_op
+
+        auto server_auth_with_password_op(RsComm& _comm, const nlohmann::json& _request) -> nlohmann::json
+        {
+            irods_auth::throw_if_request_message_is_missing_key(_request, {"password", "zone_name", "user_name"});
+            // Need to do NoLogin because it could get into inf loop for cross zone auth.
+            rodsServerHost_t* host;
+            const auto& zone_name = _request.at("zone_name").get_ref<const std::string&>();
+            int status = getAndConnRcatHostNoLogin(&_comm, PRIMARY_RCAT, zone_name.c_str(), &host);
+            if (status < 0) {
+                THROW(status, fmt::format("Failed to connect to catalog service provider: [{}]", status));
+            }
+            // What follows in this operation requires access to database operations, so continue on the catalog
+            // provider.
+            if (LOCAL_HOST != host->localFlag) {
+                return irods_auth::request(*host->conn, _request);
+            }
+            // Check the provided username / password combination.
+            const auto& user_name = _request.at("user_name").get_ref<const std::string&>();
+            const auto& password = _request.at("password").get_ref<const std::string&>();
+            int valid = 0;
+            const int ec = chl_check_password(&_comm, user_name.c_str(), zone_name.c_str(), password.c_str(), &valid);
+            if (ec < 0) {
+                THROW(ec,
+                      fmt::format(
+                          "Error occurred while checking password for user [{}#{}]: {}", user_name, zone_name, ec));
+            }
+            if (!valid) {
+                THROW(
+                    AUTHENTICATION_ERROR, fmt::format("Authentication failed for user [{}#{}].", user_name, zone_name));
+            }
+            // Success! Now set user privilege information in the RsComm. This could be its own operation, but then we
+            // would require the client to call the operation.
+            set_privileges_in_rs_comm(_comm, user_name, zone_name);
+            // Now we need to get a session token so that the user can authenticate with that instead of the password.
+            char* session_token = nullptr;
+            const auto free_session_token = irods::at_scope_exit{[session_token] { std::free(session_token); }};
+            const auto session_token_ec =
+                chl_create_session_token(&_comm, user_name.c_str(), zone_name.c_str(), &session_token);
+            if (session_token_ec < 0) {
+                THROW(session_token_ec, fmt::format("Error occurred while creating session token."));
+            }
+            nlohmann::json resp{_request};
+            resp["session_token"] = session_token;
+            return resp;
+        } // server_auth_with_password_op
+
+        auto server_auth_with_session_token_op(RsComm& _comm, const nlohmann::json& _request) -> nlohmann::json
+        {
+            irods_auth::throw_if_request_message_is_missing_key(_request, {"session_token", "zone_name", "user_name"});
+            // Need to do NoLogin because it could get into inf loop for cross zone auth.
+            rodsServerHost_t* host;
+            const auto& zone_name = _request.at("zone_name").get_ref<const std::string&>();
+            int status = getAndConnRcatHostNoLogin(&_comm, PRIMARY_RCAT, zone_name.c_str(), &host);
+            if (status < 0) {
+                THROW(status, fmt::format("Failed to connect to catalog service provider: [{}]", status));
+            }
+            // What follows in this operation requires access to database operations, so continue on the catalog
+            // provider.
+            if (LOCAL_HOST != host->localFlag) {
+                return irods_auth::request(*host->conn, _request);
+            }
+            // Check the provided username / password combination.
+            const auto& user_name = _request.at("user_name").get_ref<const std::string&>();
+            const auto& session_token = _request.at("session_token").get_ref<const std::string&>();
+            int valid = 0;
+            const int ec =
+                chl_check_session_token(&_comm, user_name.c_str(), zone_name.c_str(), session_token.c_str(), &valid);
+            if (ec < 0) {
+                THROW(
+                    ec,
+                    fmt::format(
+                        "Error occurred while checking session token for user [{}#{}]: {}", user_name, zone_name, ec));
+            }
+            if (!valid) {
+                // TODO: Don't throw here... return some indication that we want to authenticate with a password.
+                THROW(
+                    AUTHENTICATION_ERROR, fmt::format("Authentication failed for user [{}#{}].", user_name, zone_name));
+            }
+            // Success! Now set user privilege information in the RsComm. This could be its own operation, but then we
+            // would require the client to call the operation.
+            set_privileges_in_rs_comm(_comm, user_name, zone_name);
+            nlohmann::json resp{_request};
+            return resp;
+        } // server_auth_with_session_token_op
 #endif
     }; // class native_authentication
 } // namespace irods
@@ -412,4 +791,3 @@ irods::native_authentication* plugin_factory(const std::string&, const std::stri
 {
     return new irods::native_authentication{};
 }
-
