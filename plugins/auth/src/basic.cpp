@@ -41,7 +41,7 @@ namespace irods
         static constexpr const char* server_perform_auth_check = "server_perform_auth_check";
 
       public:
-        native_authentication()
+        basic_authentication()
         {
             add_operation(client_init_auth_with_server, OPERATION(RcComm, client_init_auth_with_server_op));
             add_operation(client_prepare_auth_check, OPERATION(RcComm, client_prepare_auth_check_op));
@@ -175,9 +175,9 @@ namespace irods
             }
 #endif
             authCheckInp_t authCheckInp{};
-            authCheckInp.challenge = _rsAuthRequestGetChallenge();
+            authCheckInp.challenge = "";
             const auto& response = _request.at("digest").get_ref<const std::string&>();
-            authCheckInp.response = response.c_str();
+            authCheckInp.response = const_cast<char*>(response.c_str());
             // TODO: This is obviously not necessary if we use a new API endpoint.
             addKeyVal(&authCheckInp.cond_input, "use_password_hash", "");
             const std::string username =
@@ -279,12 +279,11 @@ namespace irods
             return resp;
         } // server_perform_auth_check_op
 #endif
-    }; // class native_authentication
+    }; // class basic_authentication
 } // namespace irods
 
 extern "C"
-irods::native_authentication* plugin_factory(const std::string&, const std::string&)
+irods::basic_authentication* plugin_factory(const std::string&, const std::string&)
 {
-    return new irods::native_authentication{};
-}
-
+    return new irods::basic_authentication{};
+} // plugin_factory

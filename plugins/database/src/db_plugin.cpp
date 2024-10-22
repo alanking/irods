@@ -16068,6 +16068,7 @@ auto db_authenticate_client_op(irods::plugin_context& _ctx,
             log_db::error("{}: Failed to get auth configuration. [{}]", __func__, err.result());
             return PASS(err);
         }
+#if 0
         constexpr const char* no_expiration_time_str = "9999"; // 9999-12-31-23.59.00
         const rodsLong_t expiration_time = std::stoll(matching_password_info.expiration_timestamp);
         const auto password_expires = false; // matching_password_info.expiration_timestamp.starts_with(no_expiration_time_str);
@@ -16080,6 +16081,7 @@ auto db_authenticate_client_op(irods::plugin_context& _ctx,
                 return ERROR(CAT_PASSWORD_EXPIRED, fmt::format("{}: Password expired.", __func__));
             }
         }
+#endif
         // If the user being authenticated is not a rodsadmin, we are done.
         // TODO: WHY are we done?? Because a non-rodsadmin cannot act on behalf of other users?
         if ("rodsadmin" != matching_password_info.user_type) {
