@@ -44,9 +44,9 @@ namespace
 
     auto use_password_hash(const RcComm& _comm) -> bool
     {
-        static const auto version_must_be_greater_than_this = irods::to_version("rods4.4.0");
+        static const auto must_be_greater_than_this = irods::to_version("rods4.4.0");
         const auto server_version = irods::to_version(_comm.svrVersion->relVersion);
-        return server_version && version_must_be_greater_than_this && *server_version > *version_must_be_greater_than_this;
+        return server_version && must_be_greater_than_this && *server_version > *must_be_greater_than_this;
     } // use_password_hash
 } // anonymous namespace
 
@@ -62,14 +62,18 @@ namespace irods
         native_authentication()
         {
             add_operation(AUTH_CLIENT_AUTH_REQUEST,  OPERATION(rcComm_t, native_auth_client_request));
-            add_operation(AUTH_ESTABLISH_CONTEXT,    OPERATION(rcComm_t, native_auth_establish_context));
+            // Password-hashing mode...
             add_operation(client_prepare_auth_check, OPERATION(rcComm_t, native_auth_client_prepare_auth_check));
             add_operation(client_perform_auth_check, OPERATION(rcComm_t, native_auth_client_perform_auth_check));
+            // Non-password-hashing mode...
+            add_operation(AUTH_ESTABLISH_CONTEXT,    OPERATION(rcComm_t, native_auth_establish_context));
             add_operation(AUTH_CLIENT_AUTH_RESPONSE, OPERATION(rcComm_t, native_auth_client_response));
 #ifdef RODS_SERVER
             add_operation(AUTH_AGENT_AUTH_REQUEST,   OPERATION(rsComm_t, native_auth_agent_request));
-            add_operation(AUTH_AGENT_AUTH_RESPONSE,  OPERATION(rsComm_t, native_auth_agent_response));
+            // Password-hashing mode...
             add_operation(server_perform_auth_check, OPERATION(rsComm_t, native_auth_server_perform_auth_check));
+            // Non-password-hashing mode...
+            add_operation(AUTH_AGENT_AUTH_RESPONSE,  OPERATION(rsComm_t, native_auth_agent_response));
 #endif
         } // ctor
 

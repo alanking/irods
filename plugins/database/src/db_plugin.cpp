@@ -16070,7 +16070,7 @@ auto db_authenticate_client_op(irods::plugin_context& _ctx,
         }
         constexpr const char* no_expiration_time_str = "9999"; // 9999-12-31-23.59.00
         const rodsLong_t expiration_time = std::stoll(matching_password_info.expiration_timestamp);
-        const auto password_expires = matching_password_info.expiration_timestamp.starts_with(no_expiration_time_str);
+        const auto password_expires = false; // matching_password_info.expiration_timestamp.starts_with(no_expiration_time_str);
         if (password_expires && expiration_time >= ac.password_min_time && expiration_time <= ac.password_max_time) {
             const rodsLong_t modify_time = std::stoll(matching_password_info.modify_timestamp);
             const rodsLong_t now = static_cast<rodsLong_t>(std::time(nullptr));
@@ -16116,7 +16116,7 @@ auto db_authenticate_client_op(irods::plugin_context& _ctx,
     }
     catch (const irods::exception& e) {
         log_db::error("{}: {}", __func__, e.client_display_what());
-        return ERROR(SYS_LIBRARY_ERROR, e.what());
+        return ERROR(e.code(), e.what());
     }
     catch (const std::exception& e) {
         log_db::error("{}: {}", __func__, e.what());
