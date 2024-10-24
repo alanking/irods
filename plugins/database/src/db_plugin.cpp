@@ -65,6 +65,11 @@
 #include <utility>
 #include <vector>
 
+// TODO: Maybe this should not be done in the database plugin...
+#include <openssl/core_names.h>
+#include <openssl/kdf.h>
+#include <openssl/params.h>
+
 // clang-format off
 using log_db        = irods::experimental::log::database;
 using log_sql       = irods::experimental::log::sql;
@@ -234,13 +239,57 @@ namespace
         return SUCCESS();
     } // get_auth_config
 
+    auto create_password_salt() -> std::string
+    {
+        constexpr std::int16_t salt_length = 32;
+        return irods::generate_random_alphanumeric_string(salt_length);
+    } // create_password_salt
+
+    auto derive_hash_from_password(const std::string& _password, const std::string& _salt) -> std::string
+    {
+        constexpr std::size_t maximum_password_length = MAX_PASSWORD_LEN;
+        constexpr std::size_t maximum_salt_length = maximum_password_length;
+        if (_password.size() > maximum_password_length || _salt.size() > maximum_salt_length) {
+            THROW(PASSWORD_EXCEEDS_MAX_SIZE, fmt::format("Cannot derive key from password - password exceeds maximum size [{}].", maximum_password_length));
+        }
+        // TODO: Is it easy to swap this out? Are they really all that different?
+        EVP_KDF* kdf = EVP_KDF_fetch(nullptr, "SCRYPT", nullptr);
+        EVP_KDF_CTX* kctx = EVP_KDF_CTX_new(kdf);
+        EVP_KDF_free(kdf);
+        const auto free_kdf_ctx = irods::at_scope_exit{[kctx]{EVP_KDF_CTX_free(kctx);}};
+        OSSL_PARAM params[6];
+        OSSL_PARAM* p = params;
+        std::uint64_t n = 1024;
+        std::uint32_t r = 8;
+        std::uint32_t p = 16;
+        char password_buf[MAX_PASSWORD_LEN + 1]{};
+        std::strncpy(password_buf, _password.c_str(), _password.size());
+        char salt_buf[MAX_PASSWORD_LEN + 1]{};
+        std::strncpy(salt_buf, _salt.c_str(), _salt.size());
+        *p++ = OSSL_PARAM_construct_octet_string(OSSL_KDF_PARAM_PASSWORD, static_cast<void*>(const_cast<char*>(_password.c_str())), static_cast<std::size_t>(_password.size()));
+        *p++ = OSSL_PARAM_construct_octet_string(OSSL_KDF_PARAM_SALT, static_cast<void*>(const_cast<char*>(_salt.c_str())), static_cast<std::size_t>(_salt.size()));
+        *p++ = OSSL_PARAM_construct_uint64(OSSL_KDF_PARAM_SCRYPT_N, &n);
+        *p++ = OSSL_PARAM_construct_uint32(OSSL_KDF_PARAM_SCRYPT_R, &r);
+        *p++ = OSSL_PARAM_construct_uint32(OSSL_KDF_PARAM_SCRYPT_P, &p);
+        *p = OSSL_PARAM_construct_end();
+        unsigned char out[64]{};
+        if (EVP_KDF_derive(kctx, out, sizeof(out), params) <= 0) {
+            THROW(CAT_PASSWORD_ENCODING_ERROR, fmt::format("{}: Failed to derive key for password.", __func__));
+        }
+        char key_str[64 + 1]{};
+        std::memcpy(key_str, out, sizeof(out));
+        return {key_str};
+    } // derive_hash_from_password
+
+#if 0
     auto create_salted_password_hash(RsComm* _comm, const std::string& _password) -> std::pair<std::string, std::string>
     {
-        const std::string salt = "something_random_one_day";
-        const auto salted_password = salt + _password;
-        const auto hashed_password = salted_password; // TODO: Pass to a hashing function!
+        const auto salt = create_password_salt();
+        //const auto salted_password = salt + _password;
+        const auto hashed_password = derive_hash_from_password(_password, salt);
         return {hashed_password, salt};
     } // create_salted_password_hash
+#endif
 } // anonymous namespace
 
 // =-=-=-=-=-=-=-
@@ -7694,7 +7743,9 @@ irods::error db_mod_user_op(
         }
     }
     const char* password = _new_value;
-    const auto [password_hash, password_salt] = create_salted_password_hash(_ctx.comm(), password);
+    const auto password_salt = create_password_salt();
+    const auto password_hash = derive_hash_from_password(password, password_salt);
+    //const auto [password_hash, password_salt] = create_salted_password_hash(_ctx.comm(), password);
     if (0 == strcmp(_option, "password_hash")) {
         const int check_password_strength_ec = icatApplyRule(_ctx.comm(), const_cast<char*>("acCheckPasswordStrength"), const_cast<char*>(password));
         if (check_password_strength_ec < 0) {
@@ -16006,7 +16057,7 @@ auto db_authenticate_client_op(irods::plugin_context& _ctx,
     {
         std::string user_id;
         std::string user_type;
-        std::string password;
+        std::string hashed_password;
         std::string expiration_timestamp;
         std::string create_timestamp;
         std::string modify_timestamp;
@@ -16048,9 +16099,10 @@ auto db_authenticate_client_op(irods::plugin_context& _ctx,
         password_information matching_password_info;
         for (auto&& password_info : password_infos) {
             // TODO: hashem later -- for now, just compare the strings directly
-            const std::string to_hash = password_info.salt + _response;
-            auto input_hash = to_hash;
-            if (input_hash == password_info.password) {
+            //const std::string to_hash = password_info.salt + _response;
+            //auto input_hash = to_hash;
+            const auto key = derive_hash_from_password(_response, password_info.salt);
+            if (key == password_info.hashed_password) {
                 matching_password_info = password_info;
                 password_found = true;
                 break;
@@ -16068,20 +16120,6 @@ auto db_authenticate_client_op(irods::plugin_context& _ctx,
             log_db::error("{}: Failed to get auth configuration. [{}]", __func__, err.result());
             return PASS(err);
         }
-#if 0
-        constexpr const char* no_expiration_time_str = "9999"; // 9999-12-31-23.59.00
-        const rodsLong_t expiration_time = std::stoll(matching_password_info.expiration_timestamp);
-        const auto password_expires = false; // matching_password_info.expiration_timestamp.starts_with(no_expiration_time_str);
-        if (password_expires && expiration_time >= ac.password_min_time && expiration_time <= ac.password_max_time) {
-            const rodsLong_t modify_time = std::stoll(matching_password_info.modify_timestamp);
-            const rodsLong_t now = static_cast<rodsLong_t>(std::time(nullptr));
-            const auto password_is_expired = (modify_time + expiration_time < now);
-            if (password_is_expired) {
-                // TODO: Delete expired password from database...
-                return ERROR(CAT_PASSWORD_EXPIRED, fmt::format("{}: Password expired.", __func__));
-            }
-        }
-#endif
         // If the user being authenticated is not a rodsadmin, we are done.
         // TODO: WHY are we done?? Because a non-rodsadmin cannot act on behalf of other users?
         if ("rodsadmin" != matching_password_info.user_type) {
