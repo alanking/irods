@@ -80,8 +80,10 @@ namespace irods
             bool need_password = false;
             if (_request.at("user_name").get_ref<const std::string&>() != ANONYMOUS_USER) {
                 // And do we have an .irodsA file with a password in it?
-                // TODO: We need to check for a token here??
-                //need_password = obfGetPw(password_buf);
+                // TODO: We need to check for a token here. This will involve opening a file and reading the contents out.
+                // TODO: How do we prevent a stolen session token from being used? Should we hash tokens too?
+                // TODO: If the token file cannot be read or is empty, we need to re-authenticate with a password.
+                // TODO: We do not write down passwords, so we have to prompt for it or get it through some keyword.
                 need_password = true;
             }
             // prompt for a password if necessary
@@ -276,6 +278,9 @@ namespace irods
                 }
                 free(authCheckOut);
             }
+            // TODO: Now we need to get a session token so that the user can authenticate with that in the future.
+            // TODO: Is this another API call? Should we try to invoke the database operation directly?
+            // TODO: Should the auth check above be returning the session token?
             return resp;
         } // server_perform_auth_check_op
 #endif
