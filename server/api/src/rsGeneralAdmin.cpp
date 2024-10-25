@@ -167,7 +167,7 @@ namespace
         const std::string_view _option,
         const std::string_view _user_type) -> void
     {
-        if (_option != "password") {
+        if (_option != "password" && _option != "obfuscated_password") {
             return;
         }
 

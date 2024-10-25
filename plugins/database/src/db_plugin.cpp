@@ -7453,7 +7453,7 @@ irods::error db_mod_user_op(
     char form1[] = "update R_USER_MAIN set %s=?, modify_ts=? where user_name=? and zone_name=?";
     char form2[] = "update R_USER_MAIN set %s=%s, modify_ts=? where user_name=? and zone_name=?";
     char form3[] = "update R_USER_PASSWORD set rcat_password=?, modify_ts=? where user_id=?";
-    char form4[] = "insert into R_USER_PASSWORD (user_id, rcat_password, pass_expiry_ts,  create_ts, modify_ts) values ((select user_id from R_USER_MAIN where user_name=? and zone_name=?), ?, ?, ?, ?)";
+    char form4[] = "insert into R_USER_PASSWORD (user_id, rcat_password, pass_expiry_ts, create_ts, modify_ts, password_salt) values ((select user_id from R_USER_MAIN where user_name=? and zone_name=?), ?, ?, ?, ?, ?)";
     char form5[] = "insert into R_USER_AUTH (user_id, user_auth_name, create_ts) values ((select user_id from R_USER_MAIN where user_name=? and zone_name=?), ?, ?)";
     char form6[] = "delete from R_USER_AUTH where user_id = (select user_id from R_USER_MAIN where user_name=? and zone_name=?) and user_auth_name = ?";
 #if MY_ICAT
@@ -7617,7 +7617,7 @@ irods::error db_mod_user_op(
             log_sql::debug("chlModUser SQL 7");
         }
     }
-    if ( strcmp( _option, "password" ) == 0 ) {
+    if ( strcmp( _option, "obfuscated_password" ) == 0 ) {
         int i;
         char userIdStr[MAX_NAME_LEN];
         i = decodePw( _ctx.comm(), _new_value, decoded );
@@ -7681,6 +7681,7 @@ irods::error db_mod_user_op(
             cllBindVars[cllBindVarCount++] = "9999-12-31-23.59.01";
             cllBindVars[cllBindVarCount++] = myTime;
             cllBindVars[cllBindVarCount++] = myTime;
+            cllBindVars[cllBindVarCount++] = "";
             if ( logSQL != 0 ) {
                 log_sql::debug("chlModUser SQL 10");
             }
@@ -7689,7 +7690,7 @@ irods::error db_mod_user_op(
     const char* password = _new_value;
     const auto password_salt = irods::generate_salt();
     const auto password_hash = irods::hash_password(password, password_salt);
-    if (0 == strcmp(_option, "password_hash")) {
+    if (0 == strcmp(_option, "password")) {
         log_db::info("Setting password_hash for user [{}#{}]", userName2, zoneName);
         const int check_password_strength_ec = icatApplyRule(_ctx.comm(), const_cast<char*>("acCheckPasswordStrength"), const_cast<char*>(password));
         if (check_password_strength_ec < 0) {
@@ -7698,7 +7699,7 @@ irods::error db_mod_user_op(
             }
             return ERROR(check_password_strength_ec, "icatApplyRule for acCheckPasswordStrength failed.");
         }
-        char userIdStr[MAX_NAME_LEN]{};
+        char user_id[MAX_NAME_LEN]{};
         log_db::info("getting user_id for [{}#{}]", userName2, zoneName);
         int ec = 0;
         {
@@ -7707,7 +7708,7 @@ irods::error db_mod_user_op(
             bindVars.push_back(zoneName);
             ec = cmlGetStringValueFromSql(
                     "select R_USER_PASSWORD.user_id from R_USER_PASSWORD, R_USER_MAIN where R_USER_MAIN.user_name=? and R_USER_MAIN.zone_name=? and R_USER_MAIN.user_id = R_USER_PASSWORD.user_id",
-                    userIdStr, MAX_NAME_LEN, bindVars, &icss);
+                    user_id, MAX_NAME_LEN, bindVars, &icss);
         }
         if (0 != ec && CAT_NO_ROWS_FOUND != ec) {
             return ERROR(ec, fmt::format("Failed to get user_id for user [{}#{}]", userName2, zoneName));
@@ -7720,7 +7721,7 @@ irods::error db_mod_user_op(
             cllBindVars[cllBindVarCount++] = password_hash.c_str();
             cllBindVars[cllBindVarCount++] = myTime;
             cllBindVars[cllBindVarCount++] = password_salt.c_str();
-            cllBindVars[cllBindVarCount++] = userIdStr;
+            cllBindVars[cllBindVarCount++] = user_id;
         }
         else {
             opType = 4;
