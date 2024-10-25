@@ -27,6 +27,7 @@
 #include "irods/miscServerFunct.hpp"
 #include "irods/modAccessControl.h"
 #include "irods/msParam.h"
+#include "irods/password_hash.hpp"
 #include "irods/private/irods_catalog_properties.hpp"
 #include "irods/private/irods_sql_logger.hpp"
 #include "irods/private/low_level.hpp"
@@ -64,11 +65,6 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
-
-// TODO: Maybe this should not be done in the database plugin...
-#include <openssl/core_names.h>
-#include <openssl/kdf.h>
-#include <openssl/params.h>
 
 // clang-format off
 using log_db        = irods::experimental::log::database;
@@ -238,58 +234,6 @@ namespace
 
         return SUCCESS();
     } // get_auth_config
-
-    auto create_password_salt() -> std::string
-    {
-        constexpr std::int16_t salt_length = 32;
-        return irods::generate_random_alphanumeric_string(salt_length);
-    } // create_password_salt
-
-    auto derive_hash_from_password(const std::string& _password, const std::string& _salt) -> std::string
-    {
-        constexpr std::size_t maximum_password_length = MAX_PASSWORD_LEN;
-        constexpr std::size_t maximum_salt_length = maximum_password_length;
-        if (_password.size() > maximum_password_length || _salt.size() > maximum_salt_length) {
-            THROW(PASSWORD_EXCEEDS_MAX_SIZE, fmt::format("Cannot derive key from password - password exceeds maximum size [{}].", maximum_password_length));
-        }
-        // TODO: Is it easy to swap this out? Are they really all that different?
-        EVP_KDF* kdf = EVP_KDF_fetch(nullptr, "SCRYPT", nullptr);
-        EVP_KDF_CTX* kctx = EVP_KDF_CTX_new(kdf);
-        EVP_KDF_free(kdf);
-        const auto free_kdf_ctx = irods::at_scope_exit{[kctx]{EVP_KDF_CTX_free(kctx);}};
-        OSSL_PARAM params[6];
-        OSSL_PARAM* p = params;
-        std::uint64_t n = 1024;
-        std::uint32_t r = 8;
-        std::uint32_t p = 16;
-        char password_buf[MAX_PASSWORD_LEN + 1]{};
-        std::strncpy(password_buf, _password.c_str(), _password.size());
-        char salt_buf[MAX_PASSWORD_LEN + 1]{};
-        std::strncpy(salt_buf, _salt.c_str(), _salt.size());
-        *p++ = OSSL_PARAM_construct_octet_string(OSSL_KDF_PARAM_PASSWORD, static_cast<void*>(const_cast<char*>(_password.c_str())), static_cast<std::size_t>(_password.size()));
-        *p++ = OSSL_PARAM_construct_octet_string(OSSL_KDF_PARAM_SALT, static_cast<void*>(const_cast<char*>(_salt.c_str())), static_cast<std::size_t>(_salt.size()));
-        *p++ = OSSL_PARAM_construct_uint64(OSSL_KDF_PARAM_SCRYPT_N, &n);
-        *p++ = OSSL_PARAM_construct_uint32(OSSL_KDF_PARAM_SCRYPT_R, &r);
-        *p++ = OSSL_PARAM_construct_uint32(OSSL_KDF_PARAM_SCRYPT_P, &p);
-        *p = OSSL_PARAM_construct_end();
-        unsigned char out[64]{};
-        if (EVP_KDF_derive(kctx, out, sizeof(out), params) <= 0) {
-            THROW(CAT_PASSWORD_ENCODING_ERROR, fmt::format("{}: Failed to derive key for password.", __func__));
-        }
-        char key_str[64 + 1]{};
-        std::memcpy(key_str, out, sizeof(out));
-        return {key_str};
-    } // derive_hash_from_password
-
-#if 0
-    auto create_salted_password_hash(RsComm* _comm, const std::string& _password) -> std::pair<std::string, std::string>
-    {
-        const auto salt = create_password_salt();
-        //const auto salted_password = salt + _password;
-        const auto hashed_password = derive_hash_from_password(_password, salt);
-        return {hashed_password, salt};
-    } // create_salted_password_hash
-#endif
 } // anonymous namespace
 
 // =-=-=-=-=-=-=-
@@ -7743,10 +7687,10 @@ irods::error db_mod_user_op(
         }
     }
     const char* password = _new_value;
-    const auto password_salt = create_password_salt();
-    const auto password_hash = derive_hash_from_password(password, password_salt);
-    //const auto [password_hash, password_salt] = create_salted_password_hash(_ctx.comm(), password);
+    const auto password_salt = irods::generate_salt();
+    const auto password_hash = irods::hash_password(password, password_salt);
     if (0 == strcmp(_option, "password_hash")) {
+        log_db::info("Setting password_hash for user [{}#{}]", userName2, zoneName);
         const int check_password_strength_ec = icatApplyRule(_ctx.comm(), const_cast<char*>("acCheckPasswordStrength"), const_cast<char*>(password));
         if (check_password_strength_ec < 0) {
             if (NO_RULE_OR_MSI_FUNCTION_FOUND_ERR == check_password_strength_ec) {
@@ -7754,57 +7698,44 @@ irods::error db_mod_user_op(
             }
             return ERROR(check_password_strength_ec, "icatApplyRule for acCheckPasswordStrength failed.");
         }
-        try {
-            std::string user_id_string;
-            {
-                auto [db_instance, db_conn] = irods::experimental::catalog::new_database_connection();
-                nanodbc::statement stmt{db_conn};
-                nanodbc::prepare(
-                    stmt,
-                    "select R_USER_PASSWORD.user_id from R_USER_PASSWORD, R_USER_MAIN where R_USER_MAIN.user_name = ? "
-                    "and R_USER_MAIN.zone_name = ? and R_USER_MAIN.user_id = R_USER_PASSWORD.user_id");
-                stmt.bind(0, userName2);
-                stmt.bind(1, zoneName);
-                auto result = nanodbc::execute(stmt);
-                if (result.rows() > 0) {
-                    user_id_string = result.get<std::string>(0);
-                }
-            }
-            if (!user_id_string.empty()) {
-                std::strncpy(
-                    tSQL,
-                    "update R_USER_PASSWORD set rcat_password = ?, modify_ts = ?, password_salt = ? where user_id = ?",
-                    MAX_SQL_SIZE);
-                cllBindVars[cllBindVarCount++] = password_hash.c_str();
-                cllBindVars[cllBindVarCount++] = myTime;
-                cllBindVars[cllBindVarCount++] = password_salt.c_str();
-                cllBindVars[cllBindVarCount++] = user_id_string.c_str();
-            }
-            else {
-                opType = 4;
-                std::strncpy(tSQL,
-                             "insert into R_USER_PASSWORD (user_id, rcat_password, pass_expiry_ts, create_ts, "
-                             "modify_ts, password_salt) values ((select user_id from R_USER_MAIN where user_name = ? "
-                             "and zone_name = ?), ?, ?, ?, ?, ?)",
-                             MAX_SQL_SIZE);
-                cllBindVars[cllBindVarCount++] = userName2;
-                cllBindVars[cllBindVarCount++] = zoneName;
-                cllBindVars[cllBindVarCount++] = password_hash.c_str();
-                cllBindVars[cllBindVarCount++] = "9999-12-31-23.59.01";
-                cllBindVars[cllBindVarCount++] = myTime;
-                cllBindVars[cllBindVarCount++] = myTime;
-                cllBindVars[cllBindVarCount++] = password_salt.c_str();
-            }
+        char userIdStr[MAX_NAME_LEN]{};
+        log_db::info("getting user_id for [{}#{}]", userName2, zoneName);
+        int ec = 0;
+        {
+            std::vector<std::string> bindVars;
+            bindVars.push_back(userName2);
+            bindVars.push_back(zoneName);
+            ec = cmlGetStringValueFromSql(
+                    "select R_USER_PASSWORD.user_id from R_USER_PASSWORD, R_USER_MAIN where R_USER_MAIN.user_name=? and R_USER_MAIN.zone_name=? and R_USER_MAIN.user_id = R_USER_PASSWORD.user_id",
+                    userIdStr, MAX_NAME_LEN, bindVars, &icss);
         }
-        catch (const std::exception& e) {
-            std::string msg = fmt::format("{}: Exception occurred: [{}]", __func__, e.what());
-            log_db::error(msg);
-            return ERROR(SYS_INTERNAL_ERR, std::move(msg));
+        if (0 != ec && CAT_NO_ROWS_FOUND != ec) {
+            return ERROR(ec, fmt::format("Failed to get user_id for user [{}#{}]", userName2, zoneName));
         }
-        catch (...) {
-            std::string msg = fmt::format("{}: Unknown error occurred.", __func__);
-            log_db::error(msg);
-            return ERROR(SYS_UNKNOWN_ERROR, std::move(msg));
+        if (0 == ec) {
+            std::strncpy(
+                tSQL,
+                "update R_USER_PASSWORD set rcat_password = ?, modify_ts = ?, password_salt = ? where user_id = ?",
+                MAX_SQL_SIZE);
+            cllBindVars[cllBindVarCount++] = password_hash.c_str();
+            cllBindVars[cllBindVarCount++] = myTime;
+            cllBindVars[cllBindVarCount++] = password_salt.c_str();
+            cllBindVars[cllBindVarCount++] = userIdStr;
+        }
+        else {
+            opType = 4;
+            std::strncpy(tSQL,
+                         "insert into R_USER_PASSWORD (user_id, rcat_password, pass_expiry_ts, create_ts, "
+                         "modify_ts, password_salt) values ((select user_id from R_USER_MAIN where user_name = ? "
+                         "and zone_name = ?), ?, ?, ?, ?, ?)",
+                         MAX_SQL_SIZE);
+            cllBindVars[cllBindVarCount++] = userName2;
+            cllBindVars[cllBindVarCount++] = zoneName;
+            cllBindVars[cllBindVarCount++] = password_hash.c_str();
+            cllBindVars[cllBindVarCount++] = "9999-12-31-23.59.01";
+            cllBindVars[cllBindVarCount++] = myTime;
+            cllBindVars[cllBindVarCount++] = myTime;
+            cllBindVars[cllBindVarCount++] = password_salt.c_str();
         }
     }
 
@@ -16101,7 +16032,7 @@ auto db_authenticate_client_op(irods::plugin_context& _ctx,
             // TODO: hashem later -- for now, just compare the strings directly
             //const std::string to_hash = password_info.salt + _response;
             //auto input_hash = to_hash;
-            const auto key = derive_hash_from_password(_response, password_info.salt);
+            const auto key = irods::hash_password(_response, password_info.salt);
             if (key == password_info.hashed_password) {
                 matching_password_info = password_info;
                 password_found = true;
