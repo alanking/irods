@@ -1,6 +1,7 @@
 #include "irods/authentication_plugin_framework.hpp"
 
 #include "irods/authenticate.h"
+#include "irods/irods_exception.hpp"
 #include "irods/irods_stacktrace.hpp"
 #include "irods/miscServerFunct.hpp"
 #include "irods/msParam.h"
@@ -15,7 +16,10 @@
 #endif // RODS_SERVER
 
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <optional>
 #include <sstream>
 #include <termios.h>
 #include <unistd.h>
@@ -49,6 +53,61 @@ namespace
         }
         return password;
     } // get_password_from_client_stdin
+
+    auto get_session_token_file_path() -> std::optional<std::filesystem::path>
+    {
+        // TODO(#XXXX): Consider caching the path in a static variable once found.
+        // See whether the environment has a variable which specifies where the session token file is located.
+        constexpr const char* session_token_file_env_var = "IRODS_SESSION_TOKEN_FILE_PATH";
+        const char* env_var = std::getenv(session_token_file_env_var);
+        if (env_var && '\0' != *env_var) {
+            return std::filesystem::path{env_var};
+        }
+        // If no HOME environment variable is set, this is not an error. We just don't know where the session token
+        // file is located, so we must return nothing.
+        const char* home_var = std::getenv("HOME");
+        if (!home_var) {
+            return std::nullopt;
+        }
+        constexpr const char* session_token_filename_default = ".irods/irods_session_token";
+        return std::filesystem::path{home_var} / session_token_filename_default;
+    } // get_session_token_file_path
+
+    auto get_session_token_from_file() -> std::optional<std::string>
+    {
+        const auto session_token_file_path = get_session_token_file_path();
+        if (!session_token_file_path || !std::filesystem::exists(*session_token_file_path)) {
+            return std::nullopt;
+        }
+        std::ifstream session_token_file_stream{session_token_file_path->c_str()};
+        if (!session_token_file_stream.is_open()) {
+            const auto ec = UNIX_FILE_OPEN_ERR - errno;
+            THROW(ec, fmt::format("Failed to open session token file [{}]. errno:[{}]", session_token_file_path->c_str(), errno));
+        }
+        // TODO(#XXXX): Limit the number of characters read in here. Session tokens should be a fixed length.
+        // TODO(#XXXX): Might also consider a JSON format. For now, just expect the contents to be the session token.
+        std::string session_token_file_contents;
+        session_token_file_stream >> session_token_file_contents;
+        return session_token_file_contents;
+    } // get_session_token_from_file
+
+    auto write_session_token_to_file(const std::string& _session_token) -> void
+    {
+        const auto session_token_file_path = get_session_token_file_path();
+        if (!session_token_file_path) {
+            return;
+        }
+        // TODO(#XXXX): Is it an error to record the session token to the file? What if the client doesn't want to do 
+        // that?
+        std::ofstream session_token_file_stream{session_token_file_path->c_str()};
+        if (!session_token_file_stream.is_open()) {
+            const auto ec = UNIX_FILE_OPEN_ERR - errno;
+            THROW(ec, fmt::format("Failed to open session token file [{}]. errno:[{}]", session_token_file_path->c_str(), errno));
+        }
+        // TODO(#XXXX): Limit the number of characters read in here. Session tokens should be a fixed length.
+        // TODO(#XXXX): Might also consider a JSON format. For now, just expect the contents to be the session token.
+        session_token_file_stream << _session_token;
+    } // write_session_token_to_file
 } // anonymous namespace
 
 namespace irods
@@ -61,8 +120,8 @@ namespace irods
         static constexpr const char* client_auth_with_password = "client_auth_with_password";
         static constexpr const char* client_auth_with_session_token = "client_auth_with_session_token";
         static constexpr const char* server_prepare_auth_check = "server_prepare_auth_check";
-        static constexpr const char* server_auth_with_password = "client_auth_with_password";
-        static constexpr const char* server_auth_with_session_token = "client_auth_with_session_token";
+        static constexpr const char* server_auth_with_password = "server_auth_with_password";
+        static constexpr const char* server_auth_with_session_token = "server_auth_with_session_token";
 
       public:
         basic_authentication()
@@ -102,31 +161,36 @@ namespace irods
             irods_auth::throw_if_request_message_is_missing_key(_request, {"user_name", "zone_name"});
             nlohmann::json resp{_request};
             // The anonymous user does not require a session token or password to authenticate.
-            if (_request.at("user_name").get_ref<const std::string&>() == ANONYMOUS_USER) {
+            if (ANONYMOUS_USER == _request.at("user_name").get_ref<const std::string&>()) {
                 resp["password"] = "";
-                resp[irods_auth::next_operation] = client_perform_auth_check;
+                resp[irods_auth::next_operation] = client_auth_with_password;
                 return resp;
             }
+            // If a session token is provided by the client to the plugin, autheticate with that.
             const auto provided_session_token = _request.find("session_token");
             if (_request.end() != provided_session_token) {
                 resp["session_token"] = provided_session_token->get_ref<const std::string&>();
-                resp[irods_auth::next_operation] = client_perform_auth_check;
+                resp[irods_auth::next_operation] = client_auth_with_session_token;
                 return resp;
             }
-            // TODO: We need to check for a token here. This will involve opening a file and reading the contents out.
-            // TODO: How do we prevent a stolen session token from being used? Should we hash tokens too?
-            // TODO: If the token file cannot be read or is empty, we need to re-authenticate with a password.
-            // TODO: We do not write down passwords, so we have to prompt for it or get it through some keyword.
+            // If a password is provided by the client to the plugin, authenticate with that.
             const auto provided_password = _request.find("password");
             if (_request.end() != provided_password) {
                 resp["password"] = provided_password->get_ref<const std::string&>();
-                resp[irods_auth::next_operation] = client_perform_auth_check;
+                resp[irods_auth::next_operation] = client_auth_with_password;
+                return resp;
+            }
+            // If neither a session token nor a password was provided, look for a session token in a local file.
+            const auto discovered_session_token = get_session_token_from_file();
+            if (discovered_session_token && !discovered_session_token->empty()) {
+                resp["session_token"] = *discovered_session_token;
+                resp[irods_auth::next_operation] = client_auth_with_session_token;
                 return resp;
             }
             // If no session token was provided, no session token is found in the local file, no password is provided,
-            // AND the user is not anonymous, get the password from stdin.
+            // AND the user is not anonymous, get the password from stdin. This is the last resort.
             resp["password"] = get_password_from_client_stdin();
-            resp[irods_auth::next_operation] = client_perform_auth_check;
+            resp[irods_auth::next_operation] = client_auth_with_password;
             return resp;
         } // client_prepare_auth_check_op
 
@@ -176,9 +240,9 @@ namespace irods
             }
             authCheckInp_t authCheckInp{};
             authCheckInp.challenge = "";
-            const auto& response = _request.at("digest").get_ref<const std::string&>();
+            const auto& response = _request.at("password").get_ref<const std::string&>();
             authCheckInp.response = const_cast<char*>(response.c_str());
-            // TODO: This is obviously not necessary if we use a new API endpoint.
+            // TODO(#XXXX): This is obviously not necessary if we use a new API endpoint.
             addKeyVal(&authCheckInp.cond_input, "use_password_hash", "");
             const std::string username =
                 fmt::format("{}#{}", _request.at("user_name").get_ref<const std::string&>(), zone_name);
@@ -276,9 +340,9 @@ namespace irods
                 }
                 free(authCheckOut);
             }
-            // TODO: Now we need to get a session token so that the user can authenticate with that in the future.
-            // TODO: Is this another API call? Should we try to invoke the database operation directly?
-            // TODO: Should the auth check above be returning the session token?
+            // TODO(#XXXX): Now we need to get a session token so that the user can authenticate with that in the future.
+            // TODO(#XXXX): Is this another API call? Should we try to invoke the database operation directly?
+            // TODO(#XXXX): Should the auth check above be returning the session token?
             return resp;
         } // server_auth_with_password_op
 
@@ -295,9 +359,9 @@ namespace irods
             }
             authCheckInp_t authCheckInp{};
             authCheckInp.challenge = "";
-            const auto& response = _request.at("digest").get_ref<const std::string&>();
+            const auto& response = _request.at("session_token").get_ref<const std::string&>();
             authCheckInp.response = const_cast<char*>(response.c_str());
-            // TODO: This is obviously not necessary if we use a new API endpoint.
+            // TODO(#XXXX): This is obviously not necessary if we use a new API endpoint.
             addKeyVal(&authCheckInp.cond_input, "use_password_hash", "");
             const std::string username =
                 fmt::format("{}#{}", _request.at("user_name").get_ref<const std::string&>(), zone_name);
@@ -395,9 +459,9 @@ namespace irods
                 }
                 free(authCheckOut);
             }
-            // TODO: Now we need to get a session token so that the user can authenticate with that in the future.
-            // TODO: Is this another API call? Should we try to invoke the database operation directly?
-            // TODO: Should the auth check above be returning the session token?
+            // TODO(#XXXX): Now we need to get a session token so that the user can authenticate with that in the future.
+            // TODO(#XXXX): Is this another API call? Should we try to invoke the database operation directly?
+            // TODO(#XXXX): Should the auth check above be returning the session token?
             return resp;
         } // server_auth_with_session_token_op
 #endif
