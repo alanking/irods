@@ -58,9 +58,11 @@ int getAndConnRcatHost(
     }
 }
 
-int
-getAndConnRcatHostNoLogin( rsComm_t *rsComm, int rcatType, char *rcatZoneHint,
-                           rodsServerHost_t **rodsServerHost ) {
+int getAndConnRcatHostNoLogin(rsComm_t* rsComm,
+                              int rcatType,
+                              const char* rcatZoneHint,
+                              rodsServerHost_t** rodsServerHost)
+{
     int status = getRcatHost( rcatType, rcatZoneHint, rodsServerHost );
 
     if ( status < 0 ) {
