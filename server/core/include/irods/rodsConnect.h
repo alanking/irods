@@ -96,10 +96,10 @@ int getAndConnRcatHost(rsComm_t *rsComm,
                        const char *rcatZoneHint,
                        rodsServerHost_t **rodsServerHost);
 
-int getAndConnRcatHostNoLogin(rsComm_t *rsComm,
+int getAndConnRcatHostNoLogin(rsComm_t* rsComm,
                               int rcatType,
-                              char *rcatZoneHint,
-                              rodsServerHost_t **rodsServerHost);
+                              const char* rcatZoneHint,
+                              rodsServerHost_t** rodsServerHost);
 
 /// \brief Gets the Catalog Service Provider host information from `ZoneInfoHead`.
 ///
