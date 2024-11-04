@@ -441,7 +441,7 @@ def setup_database_values(irods_config, cursor=None, default_resource_directory=
     plaintext_session_token = password_hashing.generate_session_token()
     hashed_session_token = password_hashing.hash_session_token(plaintext_session_token, salt)
     execute_sql_statement(cursor,
-            "insert into R_USER_SESSION_KEY values (?,?,?,?,?,?,?);",
+            "insert into R_USER_SESSION_TOKEN values (?,?,?,?,?,?,?);",
             admin_user_id,
             base64.b64encode(hashed_session_token),
             salt,

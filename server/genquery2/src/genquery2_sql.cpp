@@ -81,7 +81,7 @@ namespace
         "R_USER_GROUP",                 // 14
         "R_USER_MAIN",                  // 15
         "R_USER_PASSWORD",              // 16
-        "R_USER_SESSION_KEY",           // 17
+        "R_USER_SESSION_TOKEN",         // 17
         "R_ZONE_MAIN",                  // 18
         "R_QUOTA_MAIN",                 // 19
     }); // table_names
@@ -126,7 +126,7 @@ namespace
         {to_index("R_USER_MAIN"), to_index("R_USER_AUTH")},                 // R_USER_MAIN.user_id = R_USER_AUTH.user_id
         {to_index("R_USER_MAIN"), to_index("R_USER_GROUP")},                // R_USER_MAIN.user_id = R_USER_GROUP.group_user_id
         {to_index("R_USER_MAIN"), to_index("R_USER_PASSWORD")},             // R_USER_MAIN.user_id = R_USER_PASSWORD.user_id
-        {to_index("R_USER_MAIN"), to_index("R_USER_SESSION_KEY")},          // R_USER_MAIN.user_id = R_USER_SESSION_KEY.user_id
+        {to_index("R_USER_MAIN"), to_index("R_USER_SESSION_TOKEN")},        // R_USER_MAIN.user_id = R_USER_SESSION_TOKEN.user_id
 
         // Handle R_USER_GROUP?
         // Handle R_QUOTA_MAIN

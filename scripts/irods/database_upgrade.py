@@ -189,6 +189,15 @@ def run_update(irods_config, cursor):
             for option in password_config_dict:
                 database_connect.execute_sql_statement(cursor, statement_str.format(scheme, option, password_config_dict[option]))
 
+    elif new_schema_version == 12:
+        # Support for session tokens will be added for 5.0.0 using R_USER_SESSION_KEY table. Seeing as the table is
+        # not currently being used at all (officially), let's rename some stuff for the future.
+        database_connect.execute_sql_statement(cursor, "alter table R_USER_SESSION_KEY rename to R_USER_SESSION_TOKEN;")
+        database_connect.execute_sql_statement(
+            cursor, "alter table R_USER_SESSION_TOKEN rename column session_info to session_token_salt;")
+        database_connect.execute_sql_statement(
+            cursor, "alter table R_USER_SESSION_TOKEN alter column session_token_salt varchar(32);")
+
     else:
         raise IrodsError('Upgrade to schema version %d is unsupported.' % (new_schema_version))
 

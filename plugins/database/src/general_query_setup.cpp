@@ -37,7 +37,7 @@ icatGeneralQuerySetup() {
     sTableInit();   /* initialize */
 
     sTable( "R_USER_PASSWORD",  "R_USER_PASSWORD", 0 );
-    sTable( "R_USER_SESSION_KEY",  "R_USER_SESSION_KEY", 0 );
+    sTable( "R_USER_SESSION_TOKEN",  "R_USER_SESSION_TOKEN", 0 );
     sTable( "R_TOKN_MAIN",  "R_TOKN_MAIN", 0 );
     sTable( "R_RESC_GROUP",  "R_RESC_GROUP", 0 );
     sTable( "R_ZONE_MAIN",  "R_ZONE_MAIN", 0 );
@@ -662,7 +662,7 @@ icatGeneralQuerySetup() {
     sFklink( "r_met2_au_user_group", "r_met2_au_user_main", "r_met2_au_user_group.user_id = r_met2_au_user_main.user_id" );
     sFklink( "R_USER_MAIN", "R_USER_PASSWORD", "R_USER_MAIN.user_id = R_USER_PASSWORD.user_id" );
     sFklink( "R_USER_MAIN", "R_USER_AUTH", "R_USER_MAIN.user_id = R_USER_AUTH.user_id" );
-    sFklink( "R_USER_MAIN", "R_USER_SESSION_KEY", "R_USER_MAIN.user_id = R_USER_SESSION_KEY.user_id" );
+    sFklink( "R_USER_MAIN", "R_USER_SESSION_TOKEN", "R_USER_MAIN.user_id = R_USER_SESSION_TOKEN.user_id" );
     sFklink( "R_USER_MAIN", "r_data_access", "R_USER_MAIN.user_id = r_data_access.user_id" );
     sFklink( "R_USER_MAIN", "R_USER_GROUP", "R_USER_MAIN.user_id = R_USER_GROUP.user_id" );
     sFklink( "R_USER_GROUP", "r_group_main", "R_USER_GROUP.group_user_id = r_group_main.user_id" );

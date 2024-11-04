@@ -110,7 +110,6 @@ foreach(plugin IN LISTS IRODS_DATABASE_PLUGINS)
 
   install(
     FILES
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/icatDropSysTables.sql"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/icatSysInserts.sql"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/icatPurgeRecycleBin.sql"
     DESTINATION "${IRODS_HOME_DIRECTORY}/packaging/sql"
