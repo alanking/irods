@@ -12,7 +12,7 @@ import tempfile
 import time
 
 from . import lib
-from . import password_obfuscation
+from . import password_hashing
 from .exceptions import IrodsError, IrodsWarning
 
 try:
@@ -427,15 +427,31 @@ def setup_database_values(irods_config, cursor=None, default_resource_directory=
 
     #password
     salt = password_hashing.generate_salt()
-    hashed_password = password_hashing.hash_password(irods_config.admin_password)
+    hashed_password = password_hashing.hash_password(irods_config.admin_password, salt)
     execute_sql_statement(cursor,
             "insert into R_USER_PASSWORD values (?,?,'9999-12-31-23.59.00',?,?,?);",
             admin_user_id,
-            base64.urlsafe_b64encode(hashed_password),
+            base64.b64encode(hashed_password),
             timestamp,
             timestamp,
             salt,
             log_params=False)
+    # Session token for service account administrator.
+    salt = password_hashing.generate_salt()
+    plaintext_session_token = password_hashing.generate_session_token()
+    hashed_session_token = password_hashing.hash_session_token(plaintext_session_token, salt)
+    execute_sql_statement(cursor,
+            "insert into R_USER_SESSION_KEY values (?,?,?,?,?,?,?);",
+            admin_user_id,
+            base64.b64encode(hashed_session_token),
+            salt,
+            'native',
+            timestamp,
+            timestamp,
+            '9999-12-31-23.59.00', # This token doesn't expire, for now...
+            log_params=False)
+    # TODO: Not sure if this is the right place for this, but, here we are...
+    irods_config.admin_session_token = plaintext_session_token
 
     #collections
     system_collections = [

@@ -261,9 +261,9 @@ namespace irods
             json resp{req};
             resp["user_name"] = comm.proxyUser.userName;
             resp["zone_name"] = comm.proxyUser.rodsZone;
-            constexpr auto minimum_version_for_hashed_passwords = irods::version{5, 0, 0};
+            constexpr auto maximum_version_for_obfuscated_passwords = irods::version{4, 4, 0};
             const auto version = irods::to_version(comm.svrVersion->relVersion);
-            if (version < minimum_version_for_hashed_passwords) {
+            if (version <= maximum_version_for_obfuscated_passwords) {
                 resp[irods_auth::next_operation] = AUTH_CLIENT_AUTH_REQUEST;
             }
             else {
@@ -271,6 +271,8 @@ namespace irods
             }
             return resp;
         } // auth_client_start
+
+        // Old school
 
         json native_auth_client_request(rcComm_t& comm, const json& req)
         {
@@ -374,6 +376,8 @@ namespace irods
 
             return resp;
         } // native_auth_client_response
+
+        // New school
 
         auto client_init_auth_with_server_op(RcComm& _comm, const nlohmann::json& _request) -> nlohmann::json
         {

@@ -227,6 +227,24 @@ class IrodsConfig(object):
             print(encode(value, mtime=mtime), end='', file=f)
         os.utime(paths.password_file_path(), (mtime, mtime))
 
+    @property
+    def admin_session_token(self):
+        session_token_file_path = paths.session_token_file_path()
+        if not os.path.exists(os.path.dirname(session_token_file_path)):
+            return None
+        with open(session_token_file_path, 'rt') as f:
+            return f.read()
+
+    @admin_session_token.setter
+    def admin_session_token(self, value):
+        l = logging.getLogger(__name__)
+        session_token_file_path = paths.session_token_file_path()
+        if not os.path.exists(os.path.dirname(session_token_file_path)):
+            os.makedirs(os.path.dirname(session_token_file_path), mode=0o600)
+        with open(session_token_file_path, 'wt') as f:
+            l.debug('Writing session token file %s', f.name)
+            print(value, end='', file=f)
+
     def throw_if_property_is_not_defined_in_server_config(self, property_name):
         if property_name not in self.server_config:
             raise IrodsSchemaError('Cannot validate configuration files. [{}] is missing a required property: [{}].'
