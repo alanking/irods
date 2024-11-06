@@ -15957,7 +15957,7 @@ auto db_check_session_token_op(irods::plugin_context& _ctx,
         auto [db_instance, db_conn] = irods::experimental::catalog::new_database_connection();
         nanodbc::statement stmt{db_conn};
         nanodbc::prepare(stmt,
-                         "select R_USER_SESSION_TOKEN.session_key, R_USER_SESSION_TOKEN.session_info, "
+                         "select R_USER_SESSION_TOKEN.session_token, R_USER_SESSION_TOKEN.session_token_salt, "
                          "R_USER_SESSION_TOKEN.session_expiry_ts from R_USER_SESSION_TOKEN, R_USER_MAIN where user_name=? "
                          "and zone_name=? and R_USER_MAIN.user_id = R_USER_SESSION_TOKEN.user_id");
         stmt.bind(0, _user_name);
@@ -16020,7 +16020,7 @@ auto db_create_session_token_op(irods::plugin_context& _ctx,
         auto [db_instance, db_conn] = irods::experimental::catalog::new_database_connection();
         nanodbc::statement stmt{db_conn};
         nanodbc::prepare(stmt,
-                         "insert into R_USER_SESSION_TOKEN (user_id, session_key, session_info, auth_scheme, "
+                         "insert into R_USER_SESSION_TOKEN (user_id, session_token, session_token_salt, auth_scheme, "
                          "session_expiry_ts, create_ts, modify_ts) values ((select user_id from R_USER_MAIN where "
                          "user_name = ? and zone_name = ?), ?, ?, ?, ?, ?, ?)");
         stmt.bind(0, _user_name);

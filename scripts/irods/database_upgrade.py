@@ -197,6 +197,8 @@ def run_update(irods_config, cursor):
             cursor, "alter table R_USER_SESSION_TOKEN rename column session_info to session_token_salt;")
         database_connect.execute_sql_statement(
             cursor, "alter table R_USER_SESSION_TOKEN alter column session_token_salt varchar(32);")
+        database_connect.execute_sql_statement(
+            cursor, "alter table R_USER_SESSION_TOKEN rename column session_key to session_token;")
 
     else:
         raise IrodsError('Upgrade to schema version %d is unsupported.' % (new_schema_version))
