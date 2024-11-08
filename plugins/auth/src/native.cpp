@@ -195,6 +195,52 @@ namespace
         _comm.proxyUser.authInfo.authFlag = user_privilege_level;
         _comm.clientUser.authInfo.authFlag = client_user_privilege_level;
     } // set_privileges_in_rs_comm
+
+    auto auth_scheme_requires_secure_communications(const std::string& _auth_scheme) -> bool
+    {
+        constexpr const char* KW_CFG_PAM_INTERACTIVE_INSECURE_MODE = "insecure_mode";
+        const auto config_path = irods::configuration_parser::key_path_t{
+            irods::KW_CFG_PLUGIN_CONFIGURATION,
+            AUTHENTICATION_CONFIG_KW,
+            _auth_scheme,
+            KW_CFG_PAM_INTERACTIVE_INSECURE_MODE};
+        try {
+            // Return the negation of the configuration's value because the configuration is "insecure_mode", but this
+            // function is returning whether secure communications are required. So, if insecure_mode is set to true, we
+            // should return false for this function; and vice-versa.
+            return !irods::get_server_property<const bool>(config_path);
+        }
+        catch (const irods::exception& e) {
+            if (KEY_NOT_FOUND == e.code()) {
+                // If the plugin configuration is not set, default to requiring secure communications.
+                return true;
+            }
+            // Re-throw for any other error.
+            throw;
+        }
+        catch (const json::exception e) {
+            THROW(CONFIGURATION_ERROR,
+                fmt::format("Error occurred while attempting to get the value of server configuration [{}]: {}",
+                            fmt::join(config_path, "."), e.what()));
+        }
+    } // auth_scheme_requires_secure_communications
+
+    auto throw_if_secure_communications_required() -> void
+    {
+        if (auth_scheme_requires_secure_communications(irods_auth::scheme::native)) {
+            THROW(SYS_NOT_ALLOWED,
+                  "Client communications with this server are not secure and this authentication plugin is "
+                  "configured to require TLS/SSL communication. Authentication is not allowed unless this server "
+                  "is configured to require TLS/SSL in order to prevent leaking sensitive user information.");
+        }
+    } // throw_if_secure_communications_required
+
+    auto log_warning_for_insecure_mode() -> void
+    {
+        log_auth::warn("Client communications with this server are not secure, and sensitive user information is "
+                       "being communicated over the network in an unencrypted manner. Configure this server to "
+                       "require TLS/SSL to prevent security leaks.");
+    } // log_warning_for_insecure_mode
 #endif // RODS_SERVER
 } // anonymous namespace
 
@@ -649,14 +695,28 @@ namespace irods
         {
             nlohmann::json resp{_request};
             if (_comm.auth_scheme) {
-                free(_comm.auth_scheme);
+                std::free(_comm.auth_scheme);
             }
             _comm.auth_scheme = strdup(irods_auth::scheme::native);
+            // Make sure the connection is secured before proceeding. If the connection is not secure, a warning will be
+            // displayed in the server log at the very least. If the plugin is not configured to allow for insecure
+            // communications between the client and server, the authentication attempt is rejected outright.
+            if (irods::CS_NEG_USE_SSL != comm.negotiation_results) {
+                throw_if_secure_communications_required();
+                log_warning_for_insecure_mode();
+            }
             return resp;
         } // server_prepare_auth_check_op
 
         auto server_auth_with_password_op(RsComm& _comm, const nlohmann::json& _request) -> nlohmann::json
         {
+            // Make sure the connection is secured before proceeding. If the connection is not secure, a warning will be
+            // displayed in the server log at the very least. If the plugin is not configured to allow for insecure
+            // communications between the client and server, the authentication attempt is rejected outright.
+            if (irods::CS_NEG_USE_SSL != comm.negotiation_results) {
+                throw_if_secure_communications_required();
+                log_warning_for_insecure_mode();
+            }
             irods_auth::throw_if_request_message_is_missing_key(_request, {password_kw, zone_name_kw, user_name_kw});
             // Need to do NoLogin because it could get into inf loop for cross zone auth.
             rodsServerHost_t* host;
@@ -668,6 +728,18 @@ namespace irods
             // What follows in this operation requires access to database operations, so continue on the catalog
             // provider.
             if (LOCAL_HOST != host->localFlag) {
+                // In addition to the client-server connection, the server-to-server connection which occurs between the
+                // local server and the catalog service provider must be secured as well. If the connection is not secure,
+                // a warning will be displayed in the server log at the very least. If the plugin is not configured to
+                // allow for insecure communications between the client (in this case, also a server) and server, the
+                // authentication attempt is rejected outright.
+                if (irods::CS_NEG_USE_SSL != comm.negotiation_results) {
+                    throw_if_secure_communications_required();
+                    log_warning_for_insecure_mode();
+                }
+                // Note: We should not disconnect this server-to-server connection because the connection is not owned by
+                // this context. A set of server-to-server connections is maintained by the server agent and reused by
+                // various APIs and operations as needed.
                 return irods_auth::request(*host->conn, _request);
             }
             // Check the provided username / password combination.
