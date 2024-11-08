@@ -4,6 +4,7 @@
 #define USE_SSL 1
 #include "irods/sslSockComm.h"
 
+#include "irods/authentication_client_utils.hpp"
 #include "irods/icatHighLevelRoutines.hpp"
 #include "irods/irods_at_scope_exit.hpp"
 #include "irods/irods_auth_constants.hpp"
@@ -129,7 +130,7 @@ namespace irods
             const auto force_prompt = req.find(irods_auth::force_password_prompt);
             if (req.end() != force_prompt && force_prompt->get<bool>()) {
                 fmt::print("Enter your current PAM password:");
-                resp[irods::AUTH_PASSWORD_KEY] = irods::auth::get_password_from_client_stdin();
+                resp[irods::AUTH_PASSWORD_KEY] = irods::experimental::auth::get_password_from_client_stdin();
             }
             else {
                 // obfGetPw returns 0 if the password is retrieved successfully. Therefore,
@@ -144,7 +145,7 @@ namespace irods
 
                 // There's no password stored, so we need to prompt the client for it.
                 fmt::print("Enter your current PAM password:");
-                resp[irods::AUTH_PASSWORD_KEY] = irods::auth::get_password_from_client_stdin();
+                resp[irods::AUTH_PASSWORD_KEY] = irods::experimental::auth::get_password_from_client_stdin();
             }
 
             // Need to perform the PAM authentication steps before we authenticate with the

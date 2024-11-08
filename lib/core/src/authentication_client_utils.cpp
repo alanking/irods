@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <termios.h>
 
-namespace irods::auth
+namespace irods::experimental::auth
 {
     auto get_password_from_client_stdin() -> std::string
     {
@@ -29,4 +29,4 @@ namespace irods::auth
         }
         return password;
     } // get_password_from_client_stdin
-} // namespace irods::auth
+} // namespace irods::experimental::auth

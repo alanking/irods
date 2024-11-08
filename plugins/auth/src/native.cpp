@@ -18,6 +18,7 @@
 
 #ifdef RODS_SERVER
 #include "irods/icatHighLevelRoutines.hpp"
+#include "irods/irods_client_server_negotiation.hpp"
 #include "irods/irods_logger.hpp"
 #include "irods/irods_rs_comm_query.hpp"
 #include "irods/miscServerFunct.hpp"
@@ -201,7 +202,7 @@ namespace
         constexpr const char* KW_CFG_PAM_INTERACTIVE_INSECURE_MODE = "insecure_mode";
         const auto config_path = irods::configuration_parser::key_path_t{
             irods::KW_CFG_PLUGIN_CONFIGURATION,
-            AUTHENTICATION_CONFIG_KW,
+            "authentication",
             _auth_scheme,
             KW_CFG_PAM_INTERACTIVE_INSECURE_MODE};
         try {
@@ -359,7 +360,7 @@ namespace irods
             // prompt for a password if necessary
             if (need_password) {
                 fmt::print("Enter your iRODS password:");
-                const auto password = irods::auth::get_password_from_client_stdin();
+                const auto password = irods::experimental::auth::get_password_from_client_stdin();
                 strncpy(md5_buf + CHALLENGE_LEN, password.c_str(), MAX_PASSWORD_LEN);
             }
 
@@ -427,7 +428,7 @@ namespace irods
             const auto force_prompt = _request.find(irods_auth::force_password_prompt);
             if (_request.end() != force_prompt && force_prompt->get<bool>()) {
                 fmt::print("Enter your iRODS password:");
-                resp[password_kw] = irods::auth::get_password_from_client_stdin();
+                resp[password_kw] = irods::experimental::auth::get_password_from_client_stdin();
                 resp[irods_auth::next_operation] = client_auth_with_password;
                 return resp;
             }
@@ -453,7 +454,7 @@ namespace irods
             // If no session token was provided, no session token is found in the local file, no password is provided,
             // AND the user is not anonymous, get the password from stdin. This is the last resort.
             fmt::print("Enter your iRODS password:");
-            resp[password_kw] = irods::auth::get_password_from_client_stdin();
+            resp[password_kw] = irods::experimental::auth::get_password_from_client_stdin();
             resp[irods_auth::next_operation] = client_auth_with_password;
             return resp;
         } // client_prepare_auth_check_op
@@ -701,7 +702,7 @@ namespace irods
             // Make sure the connection is secured before proceeding. If the connection is not secure, a warning will be
             // displayed in the server log at the very least. If the plugin is not configured to allow for insecure
             // communications between the client and server, the authentication attempt is rejected outright.
-            if (irods::CS_NEG_USE_SSL != comm.negotiation_results) {
+            if (irods::CS_NEG_USE_SSL != _comm.negotiation_results) {
                 throw_if_secure_communications_required();
                 log_warning_for_insecure_mode();
             }
@@ -713,7 +714,7 @@ namespace irods
             // Make sure the connection is secured before proceeding. If the connection is not secure, a warning will be
             // displayed in the server log at the very least. If the plugin is not configured to allow for insecure
             // communications between the client and server, the authentication attempt is rejected outright.
-            if (irods::CS_NEG_USE_SSL != comm.negotiation_results) {
+            if (irods::CS_NEG_USE_SSL != _comm.negotiation_results) {
                 throw_if_secure_communications_required();
                 log_warning_for_insecure_mode();
             }
@@ -733,7 +734,7 @@ namespace irods
                 // a warning will be displayed in the server log at the very least. If the plugin is not configured to
                 // allow for insecure communications between the client (in this case, also a server) and server, the
                 // authentication attempt is rejected outright.
-                if (irods::CS_NEG_USE_SSL != comm.negotiation_results) {
+                if (irods::CS_NEG_USE_SSL != _comm.negotiation_results) {
                     throw_if_secure_communications_required();
                     log_warning_for_insecure_mode();
                 }
