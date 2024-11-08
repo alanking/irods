@@ -20,37 +20,12 @@
 #include <sys/wait.h>
 
 #include <string>
-#include <termios.h>
 #include <unistd.h>
 
 namespace
 {
     namespace irods_auth = irods::experimental::auth;
     using json = nlohmann::json;
-
-    auto get_password_from_client_stdin() -> std::string
-    {
-        struct termios tty;
-        tcgetattr(STDIN_FILENO, &tty);
-        tcflag_t oldflag = tty.c_lflag;
-        tty.c_lflag &= ~ECHO;
-        int error = tcsetattr(STDIN_FILENO, TCSANOW, &tty);
-        int errsv = errno;
-
-        if (error) {
-            printf("WARNING: Error %d disabling echo mode. Password will be displayed in plaintext.\n", errsv);
-        }
-        printf("Enter your current PAM password:");
-        std::string password;
-        getline(std::cin, password);
-        printf("\n");
-        tty.c_lflag = oldflag;
-        if (tcsetattr(STDIN_FILENO, TCSANOW, &tty)) {
-            printf("Error reinstating echo mode.\n");
-        }
-
-        return password;
-    } // get_password_from_client_stdin
 
 #ifdef RODS_SERVER
     auto run_pam_auth_check(const std::string& _username, const std::string& _password) -> void
@@ -153,7 +128,8 @@ namespace irods
             // general other clients want to use the already-authenticated "session."
             const auto force_prompt = req.find(irods_auth::force_password_prompt);
             if (req.end() != force_prompt && force_prompt->get<bool>()) {
-                resp[irods::AUTH_PASSWORD_KEY] = get_password_from_client_stdin();
+                fmt::print("Enter your current PAM password:");
+                resp[irods::AUTH_PASSWORD_KEY] = irods::auth::get_password_from_client_stdin();
             }
             else {
                 // obfGetPw returns 0 if the password is retrieved successfully. Therefore,
@@ -167,7 +143,8 @@ namespace irods
                 }
 
                 // There's no password stored, so we need to prompt the client for it.
-                resp[irods::AUTH_PASSWORD_KEY] = get_password_from_client_stdin();
+                fmt::print("Enter your current PAM password:");
+                resp[irods::AUTH_PASSWORD_KEY] = irods::auth::get_password_from_client_stdin();
             }
 
             // Need to perform the PAM authentication steps before we authenticate with the

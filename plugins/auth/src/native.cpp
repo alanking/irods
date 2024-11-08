@@ -6,13 +6,12 @@
 #include "irods/authRequest.h"
 #include "irods/authResponse.h"
 #include "irods/authenticate.h"
+#include "irods/authentication_client_utils.hpp"
 #include "irods/base64.hpp"
 #include "irods/irods_auth_constants.hpp"
 #include "irods/irods_auth_plugin.hpp"
 #include "irods/irods_exception.hpp"
-#include "irods/irods_logger.hpp"
 #include "irods/irods_stacktrace.hpp"
-#include "irods/miscServerFunct.hpp"
 #include "irods/msParam.h"
 #include "irods/rcConnect.h"
 #include "irods/rodsDef.h"
@@ -21,6 +20,7 @@
 #include "irods/icatHighLevelRoutines.hpp"
 #include "irods/irods_logger.hpp"
 #include "irods/irods_rs_comm_query.hpp"
+#include "irods/miscServerFunct.hpp"
 #include "irods/rsAuthCheck.hpp"
 #include "irods/rsAuthRequest.hpp"
 #define IRODS_USER_ADMINISTRATION_ENABLE_SERVER_SIDE_API
@@ -29,7 +29,6 @@
 
 #include <openssl/md5.h>
 
-#include <termios.h>
 #include <unistd.h>
 
 #include <cstring>
@@ -54,27 +53,6 @@ namespace
 #endif // RODS_SERVER
     using json = nlohmann::json;
     namespace irods_auth = irods::experimental::auth;
-
-    auto get_password_from_client_stdin() -> std::string
-    {
-        struct termios tty;
-        tcgetattr(STDIN_FILENO, &tty);
-        tcflag_t oldflag = tty.c_lflag;
-        tty.c_lflag &= ~ECHO;
-        if (const auto error = tcsetattr(STDIN_FILENO, TCSANOW, &tty); error) {
-            const int errsv = errno;
-            fmt::print("WARNING: Error {} disabling echo mode. Password will be displayed in plaintext.\n", errsv);
-        }
-        printf("Enter your iRODS password:");
-        std::string password;
-        getline(std::cin, password);
-        printf("\n");
-        tty.c_lflag = oldflag;
-        if (tcsetattr(STDIN_FILENO, TCSANOW, &tty)) {
-            fmt::print("Error reinstating echo mode.\n");
-        }
-        return password;
-    } // get_password_from_client_stdin
 
     auto get_password_file_path() -> std::optional<std::filesystem::path>
     {
@@ -334,7 +312,8 @@ namespace irods
 
             // prompt for a password if necessary
             if (need_password) {
-                const auto password = get_password_from_client_stdin();
+                fmt::print("Enter your iRODS password:");
+                const auto password = irods::auth::get_password_from_client_stdin();
                 strncpy(md5_buf + CHALLENGE_LEN, password.c_str(), MAX_PASSWORD_LEN);
             }
 
@@ -401,7 +380,8 @@ namespace irods
             nlohmann::json resp{_request};
             const auto force_prompt = _request.find(irods_auth::force_password_prompt);
             if (_request.end() != force_prompt && force_prompt->get<bool>()) {
-                resp[password_kw] = get_password_from_client_stdin();
+                fmt::print("Enter your iRODS password:");
+                resp[password_kw] = irods::auth::get_password_from_client_stdin();
                 resp[irods_auth::next_operation] = client_auth_with_password;
                 return resp;
             }
@@ -426,7 +406,8 @@ namespace irods
             }
             // If no session token was provided, no session token is found in the local file, no password is provided,
             // AND the user is not anonymous, get the password from stdin. This is the last resort.
-            resp[password_kw] = get_password_from_client_stdin();
+            fmt::print("Enter your iRODS password:");
+            resp[password_kw] = irods::auth::get_password_from_client_stdin();
             resp[irods_auth::next_operation] = client_auth_with_password;
             return resp;
         } // client_prepare_auth_check_op
