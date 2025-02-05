@@ -1,20 +1,17 @@
 from __future__ import print_function
-import sys
-if sys.version_info < (2, 7):
-    import unittest2 as unittest
-else:
-    import unittest
 
 import json
 import os
+import sys
 import textwrap
 import time
+import unittest
 
 from . import resource_suite
 from . import session
-from .. import test
-from .. import paths
 from .. import lib
+from .. import paths
+from .. import test
 from ..configuration import IrodsConfig
 from ..controller import IrodsController
 
@@ -983,3 +980,66 @@ class Test_Execution_Frequency(resource_suite.ResourceBase, unittest.TestCase):
         finally:
             self.user0.run_icommand(['iqdel', '-a'])
 
+
+@unittest.skipIf(plugin_name == "irods_rule_engine_plugin-python", "Only implemented for native rule language.")
+def test_large_number_of_heavyweight_delay_rules(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(self):
+        # Create test user.
+        self.user1 = session.mkuser_and_return_session("rodsuser", "peggy", "hooyeah", lib.get_hostname())
+
+        # Use this collection for all the testing.
+        self.dirname = "large_collection"
+        self.public_collection_path = "/".join(["/" + self.user1.zone_name, "public_collection"])
+        self.collection_path = "/".join([self.public_collection_path self.dirname])
+
+        # Create a collection that all users can use.
+        with session.make_session_for_existing_admin() as admin_session:
+            admin_session.assert_icommand(["imkdir", "-p", self.collection_path])
+            admin_session.assert_icommand(["ichmod", "-r", "own", "public", self.public_collection_path])
+
+        # Create a lot of files in a local directory for general test usage.
+        self.max_sql_rows = 256
+        self.file_count = self.max_sql_rows + 1
+        shutil.rmtree(self.dirname, ignore_errors=True)
+        lib.make_large_local_tmp_dir(self.dirname, file_count, 1)
+
+    @classmethod
+    def tearDownClass(self):
+        # Remove test files.
+        shutil.rmtree(self.dirname, ignore_errors=True)
+        # End test user session.
+        self.user1.__exit__()
+        # Remove test user.
+        with session.make_session_for_existing_admin() as admin_session:
+            admin_session.run_icommand(['iadmin', 'rmuser', self.user1.username])
+            admin_session.run_icommand(["irm", "-rf", self.public_collection_path])
+
+    def setUp(self):
+        self.user1.assert_icommand(["iput", "-r", self.dirname, self.collection_path])
+
+    def tearDown(self):
+        self.user1.assert_icommand(["irm", "-rf", self.dirname, self.collection_path])
+
+    def test_more_than_MAX_SQL_ROWS_replication_delay_rules_complete_successfully(self):
+        other_resc = "another_resc"
+        try:
+            rule_map = {
+                'irods_rule_engine_plugin-irods_rule_language': textwrap.dedent('''
+                    test_async_replicate_collection {{
+                        delay("<PLUSET>0.1s</PLUSET><INST_NAME>irods_rule_engine_plugin-irods_rule_language-instance</INST_NAME>") {{
+                            msiAddKeyVal(*kvp,"{metadata_attr}","We are about to fail...");
+                            msiAssociateKeyValuePairsToObj(*kvp,"{logical_path}","-d");
+                            msiGoodFailure();
+                            msiAddKeyVal(*fail_kvp,"{metadata_attr}","You should never see this line.");
+                            msiAssociateKeyValuePairsToObj(*fail_kvp,"{logical_path}","-d");
+                        }}
+                        writeLine("stdout", "rule queued");
+                    }}
+                    OUTPUT ruleExecOut
+                ''')
+        }
+
+        finally:
+            self.user1.assert_icommand(["irm", "-rf", self.dirname, self.collection_path])
