@@ -869,6 +869,7 @@ NEW_ERROR(SSL_INIT_ERROR,                              -2102000)
 NEW_ERROR(SSL_HANDSHAKE_ERROR,                         -2103000)
 NEW_ERROR(SSL_SHUTDOWN_ERROR,                          -2104000)
 NEW_ERROR(SSL_CERT_ERROR,                              -2105000)
+NEW_ERROR(TLS_NOT_ENABLED,                             -2106000)
 /** @} */
 
 /* OOI CI error codes */

@@ -181,19 +181,13 @@ namespace irods
 
             svr_req[irods_auth::next_operation] = AUTH_AGENT_AUTH_REQUEST;
 
-            // Need to enable SSL here if it is not already being used because the PAM password
-            // is sent to the server in the clear.
-            const bool using_ssl = irods::CS_NEG_USE_SSL == comm.negotiation_results;
-            const auto end_ssl_if_we_enabled_it = irods::at_scope_exit{[&comm, using_ssl] {
-                if (!using_ssl) {
-                    sslEnd(&comm);
-                }
-            }};
-
-            if (!using_ssl) {
-                if (const int ec = sslStart(&comm); ec) {
-                    THROW(ec, "failed to enable SSL");
-                }
+            // TLS is required to authenticate with a PAM password because the password is sent to the server in the
+            // request. If communications with the server are not secured, this plugin will not proceed. This is not
+            // enforced on the server-side plugin, so if somebody out there writes a client which does something else,
+            // that's not our responsibility.
+            if (irods::CS_NEG_USE_SSL != comm.negotiation_results) {
+                THROW(
+                    TLS_NOT_ENABLED, "TLS communications are required by pam_password plugin, but TLS is not enabled.");
             }
 
             auto resp = irods_auth::request(comm, svr_req);
@@ -259,15 +253,10 @@ namespace irods
             }
 
             if (LOCAL_HOST != host->localFlag) {
-                const auto disconnect = irods::at_scope_exit{[host] {
-                    rcDisconnect(host->conn);
-                    host->conn = nullptr;
-                }};
-
                 log_auth::trace("redirecting call to CSP");
 
-                // Need to enable SSL here if it is not already being used because the PAM password
-                // is forwarded to the provider in the clear.
+                // TLS is required to authenticate with a PAM password because the password is sent to the server in the
+                // request. If communications with the other server are not secured, this plugin will not proceed.
                 // clang-format off
                 const bool using_ssl = (0 == std::strncmp(
                     irods::CS_NEG_USE_SSL.c_str(),
@@ -275,17 +264,9 @@ namespace irods
                     MAX_NAME_LEN));
                 // clang-format on
 
-                const auto end_ssl_if_we_enabled_it = irods::at_scope_exit{[host, using_ssl] {
-                    if (!using_ssl) {
-                        sslEnd(host->conn);
-                    }
-                }};
-
                 if (!using_ssl) {
-                    if (const int ec = sslStart(host->conn); ec) {
-                        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-array-to-pointer-decay)
-                        THROW(ec, "failed to enable SSL in server-to-server communication");
-                    }
+                    THROW(TLS_NOT_ENABLED,
+                          "TLS communications are required by pam_password plugin, but TLS is not enabled.");
                 }
 
                 return irods_auth::request(*host->conn, req);
