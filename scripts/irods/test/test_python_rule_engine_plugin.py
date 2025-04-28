@@ -133,3 +133,18 @@ class Test_Python_Rule_Engine_Plugin(session.make_sessions_mixin([('otherrods', 
             f'attribute: {avu_name}\n',
             f'value: {avu_value}\n'
         ])
+
+    @unittest.skipUnless(plugin_name == 'irods_rule_engine_plugin-python', 'only applicable for python REP')
+    def test_CAT_SUCCESS_BUT_WITH_NO_INFO_is_treated_as_an_error__issue_7381(self):
+        with append_native_re_to_server_config():
+            with temporary_core_file(plugin_name=PYTHON_RULE_ENGINE_PLUGIN_NAME) as core_py:
+                core_py.add_rule(dedent("""
+                    import irods_errors
+                    def myrule(*unused):
+                        return irods_errors.CAT_SUCCESS_BUT_WITH_NO_INFO
+                    """))
+                self.user.assert_icommand(
+                    ["irule", "-r", "irods_rule_engine_plugin-irods_rule_language-instance",
+                     """writeLine("stdout", error("CAT_SUCCESS_BUT_WITH_NO_INFO") == errorcode(myrule()))""",
+                     "null", "ruleExecOut"],
+                    "STDOUT", ["true"])
