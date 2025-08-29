@@ -37,7 +37,8 @@ wheel = [
 maximum_password_length = 42
 
 default_password_key = 'a9_3fker'
-default_scramble_prefix = '.E_'
+md5_scramble_prefix = '.E_'
+sha256_scramble_prefix = '.S_'
 
 #Decode a password from a .irodsA file
 def decode(s, uid=None):
@@ -162,10 +163,7 @@ def encode(s, uid=None, mtime=None):
     return encoded_string
 
 #Hash some stuff to create ANOTHER encoder ring.
-def get_encoder_ring(key=default_password_key):
-
-    hash_func = hashlib.sha256
-
+def get_encoder_ring(key=default_password_key, hash_func=hashlib.sha256):
     hasher = hash_func()
     #key (called keyBuf in the C) is padded
     #or truncated to 100 characters
@@ -183,7 +181,7 @@ def get_encoder_ring(key=default_password_key):
     return first + second + third + third
 
 #unscramble passwords stored in the database
-def unscramble(s, key=default_password_key, scramble_prefix=default_scramble_prefix, block_chaining=False):
+def unscramble(s, key=default_password_key, scramble_prefix=md5_scramble_prefix, block_chaining=False, hash_func=hashlib.md5):
     if key is None:
         key=default_password_key
 
@@ -196,7 +194,7 @@ def unscramble(s, key=default_password_key, scramble_prefix=default_scramble_pre
     to_unscramble = s[len(scramble_prefix):]
 
     #get our encoder ring (called cpKey in the C code)
-    encoder_ring = get_encoder_ring(key)
+    encoder_ring = get_encoder_ring(key, hash_func)
     encoder_ring_index = 0
 
     #for block chaining
@@ -217,7 +215,7 @@ def unscramble(s, key=default_password_key, scramble_prefix=default_scramble_pre
     return unscrambled_string
 
 #scramble passwords to store in the database
-def scramble(s, key=default_password_key, scramble_prefix=default_scramble_prefix, block_chaining=False):
+def scramble(s, key=default_password_key, scramble_prefix=md5_scramble_prefix, block_chaining=False, hash_func=hashlib.md5):
     if len(s) > maximum_password_length:
         raise IrodsException("Password exceeds maximum length of {maximum_password_length} characters.".format(**locals()))
     if key is None:
@@ -226,7 +224,7 @@ def scramble(s, key=default_password_key, scramble_prefix=default_scramble_prefi
     to_scramble = s
 
     #get our encoder ring (called cpKey in the C code)
-    encoder_ring = get_encoder_ring(key)
+    encoder_ring = get_encoder_ring(key, hash_func)
     encoder_ring_index = 0
 
     #for block chaining
