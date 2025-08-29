@@ -1177,7 +1177,7 @@ obfDecodeByKey( const char *in, const char *key, char *out ) {
         if ( obfDebug ) {
             printf( "using md5 for decodebykey\n" );
         }
-        myHashType = HASH_TYPE_MD5;
+        myHashType = HASH_TYPE_DEFAULT;
     }
 
     j = 0;

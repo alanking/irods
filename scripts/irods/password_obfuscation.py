@@ -164,19 +164,21 @@ def encode(s, uid=None, mtime=None):
 #Hash some stuff to create ANOTHER encoder ring.
 def get_encoder_ring(key=default_password_key):
 
-    md5_hasher = hashlib.md5()
+    hash_func = hashlib.sha256
+
+    hasher = hash_func()
     #key (called keyBuf in the C) is padded
     #or truncated to 100 characters
-    md5_hasher.update(key.ljust(100, chr(0))[:100].encode('ascii'))
-    first = md5_hasher.digest()
+    hasher.update(key.ljust(100, chr(0))[:100].encode('ascii'))
+    first = hasher.digest()
 
-    md5_hasher = hashlib.md5()
-    md5_hasher.update(first)
-    second = md5_hasher.digest()
+    hasher = hash_func()
+    hasher.update(first)
+    second = hasher.digest()
 
-    md5_hasher = hashlib.md5()
-    md5_hasher.update(first + second)
-    third = md5_hasher.digest()
+    hasher = hash_func()
+    hasher.update(first + second)
+    third = hasher.digest()
 
     return first + second + third + third
 

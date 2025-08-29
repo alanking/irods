@@ -96,7 +96,8 @@ static rodsLong_t MAX_PASSWORDS = 40;
    startup sequence.  iDrop and iDrop-lite disconnect when idle to
    reduce the number of open connections and active agents.  */
 
-#define PASSWORD_SCRAMBLE_PREFIX ".E_"
+#define PASSWORD_SHA256_SCRAMBLE_PREFIX ".S_"
+#define PASSWORD_MD5_SCRAMBLE_PREFIX    ".E_"
 #define PASSWORD_KEY_ENV_VAR     "IRODS_DATABASE_USER_PASSWORD_SALT"
 #define PASSWORD_DEFAULT_KEY     "a9_3fker"
 
@@ -232,6 +233,36 @@ namespace
 
         return SUCCESS();
     } // get_auth_config
+
+    // Checks the prefix on the scrambled password and determines which hashing algorithm to use when descrambling
+    // the password. If the scrambled password does not start with one of the known prefixes, it is assumed to be in
+    // plaintext and the return value is -1 to indicate that no descrambling should be used. The return value is
+    // otherwise a "hash type" used with the obfuscation library.
+    auto get_hash_type_for_password_descrambling(const char* scrambled_password) -> int
+    {
+        const auto starts_with = [](const char* source, const char* prefix, int len) -> bool {
+            for (int i = 0; i < len; ++i) {
+                if (*source++ != *prefix++) {
+                    return false;
+                }
+            }
+            return true;
+        };
+        if (starts_with(
+                scrambled_password, PASSWORD_SHA256_SCRAMBLE_PREFIX, std::strlen(PASSWORD_SHA256_SCRAMBLE_PREFIX)))
+        {
+            return HASH_TYPE_SHA256;
+        }
+        if (starts_with(scrambled_password, PASSWORD_MD5_SCRAMBLE_PREFIX, std::strlen(PASSWORD_MD5_SCRAMBLE_PREFIX))) {
+            return HASH_TYPE_MD5;
+        }
+        return -1;
+    } // get_hash_type_for_password_descrambling
+
+    auto password_is_scrambled(const char* password) -> bool
+    {
+        return (-1 != get_hash_type_for_password_descrambling(password));
+    } // password_is_scrambled
 } // anonymous namespace
 
 // =-=-=-=-=-=-=-
@@ -897,38 +928,44 @@ static int _delColl( rsComm_t *rsComm, collInfo_t *collInfo ) {
    Possibly descramble a password (for user passwords stored in the ICAT).
    Called internally, from various chl functions.
 */
-static int
-icatDescramble( char *pw ) {
-    char *cp1, *cp2, *cp3;
-    int i, len;
-    char pw2[MAX_PASSWORD_LEN + 10];
-    char unscrambled[MAX_PASSWORD_LEN + 10];
+static int icatDescramble(char* pw, int hash_type)
+{
+    // -1 indicates that the password is not scrambled. There is nothing to descramble if this is the case.
+    if (-1 == hash_type) {
+        return 0;
+    }
 
-    len = strlen( PASSWORD_SCRAMBLE_PREFIX );
-    cp1 = pw;
-    cp2 = PASSWORD_SCRAMBLE_PREFIX; /* if starts with this, it is scrambled */
-    for ( i = 0; i < len; i++ ) {
-        if ( *cp1++ != *cp2++ ) {
-            return 0;                /* not scrambled, leave as is */
-        }
+    // Strip the prefix from the scrambled password.
+    char scrambled[MAX_PASSWORD_LEN + 10]{};
+    std::strncpy(scrambled, pw + std::strlen(PASSWORD_SHA256_SCRAMBLE_PREFIX), sizeof(scrambled));
+
+    // Get the password key so that it can be decoded.
+    const char* password_key = getenv(PASSWORD_KEY_ENV_VAR);
+    if (nullptr == password_key) {
+        password_key = PASSWORD_DEFAULT_KEY;
     }
-    snprintf( pw2, sizeof( pw2 ), "%s", cp1 );
-    cp3 = getenv( PASSWORD_KEY_ENV_VAR );
-    if ( cp3 == NULL ) {
-        cp3 = PASSWORD_DEFAULT_KEY;
-    }
-    obfDecodeByKey( pw2, cp3, unscrambled );
-    strncpy( pw, unscrambled, MAX_PASSWORD_LEN );
+
+    // obfDecodeByKey uses the "default" hash scheme unless the input buffer has "sha1" prepended, in which case SHA1
+    // is used. The server has historically only used MD5, but in order to enable FIPS compliance, we have introduced
+    // SHA256 as a hash scheme. In order to maintain backwards compatibility with other clients using the obfuscation
+    // library, we temporarily set the default hash scheme to SHA256 because passwords stored in the catalog are
+    // obfuscated using SHA256 now. On completion of "descrambling", the default hash scheme is restored.
+    const auto original_default_hash_scheme = obfGetDefaultHashType();
+    obfSetDefaultHashType(hash_type);
+    char unscrambled[MAX_PASSWORD_LEN + 10];
+    obfDecodeByKey(scrambled, password_key, unscrambled);
+    obfSetDefaultHashType(original_default_hash_scheme);
+    std::strncpy(pw, unscrambled, MAX_PASSWORD_LEN);
 
     return 0;
-}
+} // icatDescramble
 
 /*
    Scramble a password (for user passwords stored in the ICAT).
    Called internally.
 */
-static int
-icatScramble( char *pw ) {
+static int icatScramble(char* pw, int hash_type = HASH_TYPE_SHA256)
+{
     char *cp1;
     char newPw[MAX_PASSWORD_LEN + 10];
     char scrambled[MAX_PASSWORD_LEN + 10];
@@ -937,11 +974,19 @@ icatScramble( char *pw ) {
     if ( cp1 == NULL ) {
         cp1 = PASSWORD_DEFAULT_KEY;
     }
+    // obfEncodeByKey uses the "default" hash scheme unless the input buffer has "sha1" prepended, in which case SHA1
+    // is used. The server has historically only used MD5, but in order to enable FIPS compliance, we have introduced
+    // SHA256 as a hash scheme. In order to maintain backwards compatibility with other clients using the obfuscation
+    // library, we temporarily set the default hash scheme to SHA256 because passwords stored in the catalog are
+    // obfuscated using SHA256 now. On completion of "scrambling", the default hash scheme is restored.
+    const auto original_default_hash_scheme = obfGetDefaultHashType();
+    obfSetDefaultHashType(hash_type);
     obfEncodeByKey( pw, cp1, scrambled );
-    snprintf( newPw, sizeof( newPw ), "%s%s", PASSWORD_SCRAMBLE_PREFIX, scrambled );
+    obfSetDefaultHashType(original_default_hash_scheme);
+    snprintf(newPw, sizeof(newPw), "%s%s", PASSWORD_SHA256_SCRAMBLE_PREFIX, scrambled);
     strncpy( pw, newPw, MAX_PASSWORD_LEN );
     return 0;
-}
+} // icatScramble
 
 /*
   de-scramble a password sent from the client.
@@ -978,9 +1023,20 @@ int decodePw( rsComm_t *rsComm, const char *in, char *out ) {
         return status;
     }
 
-    icatDescramble( password );
+    const int hash_type = get_hash_type_for_password_descrambling(password);
+    if (-1 != hash_type) {
+        icatDescramble(password, hash_type);
+    }
 
+    // obfEncodeByKey uses the "default" hash scheme unless the input buffer has "sha1" prepended, in which case SHA1
+    // is used. The server has historically only used MD5, but in order to enable FIPS compliance, we have introduced
+    // SHA256 as a hash scheme. In order to maintain backwards compatibility with other clients using the obfuscation
+    // library, we temporarily set the default hash scheme to SHA256 because passwords stored in the catalog are
+    // obfuscated using SHA256 now. On completion of "scrambling", the default hash scheme is restored.
+    const auto original_default_hash_scheme = obfGetDefaultHashType();
+    obfSetDefaultHashType(hash_type);
     obfDecodeByKeyV2( in, password, prevChalSig, upassword );
+    obfSetDefaultHashType(original_default_hash_scheme);
 
     pwLen1 = strlen( upassword );
 
@@ -5869,7 +5925,6 @@ irods::error db_check_auth_op(
     char myUserZone[MAX_NAME_LEN];
     char userName2[NAME_LEN + 2];
     char userZone[NAME_LEN + 2];
-    int hashType = 0;
     char lastPwModTs[MAX_PASSWORD_LEN + 10];
     snprintf( lastPwModTs, sizeof( lastPwModTs ), "0" );
     char *cPwTs = NULL;
@@ -5899,7 +5954,7 @@ irods::error db_check_auth_op(
     if ( std::string::npos != pos ) {
         // truncate off the :::sha1 string
         user_name = user_name.substr( pos );
-        hashType = HASH_TYPE_SHA1;
+        auth_check_hash_type = HASH_TYPE_SHA1;
     }
 
     memset( md5Buf, 0, sizeof( md5Buf ) );
@@ -5994,12 +6049,13 @@ irods::error db_check_auth_op(
         memset( md5Buf, 0, sizeof( md5Buf ) );
         strncpy( md5Buf, _challenge, CHALLENGE_LEN );
         rstrcpy( lastPw, cpw, MAX_PASSWORD_LEN );
-        icatDescramble( cpw );
+        if (const int hash_type = get_hash_type_for_password_descrambling(cpw); -1 != hash_type) {
+            icatDescramble(cpw, hash_type);
+        }
         strncpy( md5Buf + CHALLENGE_LEN, cpw, MAX_PASSWORD_LEN );
 
-        obfMakeOneWayHash( hashType,
-                           ( unsigned char * )md5Buf, CHALLENGE_LEN + MAX_PASSWORD_LEN,
-                           ( unsigned char * )digest );
+        obfMakeOneWayHash(
+            auth_check_hash_type, (unsigned char*) md5Buf, CHALLENGE_LEN + MAX_PASSWORD_LEN, (unsigned char*) digest);
 
         for ( i = 0; i < RESPONSE_LEN; i++ ) {
             if ( digest[i] == '\0' ) {
@@ -6099,7 +6155,7 @@ irods::error db_check_auth_op(
 
     // Only the enigmatic temporary passwords are stored as unscrambled in the catalog, so only perform this bit for
     // passwords that are not stored as scrambled in the catalog.
-    if (!std::string_view{lastPw}.starts_with(PASSWORD_SCRAMBLE_PREFIX) && expireTime < temp_password_max_time) {
+    if (!password_is_scrambled(lastPw) && expireTime < temp_password_max_time) {
         int temp_password_time;
         try {
             temp_password_time = irods::get_advanced_setting<const int>(irods::KW_CFG_DEF_TEMP_PASSWORD_LIFETIME);
@@ -6362,7 +6418,9 @@ irods::error db_make_temp_pw_op(
         return ERROR( status, "failed to get password" );
     }
 
-    icatDescramble( password );
+    if (const int hash_type = get_hash_type_for_password_descrambling(password); -1 != hash_type) {
+        icatDescramble(password, hash_type);
+    }
 
     j = 0;
     get64RandomBytes( rBuf );
@@ -6515,7 +6573,9 @@ irods::error db_make_limited_pw_op(
         return ERROR( status, "get password failed" );
     }
 
-    icatDescramble( password );
+    if (const int hash_type = get_hash_type_for_password_descrambling(password); -1 != hash_type) {
+        icatDescramble(password, hash_type);
+    }
 
     j = 0;
     get64RandomBytes( rBuf );
@@ -6799,7 +6859,11 @@ auto db_update_pam_password_op(irods::plugin_context& _ctx,
 
         // password_in_database_buffer holds the randomly generated password in a scrambled form. It needs to be
         // descrambled before returning to the caller.
-        icatDescramble(password_in_database_buffer.data());
+        if (const int hash_type = get_hash_type_for_password_descrambling(password_in_database_buffer.data());
+            -1 != hash_type)
+        {
+            icatDescramble(password_in_database_buffer.data(), hash_type);
+        }
 
         // The descrambled password at time of generation is 50 characters or less (see below).
         std::strncpy(*_password_buffer, password_in_database_buffer.data(), _password_buffer_size);
