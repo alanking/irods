@@ -207,6 +207,24 @@ class IrodsConfig(object):
             print(encode(value, mtime=mtime), end='', file=f)
         os.utime(paths.password_file_path(), (mtime, mtime))
 
+    @property
+    def admin_secret(self):
+        secrets_file_path = paths.secrets_file_path()
+        if not os.path.exists(os.path.dirname(secrets_file_path)):
+            return None
+        with open(secrets_file_path, 'rt') as f:
+            return f.read()
+
+    @admin_secret.setter
+    def admin_secret(self, value):
+        l = logging.getLogger(__name__)
+        secrets_file_path = paths.secrets_file_path()
+        if not os.path.exists(os.path.dirname(secrets_file_path)):
+            os.makedirs(os.path.dirname(secrets_file_path), mode=0o600)
+        with open(secrets_file_path, 'wt') as f:
+            l.debug('Writing secrets file %s', f.name)
+            print(value, end='', file=f)
+
     def commit(self, config_dict, path, clear_cache=True, make_backup=False):
         l = logging.getLogger(__name__)
         l.info('Updating %s...', path)
