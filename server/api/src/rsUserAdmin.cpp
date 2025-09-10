@@ -70,7 +70,7 @@ _rsUserAdmin( rsComm_t *rsComm, userAdminInp_t *userAdminInp ) {
     if ( strcmp( userAdminInp->arg0, "userpw" ) == 0 ) {
         args[0] = userAdminInp->arg1; /* username */
         args[1] = userAdminInp->arg2; /* option */
-        args[2] = userAdminInp->arg3; /* newValue */
+        args[2] = "obfuscatedPw"; // Password does not need to be made available in the static PEPs.
         argc = 3;
         status2 = applyRuleArg( "acPreProcForModifyUser",
                                 args, argc, &rei2, NO_SAVE_REI );
@@ -85,10 +85,17 @@ _rsUserAdmin( rsComm_t *rsComm, userAdminInp_t *userAdminInp ) {
                 status2);
             return status2;
         }
-        status = chlModUser( rsComm,
-                             userAdminInp->arg1,
-                             userAdminInp->arg2,
-                             userAdminInp->arg3 );
+
+        // The no-scramble option is used to indicate that the password is not obfuscated. In order to communicate
+        // this to chlModUser, we must use a slightly different option name so that the database operation does
+        // not attempt to de-obfuscate the password. This technically means that this API accepts an option called
+        // "password-unobfuscated" which is the same thing as the "userpw" option with an arg4 of "no-scramble".
+        if (userAdminInp->arg4 && "no-scramble" == std::string_view{userAdminInp->arg4}) {
+            status = chlModUser(rsComm, userAdminInp->arg1, "password-unobfuscated", userAdminInp->arg3);
+        }
+        else {
+            status = chlModUser(rsComm, userAdminInp->arg1, userAdminInp->arg2, userAdminInp->arg3);
+        }
         if ( status != 0 ) {
             chlRollback( rsComm );
         }

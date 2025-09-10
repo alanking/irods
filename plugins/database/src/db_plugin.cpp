@@ -28,6 +28,7 @@
 #include "irods/miscServerFunct.hpp"
 #include "irods/modAccessControl.h"
 #include "irods/msParam.h"
+#include "irods/password_hash.hpp"
 #include "irods/private/irods_catalog_properties.hpp"
 #include "irods/private/low_level.hpp"
 #include "irods/private/mid_level.hpp"
@@ -60,6 +61,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <thread> // For std::this_thread::sleep_for
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -6902,7 +6904,6 @@ irods::error db_mod_user_op(
 //        _ctx.prop_map().get< icatSessionStruct >( ICSS_PROP, icss );
     int status;
     int opType;
-    char decoded[MAX_PASSWORD_LEN + 20];
     char tSQL[MAX_SQL_SIZE];
     char form1[] = "update R_USER_MAIN set %s=?, modify_ts=? where user_name=? and zone_name=?";
     char form2[] = "update R_USER_MAIN set %s=%s, modify_ts=? where user_name=? and zone_name=?";
@@ -6949,7 +6950,7 @@ irods::error db_mod_user_op(
     }
     else {
         /* need to check */
-        if ( strcmp( _option, "password" ) != 0 ) {
+        if (strcmp(_option, "password") != 0 && strcmp(_option, "password-unobfuscated") != 0) {
             /* only password (in cases below) is allowed */
             return ERROR( CAT_INSUFFICIENT_PRIVILEGE_LEVEL, "insufficient privilege" );
         }
@@ -7071,10 +7072,18 @@ irods::error db_mod_user_op(
             log_sql::debug("chlModUser SQL 7");
         }
     }
-    if ( strcmp( _option, "password" ) == 0 ) {
-        int i;
+    if (strcmp(_option, "password") == 0 || strcmp(_option, "password-unobfuscated") == 0) {
         char userIdStr[MAX_NAME_LEN];
-        i = decodePw( _ctx.comm(), _new_value, decoded );
+        char decoded[MAX_PASSWORD_LEN + 20];
+        const auto clear_decoded_password_buffer =
+            irods::at_scope_exit{[&decoded] { std::memset(decoded, 0, sizeof(decoded)); }};
+        int i = 0;
+        if (0 == strcmp(_option, "password-unobfuscated")) {
+            std::strncpy(decoded, _new_value, sizeof(decoded));
+        }
+        else {
+            i = decodePw(_ctx.comm(), _new_value, decoded);
+        }
         if (i == CAT_PASSWORD_ENCODING_ERROR || strlen(decoded) > MAX_PASSWORD_LEN - 8) {
             // Password encoding error occurs when the password is not of the correct
             // length.  Pop the existing CAT_PASSWORD_ENCODING_ERROR and return PASSWORD_EXCEEDS_MAX_SIZE
@@ -7089,64 +7098,164 @@ irods::error db_mod_user_op(
             addRErrorMsg( &_ctx.comm()->rError, 0, "acCheckPasswordStrength rule not found" );
         }
 
-
         if ( status2 ) {
             return ERROR( status2, "icatApplyRule failed" );
         }
 
-        icatScramble( decoded );
-
-        if ( i ) {
-            return ERROR( i, "password scramble failed" );
-        }
-        if ( logSQL != 0 ) {
-            log_sql::debug("chlModUser SQL 8");
-        }
+        const auto config_handle{irods::server_properties::instance().map()};
+        const auto& config{config_handle.get_json()};
+        auto store_hashed_password = false;
+        auto store_scrambled_password = true;
+        if (const auto password_storage_mode_iter = config.find(irods::KW_CFG_USER_PASSWORD_STORAGE_MODE);
+            config.end() != password_storage_mode_iter)
         {
+            const auto& password_storage_mode = password_storage_mode_iter->get_ref<const std::string&>();
+            store_scrambled_password = (password_storage_mode != "hashed");
+            store_hashed_password = (password_storage_mode != "legacy");
+        }
+
+        if (store_hashed_password) {
+            const auto password_salt = irods::generate_salt();
+            const auto password_hash = irods::hash_password(decoded, password_salt);
+            char user_id[MAX_NAME_LEN]{};
+            int ec = 0;
+            {
+                std::vector<std::string> bindVars;
+                bindVars.emplace_back(userName2);
+                bindVars.emplace_back(zoneName);
+                ec = cmlGetStringValueFromSql(
+                    "select R_USER_CREDENTIALS.user_id from R_USER_CREDENTIALS, R_USER_MAIN where "
+                    "R_USER_MAIN.user_name=? and "
+                    "R_USER_MAIN.zone_name=? and R_USER_MAIN.user_id = R_USER_CREDENTIALS.user_id",
+                    user_id,
+                    MAX_NAME_LEN,
+                    bindVars,
+                    &icss);
+            }
+            if (0 != ec && CAT_NO_ROWS_FOUND != ec) {
+                return ERROR(ec, fmt::format("Failed to get user_id for user [{}#{}]", userName2, zoneName));
+            }
+            // This overwrites an existing password hash.
+            if (0 == ec) {
+                if (1 == groupAdminSettingPassword) {
+                    // Group admin can only set the initial password, not update
+                    return ERROR(CAT_INSUFFICIENT_PRIVILEGE_LEVEL, "insufficient privilege level");
+                }
+                std::strncpy(tSQL,
+                             "update R_USER_CREDENTIALS set user_password = ?, modify_time = ?, password_salt = ? "
+                             "where user_id = ?",
+                             MAX_SQL_SIZE);
+                cllBindVars[cllBindVarCount++] = password_hash.c_str();
+                cllBindVars[cllBindVarCount++] = myTime;
+                cllBindVars[cllBindVarCount++] = password_salt.c_str();
+                cllBindVars[cllBindVarCount++] = user_id;
+            }
+            else {
+                opType = 4;
+                std::strncpy(
+                    tSQL,
+                    "insert into R_USER_CREDENTIALS (user_id, user_password, password_salt, create_time, "
+                    "modify_time) values ((select user_id from R_USER_MAIN where user_name = ? and zone_name = ?), "
+                    "?, ?, ?, ?)",
+                    MAX_SQL_SIZE);
+                cllBindVars[cllBindVarCount++] = userName2;
+                cllBindVars[cllBindVarCount++] = zoneName;
+                cllBindVars[cllBindVarCount++] = password_hash.c_str();
+                cllBindVars[cllBindVarCount++] = password_salt.c_str();
+                cllBindVars[cllBindVarCount++] = myTime;
+                cllBindVars[cllBindVarCount++] = myTime;
+            }
+            status = cmlExecuteNoAnswerSql(tSQL, &icss);
+        }
+
+        if (0 == status && store_scrambled_password) {
+            icatScramble(decoded);
+            if (i) {
+                return ERROR(i, "password scramble failed");
+            }
+            if ( logSQL != 0 ) {
+                log_sql::debug("chlModUser SQL 8");
+            }
+            {
+                std::vector<std::string> bindVars;
+                bindVars.push_back(userName2);
+                bindVars.push_back(zoneName);
+                i = cmlGetStringValueFromSql(
+                    "select R_USER_PASSWORD.user_id from R_USER_PASSWORD, R_USER_MAIN where R_USER_MAIN.user_name=? "
+                    "and R_USER_MAIN.zone_name=? and R_USER_MAIN.user_id = R_USER_PASSWORD.user_id",
+                    userIdStr,
+                    MAX_NAME_LEN,
+                    bindVars,
+                    &icss);
+            }
+            if (i != 0 && i != CAT_NO_ROWS_FOUND) {
+                return ERROR(i, "get user password failed");
+            }
+            if (i == 0) {
+                if (groupAdminSettingPassword == 1) { // JMC - backport 4772
+                    /* Group admin can only set the initial password, not update */
+                    return ERROR(CAT_INSUFFICIENT_PRIVILEGE_LEVEL, "insufficient privilege level");
+                }
+                rstrcpy(tSQL, form3, MAX_SQL_SIZE);
+                cllBindVars[cllBindVarCount++] = decoded;
+                cllBindVars[cllBindVarCount++] = myTime;
+                cllBindVars[cllBindVarCount++] = userIdStr;
+                if (logSQL != 0) {
+                    log_sql::debug("chlModUser SQL 9");
+                }
+            }
+            else {
+                opType = 4;
+                rstrcpy(tSQL, form4, MAX_SQL_SIZE);
+                cllBindVars[cllBindVarCount++] = userName2;
+                cllBindVars[cllBindVarCount++] = zoneName;
+                cllBindVars[cllBindVarCount++] = decoded;
+                cllBindVars[cllBindVarCount++] = "9999-12-31-23.59.01";
+                cllBindVars[cllBindVarCount++] = myTime;
+                cllBindVars[cllBindVarCount++] = myTime;
+                if (logSQL != 0) {
+                    log_sql::debug("chlModUser SQL 10");
+                }
+            }
+            status = cmlExecuteNoAnswerSql(tSQL, &icss);
+        }
+
+        // All the other operations use a common execution point for some reason. Setting a user's password is special
+        // because we may have to set values in two different database tables. As such, we execute the two statements
+        // above and commit once here, and then return early.
+        if (0 == status) {
+            status = cmlExecuteNoAnswerSql("commit", &icss);
+            if (status != 0) {
+                log_db::info("chlModUser cmlExecuteNoAnswerSql commit failure {}", status);
+                return ERROR(status, "commit failed");
+            }
+            return SUCCESS();
+        }
+
+        _rollback("chlModUser");
+
+        // This provides a more specific error code in the insertion case (as compared to the update case, which
+        // doesn't, for some reason).
+        if (4 == opType) {
             std::vector<std::string> bindVars;
-            bindVars.push_back( userName2 );
-            bindVars.push_back( zoneName );
-            i = cmlGetStringValueFromSql(
-                    "select R_USER_PASSWORD.user_id from R_USER_PASSWORD, R_USER_MAIN where R_USER_MAIN.user_name=? and R_USER_MAIN.zone_name=? and R_USER_MAIN.user_id = R_USER_PASSWORD.user_id",
-                    userIdStr, MAX_NAME_LEN, bindVars, &icss );
-        }
-        if ( i != 0 && i != CAT_NO_ROWS_FOUND ) {
-            return ERROR( i, "get user password failed" );
-        }
-        if ( i == 0 ) {
-            if ( groupAdminSettingPassword == 1 ) { // JMC - backport 4772
-                /* Group admin can only set the initial password, not update */
-                return ERROR( CAT_INSUFFICIENT_PRIVILEGE_LEVEL, "insufficient privilege level" );
-            }
-            rstrcpy( tSQL, form3, MAX_SQL_SIZE );
-            cllBindVars[cllBindVarCount++] = decoded;
-            cllBindVars[cllBindVarCount++] = myTime;
-            cllBindVars[cllBindVarCount++] = userIdStr;
-            if ( logSQL != 0 ) {
-                log_sql::debug("chlModUser SQL 9");
+            bindVars.emplace_back(userName2);
+            bindVars.emplace_back(zoneName);
+            const int ec = cmlGetIntegerValueFromSql(
+                "select user_id from R_USER_MAIN where user_name=? and zone_name=?", &iVal, bindVars, &icss);
+            if (0 != ec) {
+                log_db::info("chlModUser invalid user {} zone {}", userName2, zoneName);
+                return ERROR(CAT_INVALID_USER, "invalid user");
             }
         }
-        else {
-            opType = 4;
-            rstrcpy( tSQL, form4, MAX_SQL_SIZE );
-            cllBindVars[cllBindVarCount++] = userName2;
-            cllBindVars[cllBindVarCount++] = zoneName;
-            cllBindVars[cllBindVarCount++] = decoded;
-            cllBindVars[cllBindVarCount++] = "9999-12-31-23.59.01";
-            cllBindVars[cllBindVarCount++] = myTime;
-            cllBindVars[cllBindVarCount++] = myTime;
-            if ( logSQL != 0 ) {
-                log_sql::debug("chlModUser SQL 10");
-            }
-        }
+        log_db::info("Failed to update password for user [{}#{}]: [{}]", userName2, zoneName, status);
+        return ERROR(status, "Failed to update user password.");
     }
 
     if ( tSQL[0] == '\0' ) {
         return ERROR( CAT_INVALID_ARGUMENT, "invalid argument" );
     }
 
-    status =  cmlExecuteNoAnswerSql( tSQL, &icss );
-    memset( decoded, 0, MAX_PASSWORD_LEN );
+    status = cmlExecuteNoAnswerSql(tSQL, &icss);
 
     if ( status != 0 ) { /* error */
         if ( opType == 1 ) { /* doing a type change, check if user_type problem */
@@ -15364,6 +15473,71 @@ auto db_update_replica_access_time(irods::plugin_context& _ctx,
     }
 } // db_update_replica_access_time
 
+auto db_check_password_op(irods::plugin_context& _ctx,
+                          const char* _user_name,
+                          const char* _zone_name,
+                          const char* _password,
+                          int* _valid) -> irods::error
+{
+    if (const auto ret = _ctx.valid(); !ret.ok()) {
+        return PASS(ret);
+    }
+    if (!_user_name || !_zone_name || !_password || !_valid) {
+        return ERROR(CAT_INVALID_ARGUMENT, fmt::format("{}: One or more input pointers are null.", __func__));
+    }
+    *_valid = 0;
+    // This should be fairly small, even if the user has 40 passwords stored due to PAM authentication.
+    struct auth_key
+    {
+        std::string key;
+        std::string salt;
+        std::string expiration_timestamp;
+    };
+    std::vector<auth_key> auth_keys;
+    try {
+        auto [db_instance, db_conn] = irods::experimental::catalog::new_database_connection();
+        nanodbc::statement stmt{db_conn};
+        nanodbc::prepare(stmt,
+                         "select R_USER_CREDENTIALS.user_password, R_USER_CREDENTIALS.password_salt from "
+                         "R_USER_CREDENTIALS, R_USER_MAIN "
+                         "where user_name=? and zone_name=? and R_USER_MAIN.user_id = R_USER_CREDENTIALS.user_id");
+        stmt.bind(0, _user_name);
+        stmt.bind(1, _zone_name);
+        // Maybe only expect one password? And salt cannot be null or empty?
+        for (auto result = nanodbc::execute(stmt); result.next();) {
+            // Only consider keys with salts. If no salt is recorded, it is likely a legacy password. Regardless, we
+            // cannot match any passwords without a salt because the password is hashed with a salt at creation.
+            if (const auto salt = result.get<std::string>(1); !salt.empty()) {
+                const auto key = result.get<std::string>(0);
+                auth_keys.emplace_back(auth_key{key, salt, ""});
+            }
+        }
+    }
+    catch (const std::exception& e) {
+        log_db::error("{}: Error occurred fetching password information for user [{}#{}]: {}",
+                      __func__,
+                      _user_name,
+                      _zone_name,
+                      e.what());
+        return ERROR(SYS_LIBRARY_ERROR, e.what());
+    }
+    if (auth_keys.empty()) {
+        // The user does not have any stored keys. This operation does not care whether this is an invalid user or
+        // there are no keys stored for the user.
+        return SUCCESS();
+    }
+    for (const auto& auth_key : auth_keys) {
+        if (const auto hashed_password = irods::hash_password(_password, auth_key.salt);
+            hashed_password == auth_key.key)
+        {
+            *_valid = 1;
+            return SUCCESS();
+        }
+    }
+    // Reaching this point means that the provided user and password combination did not match anything.
+    return SUCCESS();
+} // db_check_password_op
+
 // =-=-=-=-=-=-=-
 //
 irods::error db_start_operation( irods::plugin_property_map& _props ) {
@@ -15769,6 +15943,9 @@ irods::database* plugin_factory(
     pg->add_operation<const char*, char**>(
         DATABASE_OP_UPDATE_REPLICA_ACCESS_TIME,
         function<error(plugin_context&, const char*, char**)>(db_update_replica_access_time));
+    pg->add_operation(
+        DATABASE_OP_CHECK_PASSWORD,
+        function<error(plugin_context&, const char*, const char*, const char*, int*)>(db_check_password_op));
 
     return pg;
 } // plugin_factory
