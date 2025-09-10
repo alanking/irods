@@ -907,8 +907,7 @@ int _rsGeneralAdmin(rsComm_t* rsComm, generalAdminInp_t* generalAdminInp)
             const auto user_name = std::string_view{generalAdminInp->arg2 ?
                                                     generalAdminInp->arg2 : ""};
 
-            const auto option = std::string_view{generalAdminInp->arg3 ?
-                                                 generalAdminInp->arg3 : ""};
+            auto option = std::string{generalAdminInp->arg3 ? generalAdminInp->arg3 : ""};
 
             const auto new_value = std::string_view{generalAdminInp->arg4 ?
                                                     generalAdminInp->arg4 : ""};
@@ -927,16 +926,26 @@ int _rsGeneralAdmin(rsComm_t* rsComm, generalAdminInp_t* generalAdminInp)
                     return ec;
                 }
 
-                throw_if_downgrading_irods_service_account_rodsadmin(*rsComm, option, user_name, new_value);
+                throw_if_downgrading_irods_service_account_rodsadmin(*rsComm, option.c_str(), user_name, new_value);
 
                 throw_if_group_is_changing_to_user_or_user_is_changing_to_group(
-                    *rsComm, option, current_user_type, new_value);
+                    *rsComm, option.c_str(), current_user_type, new_value);
 
-                throw_if_password_is_being_set_on_a_group(*rsComm, option, current_user_type);
+                throw_if_password_is_being_set_on_a_group(*rsComm, option.c_str(), current_user_type);
             }
             catch (const irods::exception& e) {
                 log_api::error("[{}:{}] - [{}]", __func__, __LINE__, e.client_display_what());
                 return e.code();
+            }
+
+            // The no-scramble option is used to indicate that the password is not obfuscated. In order to communicate
+            // this to chlModUser, we must use a slightly different option name so that the database operation does
+            // not attempt to de-obfuscate the password. This technically means that this API accepts an option called
+            // "password-unobfuscated" which is the same thing as the "password" option with an arg5 of "no-scramble".
+            if ("password" == option && generalAdminInp->arg5 &&
+                "no-scramble" == std::string_view{generalAdminInp->arg5})
+            {
+                option = "password-unobfuscated";
             }
 
             args[0] = user_name.data();

@@ -447,4 +447,10 @@ auto chl_delay_rule_unlock(RsComm& _comm, const char* _rule_ids) -> int;
 /// \since 5.0.0
 auto chl_update_replica_access_time(RsComm& _comm, const char* _json_input, char** _output) -> int;
 
+auto chl_check_password(RsComm* _comm,
+                        const char* _user_name,
+                        const char* _zone_name,
+                        const char* _password,
+                        int* _valid) -> int;
+
 #endif // IRODS_ICAT_HIGHLEVEL_ROUTINES_HPP
