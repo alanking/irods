@@ -37,12 +37,12 @@ namespace
     using json = nlohmann::json;
     namespace irods_auth = irods::authentication;
 
-    auto get_password_file_path() -> std::optional<std::filesystem::path>
+    auto get_session_token_file_path() -> std::optional<std::filesystem::path>
     {
         // TODO(#XXXX): Consider caching the path in a static variable once found.
         // See whether the environment has a variable which specifies where the session token file is located.
-        constexpr const char* password_file_env_var = "IRODS_SESSION_TOKEN_FILE_PATH";
-        const char* env_var = std::getenv(password_file_env_var);
+        constexpr const char* session_token_file_env_var = "IRODS_SESSION_TOKEN_FILE_PATH";
+        const char* env_var = std::getenv(session_token_file_env_var);
         if (env_var && '\0' != *env_var) {
             return std::filesystem::path{env_var};
         }
@@ -52,52 +52,52 @@ namespace
         if (!home_var) {
             return std::nullopt;
         }
-        constexpr const char* password_filename_default = ".irods/.irods_secrets";
-        return std::filesystem::path{home_var} / password_filename_default;
-    } // get_password_file_path
+        constexpr const char* session_token_filename_default = ".irods/.irods_secrets";
+        return std::filesystem::path{home_var} / session_token_filename_default;
+    } // get_session_token_file_path
 
-    auto get_password_from_file() -> std::optional<std::string>
+    auto get_session_token_from_file() -> std::optional<std::string>
     {
-        const auto password_file_path = get_password_file_path();
-        if (!password_file_path || !std::filesystem::exists(*password_file_path)) {
+        const auto session_token_file_path = get_session_token_file_path();
+        if (!session_token_file_path || !std::filesystem::exists(*session_token_file_path)) {
             return std::nullopt;
         }
-        std::ifstream password_file_stream{password_file_path->c_str()};
-        if (!password_file_stream.is_open()) {
+        std::ifstream session_token_file_stream{session_token_file_path->c_str()};
+        if (!session_token_file_stream.is_open()) {
             const auto ec = UNIX_FILE_OPEN_ERR - errno;
             THROW(
                 ec,
-                fmt::format("Failed to open session token file [{}]. errno:[{}]", password_file_path->c_str(), errno));
+                fmt::format("Failed to open session token file [{}]. errno:[{}]", session_token_file_path->c_str(), errno));
         }
         // TODO(#XXXX): Limit the number of characters read in here. Session tokens should be a fixed length.
         // TODO(#XXXX): Might also consider a JSON format. For now, just expect the contents to be the session token.
-        std::string password_file_contents;
-        password_file_stream >> password_file_contents;
-        return password_file_contents;
-    } // get_password_from_file
+        std::string session_token_file_contents;
+        session_token_file_stream >> session_token_file_contents;
+        return session_token_file_contents;
+    } // get_session_token_from_file
 
-    auto write_password_to_file(const std::string& _password) -> void
+    auto write_session_token_to_file(const std::string& _session_token) -> void
     {
-        const auto password_file_path = get_password_file_path();
-        if (!password_file_path) {
+        const auto session_token_file_path = get_session_token_file_path();
+        if (!session_token_file_path) {
             return;
         }
-        std::ofstream password_file_stream{password_file_path->c_str()};
-        if (!password_file_stream.is_open()) {
+        std::ofstream session_token_file_stream{session_token_file_path->c_str()};
+        if (!session_token_file_stream.is_open()) {
             // TODO: Is this really an error?
             const auto ec = UNIX_FILE_OPEN_ERR - errno;
             THROW(
                 ec,
-                fmt::format("Failed to open session token file [{}]. errno:[{}]", password_file_path->c_str(), errno));
+                fmt::format("Failed to open session token file [{}]. errno:[{}]", session_token_file_path->c_str(), errno));
         }
         // TODO(#XXXX): Limit the number of characters read in here. Passwords should have a max length.
         // TODO(#XXXX): Might also consider a JSON format. For now, just expect the contents to be the session token.
-        password_file_stream << _password;
-        password_file_stream.close();
+        session_token_file_stream << _session_token;
+        session_token_file_stream.close();
         // Make sure that only the owner can read/write this file because it contains sensitive information.
         std::filesystem::permissions(
-            password_file_path->c_str(), std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
-    } // write_password_to_file
+            session_token_file_path->c_str(), std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
+    } // write_session_token_to_file
 
 #ifdef RODS_SERVER
     auto set_privileges_in_rs_comm(RsComm& _comm, const std::string& _user_name, const std::string& _zone_name) -> void
@@ -239,6 +239,7 @@ namespace irods
 
         // Other keys / constants
         static constexpr const char* password_kw = "password";
+        static constexpr const char* session_token_kw = "session_token";
         static constexpr const char* user_name_kw = "user_name";
         static constexpr const char* zone_name_kw = "zone_name";
 
@@ -293,13 +294,13 @@ namespace irods
             // If a password is provided by the client to the plugin, authenticate with that.
             const auto provided_password = _request.find(password_kw);
             if (_request.end() != provided_password) {
-                resp[password_kw] = provided_password->get_ref<const std::string&>();
                 resp[irods_auth::next_operation] = client_auth_with_password;
                 return resp;
             }
-            const auto discovered_password = get_password_from_file();
-            if (discovered_password && !discovered_password->empty()) {
-                resp[password_kw] = *discovered_password;
+            const auto discovered_session_token = get_session_token_from_file();
+            if (discovered_session_token && !discovered_session_token->empty()) {
+                // TODO: If this fails, we need to fall back to prompting for user password...?
+                resp[session_token_kw] = *discovered_session_token;
                 resp[irods_auth::next_operation] = client_auth_with_password;
                 return resp;
             }
@@ -313,14 +314,14 @@ namespace irods
 
         auto client_auth_with_password_op(RcComm& _comm, const nlohmann::json& _request) -> nlohmann::json
         {
-            irods_auth::throw_if_request_message_is_missing_key(_request, {user_name_kw, zone_name_kw, password_kw});
+            irods_auth::throw_if_request_message_is_missing_key(_request, {user_name_kw, zone_name_kw});
             nlohmann::json svr_req{_request};
             svr_req[irods_auth::next_operation] = server_auth_with_password;
             auto resp = irods_auth::request(_comm, svr_req);
             if (const auto record_auth_file_iter = _request.find(irods_auth::record_auth_file);
                 _request.end() != record_auth_file_iter && record_auth_file_iter->get<bool>())
             {
-                write_password_to_file(_request.at(password_kw).get_ref<const std::string&>());
+                write_session_token_to_file(resp.at(session_token_kw).get_ref<const std::string&>());
             }
             _comm.loggedIn = 1;
             resp[irods_auth::next_operation] = irods_auth::flow_complete;
@@ -354,7 +355,7 @@ namespace irods
                 throw_if_secure_communications_required();
                 log_warning_for_insecure_mode();
             }
-            irods_auth::throw_if_request_message_is_missing_key(_request, {password_kw, zone_name_kw, user_name_kw});
+            irods_auth::throw_if_request_message_is_missing_key(_request, {zone_name_kw, user_name_kw});
             // Need to do NoLogin because it could get into inf loop for cross zone auth.
             rodsServerHost_t* host;
             const auto& zone_name = _request.at(zone_name_kw).get_ref<const std::string&>();
@@ -379,11 +380,37 @@ namespace irods
                 // by various APIs and operations as needed.
                 return irods_auth::request(*host->conn, _request);
             }
+            nlohmann::json resp{_request};
             // Check the provided username / password combination.
             const auto& user_name = _request.at(user_name_kw).get_ref<const std::string&>();
-            const auto& password = _request.at(password_kw).get_ref<const std::string&>();
+            if (const auto password = _request.find(password_kw); password != _request.end()) {
+                int valid = 0;
+                if (const int ec = chl_check_password(&_comm, user_name.c_str(), zone_name.c_str(), password->get_ref<const std::string&>().c_str(), &valid); ec < 0) {
+                    THROW(ec,
+                          fmt::format(
+                              "Error occurred while checking password for user [{}#{}]: {}", user_name, zone_name, ec));
+                }
+                if (!valid) {
+                    THROW(
+                        AUTHENTICATION_ERROR, fmt::format("Authentication failed for user [{}#{}].", user_name, zone_name));
+                }
+                // Now create a session token.
+                char* token;
+                const auto free_token = irods::at_scope_exit{[&token] { std::free(token); }};
+                if (const int ec = chl_make_session_token(&_comm, user_name.c_str(), zone_name.c_str(), &token); ec < 0) {
+                    THROW(ec, fmt::format("Error occurred while generating session token for user [{}#{}]: {}", user_name, zone_name, ec));
+                }
+
+                resp[session_token_kw] = token;
+            }
+
+            // Authenticate using the session token...
+            const auto session_token = resp.find(session_token_kw);
+            if (session_token == resp.end()) {
+                THROW(SYS_INVALID_INPUT_PARAM, fmt::format("Cannot authenticate user [{}#{}]: No password or session token found.", user_name, zone_name));
+            }
             int valid = 0;
-            const int ec = chl_check_password(&_comm, user_name.c_str(), zone_name.c_str(), password.c_str(), &valid);
+            const int ec = chl_check_password(&_comm, user_name.c_str(), zone_name.c_str(), session_token->get_ref<const std::string&>().c_str(), &valid);
             if (ec < 0) {
                 THROW(ec,
                       fmt::format(
@@ -393,10 +420,11 @@ namespace irods
                 THROW(
                     AUTHENTICATION_ERROR, fmt::format("Authentication failed for user [{}#{}].", user_name, zone_name));
             }
+
+            // TODO: Only do this when we authenticate with the session token.
             // Success! Now set user privilege information in the RsComm. This could be its own operation, but then we
             // would require the client to call the operation.
             set_privileges_in_rs_comm(_comm, user_name, zone_name);
-            nlohmann::json resp{_request};
             return resp;
         } // server_auth_with_password_op
 #endif

@@ -15473,6 +15473,124 @@ auto db_update_replica_access_time(irods::plugin_context& _ctx,
     }
 } // db_update_replica_access_time
 
+auto db_make_session_token(
+    irods::plugin_context& _ctx,
+    const char* _user_name,
+    const char* _zone_name,
+    char** _token) -> irods::error
+{
+    if (const auto ret = _ctx.valid(); !ret.ok()) {
+        return PASS(ret);
+    }
+    if (!_user_name || !_zone_name) {
+        return ERROR(CAT_INVALID_ARGUMENT, fmt::format("{}: One or more input pointers are null.", __func__));
+    }
+    char myTime[50];
+    getNowStr( myTime );
+
+    // TODO: UUID
+    const auto token = irods::generate_random_alphanumeric_string(MAX_PASSWORD_LEN);
+
+    cllBindVars[cllBindVarCount++] = _user_name;
+    cllBindVars[cllBindVarCount++] = _zone_name;
+    cllBindVars[cllBindVarCount++] = token.c_str();
+    cllBindVars[cllBindVarCount++] = "basic";
+    cllBindVars[cllBindVarCount++] = "0";
+    cllBindVars[cllBindVarCount++] = myTime;
+    cllBindVars[cllBindVarCount++] = myTime;
+
+    const auto ec = cmlExecuteNoAnswerSql("insert into R_USER_SESSION_KEY (user_id, session_key, auth_scheme, session_expiry_ts, create_ts, modify_ts) values ((select user_id from R_USER_MAIN where user_name = ? and zone_name = ?), ?, ?, ?, ?, ?)", &icss);
+    if (0 != ec) {
+        _rollback("make_session_token");
+        return ERROR(ec, "Failed to create session token.");
+    }
+    if (const auto ec = cmlExecuteNoAnswerSql("commit", &icss); 0 != ec) {
+        _rollback("make_session_token");
+        return ERROR(ec, "Failed to create session token.");
+    }
+    *_token = strdup(token.c_str());
+    return SUCCESS();
+} // db_make_session_token
+
+auto check_session_key(irods::plugin_context& _ctx,
+                       const char* _user_name,
+                       const char* _zone_name,
+                       const char* _password,
+                       int* _valid)
+{
+    if (const auto ret = _ctx.valid(); !ret.ok()) {
+        return PASS(ret);
+    }
+    if (!_user_name || !_zone_name || !_password || !_valid) {
+        return ERROR(CAT_INVALID_ARGUMENT, fmt::format("{}: One or more input pointers are null.", __func__));
+    }
+    *_valid = 0;
+    struct auth_key
+    {
+        std::string token;
+        std::string auth_scheme;
+        std::string expiration_timestamp;
+    };
+    std::vector<auth_key> auth_keys;
+    try {
+        auto [db_instance, db_conn] = irods::experimental::catalog::new_database_connection();
+        nanodbc::statement stmt{db_conn};
+        nanodbc::prepare(stmt,
+                         "select R_USER_SESSION_KEY.session_key, R_USER_SESSION_KEY.auth_scheme, R_USER_SESSION_KEY.session_expiry_ts from R_USER_SESSION_KEY, R_USER_MAIN where user_name=? and zone_name=? and R_USER_MAIN.user_id = R_USER_SESSION_KEY.user_id");
+        stmt.bind(0, _user_name);
+        stmt.bind(1, _zone_name);
+        // Maybe only expect one password? And salt cannot be null or empty?
+        for (auto result = nanodbc::execute(stmt); result.next();) {
+            // Only consider keys with salts. If no salt is recorded, it is likely a legacy password. Regardless, we
+            // cannot match any passwords without a salt because the password is hashed with a salt at creation.
+            const auto session_key = result.get<std::string>(0);
+            const auto auth_scheme = result.get<std::string>(1);
+            const auto expiration_timestamp = result.get<std::string>(2);
+            auth_keys.emplace_back(auth_key{session_key, auth_scheme, expiration_timestamp});
+        }
+    }
+    catch (const std::exception& e) {
+        log_db::error("{}: Error occurred fetching session token information for user [{}#{}]: {}",
+                      __func__,
+                      _user_name,
+                      _zone_name,
+                      e.what());
+        return ERROR(SYS_LIBRARY_ERROR, e.what());
+    }
+    if (auth_keys.empty()) {
+        // The user does not have any stored keys. This operation does not care whether this is an invalid user or
+        // there are no keys stored for the user.
+        return SUCCESS();
+    }
+    for (const auto& auth_key : auth_keys) {
+        // TODO: Just check the keys for now. We can do auth scheme stuff later.
+        if (_password == auth_key.token) {
+            // Found the token - now we need to make sure that it's not expired.
+# if 0
+            auth_config ac{};
+            if (const auto err = get_auth_config("authentication", ac); !err.ok()) {
+                log_db::error("Failed to get auth configuration. [{}]", err.result());
+                return err;
+            }
+
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
+            int timeToLive = _ttl * 3600; /* convert input hours to seconds */
+            if (timeToLive < ac.password_min_time || timeToLive > ac.password_max_time) {
+                log_db::error("Invalid TTL - min time: [{}] max time:[{}] ttl: [{}]",
+                              ac.password_min_time,
+                              ac.password_max_time,
+                              timeToLive);
+                return ERROR( PAM_AUTH_PASSWORD_INVALID_TTL, "invalid ttl" );
+            }
+#endif
+            *_valid = 1;
+            return SUCCESS();
+        }
+    }
+    // Reaching this point means that the provided user and password combination did not match anything.
+    return SUCCESS();
+} // check_session_key
+
 auto db_check_password_op(irods::plugin_context& _ctx,
                           const char* _user_name,
                           const char* _zone_name,
@@ -15484,6 +15602,10 @@ auto db_check_password_op(irods::plugin_context& _ctx,
     }
     if (!_user_name || !_zone_name || !_password || !_valid) {
         return ERROR(CAT_INVALID_ARGUMENT, fmt::format("{}: One or more input pointers are null.", __func__));
+    }
+    // TODO: Separate into a different operation.
+    if (const auto ret = check_session_key(_ctx, _user_name, _zone_name, _password, _valid); ret.ok() && 1 == *_valid) {
+        return SUCCESS();
     }
     *_valid = 0;
     // This should be fairly small, even if the user has 40 passwords stored due to PAM authentication.
@@ -15946,6 +16068,9 @@ irods::database* plugin_factory(
     pg->add_operation(
         DATABASE_OP_CHECK_PASSWORD,
         function<error(plugin_context&, const char*, const char*, const char*, int*)>(db_check_password_op));
+    pg->add_operation(
+        DATABASE_OP_MAKE_SESSION_TOKEN,
+        function<error(plugin_context&, const char*, const char*, char**)>(db_make_session_token));
 
     return pg;
 } // plugin_factory

@@ -4790,3 +4790,24 @@ auto chl_check_password(RsComm* _comm,
     // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     return ret.code();
 } // chl_check_password
+
+auto chl_make_session_token(RsComm* _comm, const char* _user_name, const char* _zone_name, char** _token) -> int
+{
+    irods::database_object_ptr db_obj_ptr;
+    if (const auto ret = irods::database_factory(database_plugin_type, db_obj_ptr); !ret.ok()) {
+        irods::log(PASS(ret));
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+        return ret.code();
+    }
+    irods::plugin_ptr db_plug_ptr;
+    if (const auto ret = db_obj_ptr->resolve(irods::DATABASE_INTERFACE, db_plug_ptr); !ret.ok()) {
+        irods::log(PASSMSG("failed to resolve database interface", ret));
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+        return ret.code();
+    }
+    irods::first_class_object_ptr ptr = boost::dynamic_pointer_cast<irods::first_class_object>(db_obj_ptr);
+    irods::database_ptr db = boost::dynamic_pointer_cast<irods::database>(db_plug_ptr);
+    const auto ret = db->call(_comm, irods::DATABASE_OP_MAKE_SESSION_TOKEN, ptr, _user_name, _zone_name, _token);
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+    return ret.code();
+} // chl_check_password

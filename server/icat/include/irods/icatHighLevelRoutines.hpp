@@ -453,4 +453,6 @@ auto chl_check_password(RsComm* _comm,
                         const char* _password,
                         int* _valid) -> int;
 
+auto chl_make_session_token(RsComm* _comm, const char* _user_name, const char* _zone_name, char** _token) -> int;
+
 #endif // IRODS_ICAT_HIGHLEVEL_ROUTINES_HPP
