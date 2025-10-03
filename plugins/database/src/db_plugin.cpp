@@ -15529,7 +15529,7 @@ auto check_session_key(irods::plugin_context& _ctx,
     {
         std::string token;
         std::string auth_scheme;
-        std::string expiration_timestamp;
+        std::int64_t expiration_timestamp;
     };
     std::vector<auth_key> auth_keys;
     try {
@@ -15539,13 +15539,10 @@ auto check_session_key(irods::plugin_context& _ctx,
                          "select R_USER_SESSION_KEY.session_key, R_USER_SESSION_KEY.auth_scheme, R_USER_SESSION_KEY.session_expiry_ts from R_USER_SESSION_KEY, R_USER_MAIN where user_name=? and zone_name=? and R_USER_MAIN.user_id = R_USER_SESSION_KEY.user_id");
         stmt.bind(0, _user_name);
         stmt.bind(1, _zone_name);
-        // Maybe only expect one password? And salt cannot be null or empty?
         for (auto result = nanodbc::execute(stmt); result.next();) {
-            // Only consider keys with salts. If no salt is recorded, it is likely a legacy password. Regardless, we
-            // cannot match any passwords without a salt because the password is hashed with a salt at creation.
             const auto session_key = result.get<std::string>(0);
             const auto auth_scheme = result.get<std::string>(1);
-            const auto expiration_timestamp = result.get<std::string>(2);
+            const auto expiration_timestamp = std::stoll(result.get<std::string>(2));
             auth_keys.emplace_back(auth_key{session_key, auth_scheme, expiration_timestamp});
         }
     }
@@ -15565,24 +15562,12 @@ auto check_session_key(irods::plugin_context& _ctx,
     for (const auto& auth_key : auth_keys) {
         // TODO: Just check the keys for now. We can do auth scheme stuff later.
         if (_password == auth_key.token) {
-            // Found the token - now we need to make sure that it's not expired.
-# if 0
-            auth_config ac{};
-            if (const auto err = get_auth_config("authentication", ac); !err.ok()) {
-                log_db::error("Failed to get auth configuration. [{}]", err.result());
-                return err;
+            // Check whether the token has expired. If the recorded expiration timestamp is non-positive, that means
+            // that the token does not expire. If the expiration timestamp value is less than the current epoch time,
+            // that means it has expired.
+            if (auth_key.expiration_timestamp > 0 && auth_key.expiration_timestamp < std::time(nullptr)) {
+                continue;
             }
-
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
-            int timeToLive = _ttl * 3600; /* convert input hours to seconds */
-            if (timeToLive < ac.password_min_time || timeToLive > ac.password_max_time) {
-                log_db::error("Invalid TTL - min time: [{}] max time:[{}] ttl: [{}]",
-                              ac.password_min_time,
-                              ac.password_max_time,
-                              timeToLive);
-                return ERROR( PAM_AUTH_PASSWORD_INVALID_TTL, "invalid ttl" );
-            }
-#endif
             *_valid = 1;
             return SUCCESS();
         }
