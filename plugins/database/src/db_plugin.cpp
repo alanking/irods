@@ -15983,6 +15983,84 @@ auto db_delete_session_tokens_op(irods::plugin_context& _ctx, const char* _json_
     return SUCCESS();
 } // db_delete_session_tokens_op
 
+auto db_remove_password_op(irods::plugin_context& _ctx, const char* _json_input) -> irods::error
+{
+    if (const auto ret = _ctx.valid(); !ret.ok()) {
+        return PASS(ret);
+    }
+    if (!_json_input) {
+        return ERROR(CAT_INVALID_ARGUMENT, fmt::format("{}: JSON input is null.", __func__));
+    }
+
+    try {
+        const auto json_input = nlohmann::json::parse(_json_input);
+
+        // User name and zone name must both be specified in order to delete the password for a specific user.
+        const auto& user_name = json_input.at("user_name").get_ref<const std::string&>();
+        const auto& zone_name = json_input.at("zone_name").get_ref<const std::string&>();
+
+        // Get the user ID first, not as a subselect. The reason for this is to see whether the provided user
+        // information refers to an actual user. It is possible that the user exists and does not have a password set.
+        char user_id[NAME_LEN + 1];
+        {
+            std::vector<std::string> bindVars;
+            bindVars.emplace_back(user_name);
+            bindVars.emplace_back(zone_name);
+            auto ec = cmlGetStringValueFromSql("select user_id from R_USER_MAIN where user_name=? and "
+                                               "R_USER_MAIN.zone_name=? and user_type_name!='rodsgroup'",
+                                               user_id,
+                                               NAME_LEN,
+                                               bindVars,
+                                               &icss);
+            if (0 != ec) {
+                if (CAT_NO_ROWS_FOUND == ec) {
+                    ec = CAT_INVALID_USER;
+                }
+                return ERROR(ec, fmt::format("Failed to get user_id with user input: [{}#{}]", user_name, zone_name));
+            }
+        }
+
+        // Get together the parameters for the query to delete the password.
+        constexpr const char* delete_sql = "delete from R_USER_CREDENTIALS where user_id=?";
+        int i{};
+        cllBindVars[i++] = user_id;
+        cllBindVarCount = i;
+
+        // Execute the appropriate delete statement.
+        if (int ec = cmlExecuteNoAnswerSql(delete_sql, &icss); 0 != ec) {
+            if (CAT_SUCCESS_BUT_WITH_NO_INFO == ec) {
+                log_db::info("No user passwords valid for removal.");
+            }
+            else {
+                _rollback("remove_password");
+                const auto msg = fmt::format("Failed to remove user password. ec=[{}]", ec);
+                log_db::info(msg);
+                return ERROR(ec, msg);
+            }
+        }
+
+        // Commit the changes.
+        if (const auto ec = cmlExecuteNoAnswerSql("commit", &icss); 0 != ec) {
+            _rollback("delete_session_tokens");
+            const auto msg = fmt::format("Failed to remove user password. ec=[{}]", ec);
+            log_db::info(msg);
+            return ERROR(ec, msg);
+        }
+    }
+    catch (const nlohmann::json::exception& e) {
+        const auto msg = fmt::format("{} - JSON error occurred: [{}]", __func__, e.what());
+        log_db::error(msg);
+        return ERROR(SYS_LIBRARY_ERROR, std::move(msg));
+    }
+    catch (const std::exception& e) {
+        const auto msg = fmt::format("{} - Exception occurred: [{}]", __func__, e.what());
+        log_db::error(msg);
+        return ERROR(SYS_INTERNAL_ERR, std::move(msg));
+    }
+
+    return SUCCESS();
+} // db_remove_password_op
+
 // =-=-=-=-=-=-=-
 //
 irods::error db_start_operation( irods::plugin_property_map& _props ) {
@@ -16396,6 +16474,8 @@ irods::database* plugin_factory(
                       function<error(plugin_context&, const char*, int*)>(db_check_session_token_op));
     pg->add_operation(
         DATABASE_OP_DELETE_SESSION_TOKENS, function<error(plugin_context&, const char*)>(db_delete_session_tokens_op));
+    pg->add_operation(
+        DATABASE_OP_REMOVE_PASSWORD, function<error(plugin_context&, const char*)>(db_remove_password_op));
 
     return pg;
 } // plugin_factory
