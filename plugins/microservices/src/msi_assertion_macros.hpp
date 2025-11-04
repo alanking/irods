@@ -22,19 +22,19 @@ using log_msi_test_internal = irods::experimental::log::microservice;
   }
 
 // NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
-#define IRODS_MSI_TEST_BEGIN(test_title)                              \
-  int msi_test_error_code = 0;                                        \
-                                                                      \
-  irods::at_scope_exit print_pass_or_failed{[&msi_test_error_code] {  \
-    if (msi_test_error_code) {                                        \
-      log_msi_test_internal::info("--- TEST FAILED ---");             \
-    }                                                                 \
-    else {                                                            \
-      log_msi_test_internal::info("--- TEST PASSED ---");             \
-    }                                                                 \
-  }};                                                                 \
-                                                                      \
-  try {                                                               \
+#define IRODS_MSI_TEST_BEGIN(test_title)                                    \
+  int msi_test_error_code = 0;                                              \
+                                                                            \
+  const irods::at_scope_exit print_pass_or_failed{[&msi_test_error_code] {  \
+    if (msi_test_error_code) {                                              \
+      log_msi_test_internal::info("--- TEST FAILED ---");                   \
+    }                                                                       \
+    else {                                                                  \
+      log_msi_test_internal::info("--- TEST PASSED ---");                   \
+    }                                                                       \
+  }};                                                                       \
+                                                                            \
+  try {                                                                     \
     log_msi_test_internal::info(">>> TEST BEGIN: [" #test_title "]");
 
 // NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
