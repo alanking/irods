@@ -1,13 +1,13 @@
 #!/usr/bin/python3
 
-import optparse
+import argparse
 import os
 import sys
 
 import irods.setup_options
 
-def parse_options():
-    parser = optparse.OptionParser()
+def parse_args():
+    parser = argparse.ArgumentParser()
     irods.setup_options.add_options(parser)
 
     return parser.parse_args()
@@ -16,7 +16,7 @@ def get_ld_library_path_list():
 
     ld_library_path_list = []
 
-    (options, _) = parse_options()
+    options = parse_args()
     if options.ld_library_path:
         ld_library_path_list = [p for p in options.ld_library_path.split(':') if p]
 
@@ -500,7 +500,7 @@ def main():
 
     irods.log.register_tty_handler(sys.stderr, logging.WARNING, None)
 
-    (options, _) = parse_options()
+    options = parse_args()
 
     irods_config = IrodsConfig()
 

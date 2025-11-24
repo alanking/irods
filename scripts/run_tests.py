@@ -5,9 +5,9 @@ try:
     import importlib
 except ImportError:
     from __builtin__ import __import__
+import argparse
 import itertools
 import logging
-import optparse
 import os
 import shutil
 import subprocess
@@ -28,21 +28,6 @@ import irods.paths
 import irods.test
 import irods.test.settings
 
-def optparse_callback_catch_keyboard_interrupt(*args, **kwargs):
-    unittest.installHandler()
-
-def optparse_callback_use_ssl(*args, **kwargs):
-    irods.test.settings.USE_SSL = True
-
-def optparse_callback_use_mungefs(*args, **kwargs):
-    irods.test.settings.USE_MUNGEFS = True
-
-def optparse_callback_federation(option, opt_str, value, parser):
-    irods.test.settings.FEDERATION.REMOTE_IRODS_VERSION = tuple(map(int, value[0].split('.')))
-    irods.test.settings.FEDERATION.REMOTE_ZONE = value[1]
-    irods.test.settings.FEDERATION.REMOTE_HOST = value[2]
-    if irods.test.settings.FEDERATION.REMOTE_IRODS_VERSION < (4,2):
-        irods.test.settings.FEDERATION.REMOTE_VAULT = '/var/lib/irods/iRODS/Vault'
 
 def add_class_path_prefix(name):
     return "irods.test." + name
@@ -145,22 +130,38 @@ if __name__ == '__main__':
     irods.log.register_tty_handler(sys.stderr, logging.WARNING, None)
     irods.log.register_file_handler(IrodsConfig().test_log_path)
 
-    parser = optparse.OptionParser()
-    parser.add_option('--run_specific_test', metavar='dotted name')
-    parser.add_option('--skip_until', action="store")
-    parser.add_option('--run_python_suite', action='store_true')
-    parser.add_option('--run_plugin_tests', action='store_true')
-    parser.add_option('--include_auth_tests', action='store_true')
-    parser.add_option('--include_timing_tests', action='store_true')
-    parser.add_option('--topology_test', type='choice', choices=['icat', 'resource'], metavar='<icat|resource>')
-    parser.add_option('--catch_keyboard_interrupt', action='callback', callback=optparse_callback_catch_keyboard_interrupt)
-    parser.add_option('--use_ssl', action='callback', callback=optparse_callback_use_ssl)
-    parser.add_option('--use_mungefs', action='callback', callback=optparse_callback_use_mungefs)
-    parser.add_option('--no_buffer', action='store_false', dest='buffer_test_output', default=True)
-    parser.add_option('--xml_output', action='store_true', dest='xml_output', default=False)
-    parser.add_option('--federation', type='str', nargs=3, action='callback', callback=optparse_callback_federation, metavar='<remote irods version, remote zone, remote host>')
-    parser.add_option('--hostnames', type='str', nargs=4, metavar='<ICAT_HOSTNAME HOSTNAME_1 HOSTNAME_2 HOSTNAME_3>')
-    options, _ = parser.parse_args()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--run_specific_test', metavar='dotted name')
+    parser.add_argument('--skip_until', action="store")
+    parser.add_argument('--run_python_suite', action='store_true')
+    parser.add_argument('--run_plugin_tests', action='store_true')
+    parser.add_argument('--include_auth_tests', action='store_true')
+    parser.add_argument('--include_timing_tests', action='store_true')
+    parser.add_argument('--topology_test', choices=['icat', 'resource'], metavar='<icat|resource>')
+    parser.add_argument('--catch_keyboard_interrupt', action='store_true')
+    parser.add_argument('--use_ssl', action='store_true')
+    parser.add_argument('--use_mungefs', action='store_true')
+    parser.add_argument('--no_buffer', action='store_false', dest='buffer_test_output', default=True)
+    parser.add_argument('--xml_output', action='store_true', dest='xml_output', default=False)
+    parser.add_argument('--federation', nargs=3, metavar=('remote_irods_version', 'remote_zone', 'remote_host'))
+    parser.add_argument('--hostnames', nargs=4, metavar=('ICAT_HOSTNAME', 'HOSTNAME_1', 'HOSTNAME_2', 'HOSTNAME_3'))
+    options = parser.parse_args()
+
+    if options.catch_keyboard_interrupt:
+        unittest.installHandler()
+
+    if options.use_ssl:
+        irods.test.settings.USE_SSL = True
+
+    if options.use_mungefs:
+        irods.test.settings.USE_MUNGEFS = True
+
+    if options.federation:
+        irods.test.settings.FEDERATION.REMOTE_IRODS_VERSION = tuple(map(int, options.federation[0].split('.')))
+        irods.test.settings.FEDERATION.REMOTE_ZONE = options.federation[1]
+        irods.test.settings.FEDERATION.REMOTE_HOST = options.federation[2]
+        if irods.test.settings.FEDERATION.REMOTE_IRODS_VERSION < (4,2):
+            irods.test.settings.FEDERATION.REMOTE_VAULT = '/var/lib/irods/iRODS/Vault'
 
     if len(sys.argv) == 1:
         parser.print_help()

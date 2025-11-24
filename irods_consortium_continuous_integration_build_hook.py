@@ -1,10 +1,10 @@
 from __future__ import print_function
 
+import argparse
 import glob
 import itertools
 import logging
 import multiprocessing
-import optparse
 import os
 import sys
 import tempfile
@@ -144,15 +144,15 @@ def register_log_handler():
     logging.getLogger().addHandler(logging_handler)
 
 def main():
-    parser = optparse.OptionParser()
-    parser.add_option('--debug_build', default='false')
-    parser.add_option('--icommands_git_commitish')
-    parser.add_option('--icommands_git_repository')
-    parser.add_option('--externals_packages_directory')
-    parser.add_option('--output_root_directory')
-    parser.add_option('--just_install_dependencies', action='store_true', default=False)
-    parser.add_option('--verbose', action='store_true', default=False)
-    options, _ = parser.parse_args()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--debug_build', default='false')
+    parser.add_argument('--icommands_git_commitish')
+    parser.add_argument('--icommands_git_repository')
+    parser.add_argument('--externals_packages_directory')
+    parser.add_argument('--output_root_directory')
+    parser.add_argument('--just_install_dependencies', action='store_true', default=False)
+    parser.add_argument('--verbose', action='store_true', default=False)
+    options = parser.parse_args()
 
     if options.verbose:
         register_log_handler()
