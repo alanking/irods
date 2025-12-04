@@ -1875,7 +1875,9 @@ Res *smsi_delayExec( Node** paramsr, int, Node* node, ruleExecInfo_t* rei, int, 
 
     i = _delayExec( actionCall, recoveryActionCall, delayCondition, rei );
 
-    deleteMsParamArray( rei->msParamArray );
+    clearMsParamArray(rei->msParamArray, 1);
+    // NOLINTNEXTLINE(cppcoreguidelines-owning-memory, cppcoreguidelines-no-malloc)
+    free(rei->msParamArray);
     rei->msParamArray = tmp;
 
     if ( i < 0 ) {
