@@ -372,6 +372,7 @@ TEST_CASE("test mtime changes on open and close replica without writing to it")
     SECTION("O_WRONLY with O_TRUNC updates mtime")
     {
         // Open replica with O_WRONLY and O_TRUNC flags so that the replica gets truncated.
+        // NOLINTNEXTLINE(hicpp-signed-bitwise)
         input.openFlags = O_WRONLY | O_TRUNC;
         // NOLINTNEXTLINE(readability-identifier-length)
         const auto fd = rc_replica_open(comm, &input, &json_output);
