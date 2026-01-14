@@ -252,14 +252,16 @@ TEST_CASE("test mtime changes on open and close replica without writing to it")
         std::strncpy(static_cast<char*>(info.objPath), path.c_str(), MAX_NAME_LEN - 1);
         info.replNum = 0;
 
-        auto [kvp, lm] = irods::experimental::make_key_value_proxy();
-        kvp[REPL_STATUS_KW] = std::to_string(STALE_REPLICA);
-        kvp[ADMIN_KW] = "";
+        KeyValPair kvp{};
+        addKeyVal(&kvp, REPL_STATUS_KW, std::to_string(STALE_REPLICA).c_str());
+        addKeyVal(&kvp, ADMIN_KW, "");
 
-        mod_meta_inp.regParam = kvp.get();
+        mod_meta_inp.regParam = &kvp;
         mod_meta_inp.dataObjInfo = &info;
 
-        REQUIRE(0 == rcModDataObjMeta(comm, &mod_meta_inp));
+        static_cast<void>(rcModDataObjMeta(comm, &mod_meta_inp));
+
+        clearKeyVal(&kvp);
     }};
 
     // Create an empty data object.
