@@ -1,17 +1,15 @@
-/*** Copyright (c), The Unregents of the University of California            ***
- *** For more information please refer to files in the COPYRIGHT directory ***/
-/* unregDataObj.c
- */
-
-#include "irods/unregDataObj.h"
-#include "irods/icatHighLevelRoutines.hpp"
-#include "irods/fileDriver.hpp"
-#include "irods/miscServerFunct.hpp"
 #include "irods/rsUnregDataObj.hpp"
 
-#include "irods/irods_file_object.hpp"
-#include "irods/irods_stacktrace.hpp"
+#include "irods/dataObjOpr.hpp"
+#include "irods/fileDriver.hpp"
+#include "irods/icatHighLevelRoutines.hpp"
 #include "irods/irods_configuration_keywords.hpp"
+#include "irods/irods_file_object.hpp"
+#include "irods/irods_logger.hpp"
+#include "irods/irods_stacktrace.hpp"
+#include "irods/logical_locking.hpp"
+#include "irods/miscServerFunct.hpp"
+#include "irods/unregDataObj.h"
 
 int
 rsUnregDataObj( rsComm_t *rsComm, unregDataObj_t *unregDataObjInp ) {
@@ -70,6 +68,34 @@ _rsUnregDataObj( rsComm_t *rsComm, unregDataObj_t *unregDataObjInp ) {
 
         condInput = unregDataObjInp->condInput;
         dataObjInfo = unregDataObjInp->dataObjInfo;
+
+        // Check to see if the object is locked. If so, an error is returned.
+        {
+            using log_api = irods::experimental::log::api;
+            namespace ill = irods::logical_locking;
+
+            DataObjInfo* info{};
+            const auto free_DataObjInfo = irods::at_scope_exit{[&info] { freeAllDataObjInfo(info); }};
+
+            // Get data object information. Returns error if object does not exist.
+            DataObjInp inp{};
+            std::strncpy(static_cast<char*>(inp.objPath), dataObjInfo->objPath, sizeof(inp.objPath) - 1);
+            if (const auto ret = getDataObjInfo(rsComm, &inp, &info, ACCESS_DELETE_OBJECT, 0); ret < 0) {
+                log_api::error("{}: data object [{}] does not exist. [error code={}]", __func__, inp.objPath, ret);
+                return ret;
+            }
+
+            if (const auto ret = ill::try_lock(*info, ill::lock_type::write); ret < 0) {
+                const auto msg = fmt::format("Unregister not allowed because source data object is locked "
+                                             "[error code=[{}], source path=[{}]",
+                                             ret,
+                                             dataObjInfo->objPath);
+
+                log_api::info("{}: {}", __func__, msg);
+
+                return ret;
+            }
+        }
 
         status = chlUnregDataObj( rsComm, dataObjInfo, condInput );
         if ( status < 0 ) {
