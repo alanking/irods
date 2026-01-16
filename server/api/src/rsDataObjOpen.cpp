@@ -347,7 +347,14 @@ namespace
                 info_json_str = nullptr;
             }};
 
+            // This session property indicates to the register_physical_path API that logical locking should not be
+            // enforced. Logical locking has already been enforced above, so at this point, we know that logical locking
+            // is not being violated. The session property should be removed as soon as possible.
+            static_cast<void>(addKeyVal(&_comm.session_props, ill::keywords::bypass, ""));
+
             if (const int ec = rs_register_physical_path(&_comm, l1desc.dataObjInp, &info_json_str); ec < 0 || !info_json_str) {
+                rmKeyVal(&_comm.session_props, ill::keywords::bypass);
+
                 irods::log(LOG_ERROR, fmt::format(
                     "[{}:{}] - failed to register physical path "
                     "[error_code=[{}], path=[{}], hierarchy=[{}]",
@@ -370,6 +377,8 @@ namespace
 
                 return ec;
             }
+
+            rmKeyVal(&_comm.session_props, ill::keywords::bypass);
 
             // Extract the JSON output from the registration API. If the output is not an expected value, a JSON
             // parsing error could occur, so the usual teardown needs to occur here. This is done before the

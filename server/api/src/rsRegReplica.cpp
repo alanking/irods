@@ -4,6 +4,8 @@
 #include "irods/irods_configuration_keywords.hpp"
 #include "irods/irods_file_object.hpp"
 #include "irods/irods_hierarchy_parser.hpp"
+#include "irods/irods_logger.hpp"
+#include "irods/logical_locking.hpp"
 #include "irods/miscServerFunct.hpp"
 #include "irods/objMetaOpr.hpp"
 #include "irods/regReplica.h"
@@ -24,8 +26,11 @@
 
 namespace
 {
-    namespace ir = irods::experimental::replica;
+    using log_api = irods::experimental::log::api;
+
     namespace id = irods::experimental::data_object;
+    namespace ill = irods::logical_locking;
+    namespace ir = irods::experimental::replica;
 
     std::string compute_checksum_for_resc(
         rsComm_t&              _comm,
@@ -138,6 +143,18 @@ namespace
         const auto dest = ir::make_replica_proxy(*_inp.destDataObjInfo);
         if (source.find_replica(dest.hierarchy())) {
             return SYS_COPY_ALREADY_IN_RESC;
+        }
+
+        // Check to see if the object is locked. If so, an error is returned.
+        if (nullptr == getValByKey(&_comm.session_props, ill::keywords::bypass)) {
+            if (const auto ret = ill::try_lock(*dest.get(), ill::lock_type::write); ret < 0) {
+                const auto msg = fmt::format(
+                    "Registering replica not allowed because data object is locked. error code=[{}], path=[{}]",
+                    ret,
+                    source.logical_path());
+                log_api::info("{}: {}", __func__, msg);
+                return ret;
+            }
         }
 
         if (cond_input.contains(SU_CLIENT_USER_KW)) {
