@@ -347,6 +347,9 @@ namespace
                 info_json_str = nullptr;
             }};
 
+            //addKeyVal(&l1desc.dataObjInp->condInput, REPLICA_TOKEN_KW, replica_token);
+            irods::experimental::key_value_proxy{_comm.session_props}["bypass_lock"] = "";
+            log_api::info("{}: [token={}]", __func__, replica_token);
             if (const int ec = rs_register_physical_path(&_comm, l1desc.dataObjInp, &info_json_str); ec < 0 || !info_json_str) {
                 irods::log(LOG_ERROR, fmt::format(
                     "[{}:{}] - failed to register physical path "

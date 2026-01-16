@@ -26,6 +26,7 @@
 #include "irods/irods_resource_backport.hpp"
 #include "irods/irods_resource_redirect.hpp"
 #include "irods/key_value_proxy.hpp"
+#include "irods/logical_locking.hpp"
 #include "irods/miscServerFunct.hpp"
 #include "irods/objMetaOpr.hpp"
 #include "irods/phyPathReg.h"
@@ -219,6 +220,28 @@ namespace
             return ec;
         }
 
+        // Free the structure before exiting the function
+        const auto free_data_obj_info_head = irods::at_scope_exit{[&data_obj_info_head] { freeAllDataObjInfo(data_obj_info_head); }};
+
+        // Check to see if the object is locked. If so, an error is returned.
+        if (data_obj_info_head && !irods::experimental::key_value_proxy{_comm->session_props}.contains("bypass_lock")) {
+            namespace ill = irods::logical_locking;
+
+            const auto* maybe_replica_token = getValByKey(&_comm->session_props, REPLICA_TOKEN_KW);
+            const auto* replica_token = (nullptr != maybe_replica_token) ? maybe_replica_token : "";
+            log_api::info("{}: [token={}], hier={}", __func__, replica_token, data_obj_info_head->rescHier);
+            if (const auto ret = ill::try_lock(*data_obj_info_head, ill::lock_type::write, data_obj_info_head->rescHier, replica_token); ret < 0) {
+                const auto msg = fmt::format("Registering replica not allowed because source data object is locked "
+                                             "[error code=[{}], source path=[{}]",
+                                             ret,
+                                             data_obj_info_head->objPath);
+
+                log_api::info("{}: {}", __func__, msg);
+
+                return ret;
+            }
+        }
+
         // Put a desired replica at the head of the list
         if (const int ec = sortObjInfoForOpen(&data_obj_info_head, phy_path_reg_cond_input.get(), 0 ); ec < 0) {
             // we did not match the hier string but we can still continue as we have a good copy for a read
@@ -226,9 +249,6 @@ namespace
                 return ec;
             }
         }
-
-        // Free the structure before exiting the function
-        irods::at_scope_exit free_data_obj_info_head{[&data_obj_info_head] { freeAllDataObjInfo(data_obj_info_head); }};
 
         // Populate information for the replica being registered
         auto dst_replica_info = *data_obj_info_head;
