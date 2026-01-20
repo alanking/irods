@@ -893,7 +893,7 @@ TEST_CASE("UnregDataObj")
     RcComm& comm = static_cast<RcComm&>(conn);
 
     // Construct some paths for use in tests.
-    const auto filename = "target_object";
+    constexpr const char* const filename = "target_object";
     const auto sandbox = get_sandbox_name();
     const auto target_object = sandbox / filename;
 
@@ -1000,7 +1000,7 @@ TEST_CASE("RegDataObj and PhyPathReg")
     RcComm& comm = static_cast<RcComm&>(conn);
 
     // Construct some paths for use in tests.
-    const auto filename = "target_object";
+    constexpr const char* const filename = "target_object";
     const auto sandbox = get_sandbox_name();
     const auto target_object = sandbox / filename;
 
