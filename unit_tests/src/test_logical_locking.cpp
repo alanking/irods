@@ -933,9 +933,7 @@ TEST_CASE("UnregDataObj / PhyPathReg / RegDataObj ")
     REQUIRE(GOOD_REPLICA == ir::replica_status(comm, target_object, other_replica_resc));
 
     // Create a local file to register.
-    std::ofstream fstream{filename};
-    fstream << "content!";
-    fstream.close();
+    std::ofstream{filename} << "content!";
 
     // Open source object to lock it.
     DataObjInp open_inp{};
