@@ -21,7 +21,7 @@ namespace irods::logical_locking
         // wherein a replica access token is not available but an object which needs to be modified is locked. It
         // is recommended that this be used in the session_props of the RsComm so that only internal server
         // operations can use it.
-        static constexpr const char* bypass = "bypass_logical_locking";
+        static inline constexpr const char* bypass = "bypass_logical_locking";
     } // namespace keywords
 
     // TODO: future work...
