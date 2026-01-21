@@ -451,7 +451,15 @@ namespace
         const auto source_replica_original_status = ill::get_original_replica_status(_source_replica.data_id(), _source_replica.replica_number());
         const auto source_replica_number = _source_replica.replica_number();
 
+        // This session property indicates to the UnregDataObj API that logical locking should not be enforced. Logical
+        // locking is not needed here because this API locked it and therefore is already "holding" the lock. A more
+        // elegant solution might allow for a re-entrant lock, but that is not currently available. The session property
+        // should be removed as soon as possible.
+        static_cast<void>(addKeyVal(&_comm.session_props, ill::keywords::bypass, ""));
+
         const int trim_ec = dataObjUnlinkS(&_comm, _source_l1desc.dataObjInp, _source_replica.get());
+
+        rmKeyVal(&_comm.session_props, ill::keywords::bypass);
 
         if (trim_ec < 0) {
             irods::log(LOG_WARNING, fmt::format(

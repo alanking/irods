@@ -11,6 +11,12 @@
 #include "irods/miscServerFunct.hpp"
 #include "irods/unregDataObj.h"
 
+namespace
+{
+    using log_api = irods::experimental::log::api;
+    namespace ill = irods::logical_locking;
+} // anonymous namespace
+
 int
 rsUnregDataObj( rsComm_t *rsComm, unregDataObj_t *unregDataObjInp ) {
     int status;
@@ -70,15 +76,16 @@ _rsUnregDataObj( rsComm_t *rsComm, unregDataObj_t *unregDataObjInp ) {
         dataObjInfo = unregDataObjInp->dataObjInfo;
 
         // Check to see if the object is locked. If so, an error is returned.
-        {
-            using log_api = irods::experimental::log::api;
-            namespace ill = irods::logical_locking;
-
+        if (nullptr == getValByKey(&rsComm->session_props, ill::keywords::bypass)) {
             DataObjInfo* info{};
             const auto free_DataObjInfo = irods::at_scope_exit{[&info] { freeAllDataObjInfo(info); }};
 
             // Get data object information. Returns error if object does not exist.
             DataObjInp inp{};
+            const auto clear_condInput = irods::at_scope_exit{[&inp] { clearKeyVal(&inp.condInput); }};
+            if (nullptr != getValByKey(unregDataObjInp->condInput, ADMIN_KW)) {
+                addKeyVal(&inp.condInput, ADMIN_KW, "");
+            }
             std::strncpy(static_cast<char*>(inp.objPath), dataObjInfo->objPath, sizeof(inp.objPath) - 1);
             if (const auto ret = getDataObjInfo(rsComm, &inp, &info, ACCESS_DELETE_OBJECT, 0); ret < 0) {
                 log_api::error("{}: data object [{}] does not exist. [error code={}]", __func__, inp.objPath, ret);
