@@ -131,10 +131,19 @@ namespace
                                          p.object_name().c_str(),
                                          kvp.at(RESC_HIER_STR_KW).value());
 
-            for (auto&& row : irods::query{&_conn, gql}) {
-                data_id = std::stoull(row[0]);
-                replica_number = std::stoul(row[1]);
+            auto query = irods::query{&_conn, gql};
+
+            // TODO(#8809) - remove static_cast when empty returns bool
+            if (static_cast<bool>(query.empty())) {
+                log_api::error("{}: Failed to update replica access table for [{}] in [{}].",
+                               __func__,
+                               p.c_str(),
+                               kvp.at(RESC_HIER_STR_KW).value());
+                return SYS_REPLICA_DOES_NOT_EXIST;
             }
+
+            data_id = std::stoull(query.front()[0]);
+            replica_number = std::stoul(query.front()[1]);
         }
         catch (const std::out_of_range&) {
             irods::log(LOG_NOTICE, fmt::format("[{}:{}] - Could not convert string to integer", __FUNCTION__, __LINE__));
