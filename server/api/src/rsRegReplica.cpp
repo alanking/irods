@@ -146,7 +146,9 @@ namespace
         }
 
         // Check to see if the object is locked. If so, an error is returned.
-        if (nullptr == getValByKey(&_comm.session_props, ill::keywords::bypass)) {
+        if (!irods::server_property_exists(irods::AGENT_CONN_KW) ||
+            nullptr == getValByKey(&_inp.condInput, ill::keywords::bypass))
+        {
             if (const auto ret = ill::try_lock(*dest.get(), ill::lock_type::write); ret < 0) {
                 const auto msg = fmt::format(
                     "Registering replica not allowed because data object is locked. error code=[{}], path=[{}]",
@@ -238,7 +240,22 @@ int rsRegReplica(rsComm_t *rsComm, regReplica_t *regReplicaInp)
             cond_input[IN_REPL_KW] = "";
         }
 
+        // This logical locking bypass is only allowed for server-to-server connections. If this is not a
+        // server-to-server connection, remove the bypass keyword so that logical locking can be properly enforced.
+        bool restore_ill_bypass_keyword = false;
+        if (nullptr != getValByKey(&regReplicaInp->condInput, ill::keywords::bypass)) {
+            if (!irods::server_property_exists(irods::AGENT_CONN_KW)) {
+                restore_ill_bypass_keyword = true;
+                static_cast<void>(rmKeyVal(&regReplicaInp->condInput, ill::keywords::bypass));
+            }
+        }
+
         const auto ec = rcRegReplica(rodsServerHost->conn, regReplicaInp);
+
+        if (restore_ill_bypass_keyword) {
+            static_cast<void>(addKeyVal(&regReplicaInp->condInput, ill::keywords::bypass, ""));
+        }
+
         if (ec < 0) {
             irods::log(LOG_ERROR, fmt::format("[{}:{}] - failed registering replica [{}] ec=[{}]",
                         __func__, __LINE__, regReplicaInp->destDataObjInfo->objPath, ec));

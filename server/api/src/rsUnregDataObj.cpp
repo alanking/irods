@@ -6,6 +6,7 @@
 #include "irods/irods_configuration_keywords.hpp"
 #include "irods/irods_file_object.hpp"
 #include "irods/irods_logger.hpp"
+#include "irods/irods_server_properties.hpp"
 #include "irods/irods_stacktrace.hpp"
 #include "irods/logical_locking.hpp"
 #include "irods/miscServerFunct.hpp"
@@ -51,7 +52,21 @@ rsUnregDataObj( rsComm_t *rsComm, unregDataObj_t *unregDataObjInp ) {
 
     }
     else {
+        // This logical locking bypass is only allowed for server-to-server connections. If this is not a
+        // server-to-server connection, remove the bypass keyword so that logical locking can be properly enforced.
+        bool restore_ill_bypass_keyword = false;
+        if (nullptr != getValByKey(unregDataObjInp->condInput, ill::keywords::bypass)) {
+            if (!irods::server_property_exists(irods::AGENT_CONN_KW)) {
+                restore_ill_bypass_keyword = true;
+                static_cast<void>(rmKeyVal(unregDataObjInp->condInput, ill::keywords::bypass));
+            }
+        }
+
         status = rcUnregDataObj( rodsServerHost->conn, unregDataObjInp );
+
+        if (restore_ill_bypass_keyword) {
+            static_cast<void>(addKeyVal(unregDataObjInp->condInput, ill::keywords::bypass, ""));
+        }
     }
 
     return status;
@@ -76,7 +91,8 @@ _rsUnregDataObj( rsComm_t *rsComm, unregDataObj_t *unregDataObjInp ) {
         dataObjInfo = unregDataObjInp->dataObjInfo;
 
         // Check to see if the object is locked. If so, an error is returned.
-        if (nullptr == getValByKey(&rsComm->session_props, ill::keywords::bypass)) {
+        if (!irods::server_property_exists(irods::AGENT_CONN_KW) ||
+            nullptr == getValByKey(condInput, ill::keywords::bypass)) {
             DataObjInfo* info{};
             const auto free_DataObjInfo = irods::at_scope_exit{[&info] { freeAllDataObjInfo(info); }};
 

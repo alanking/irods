@@ -347,13 +347,23 @@ namespace
                 info_json_str = nullptr;
             }};
 
-            // This session property indicates to the register_physical_path API that logical locking should not be
-            // enforced. Logical locking has already been enforced above, so at this point, we know that logical locking
-            // is not being violated. The session property should be removed as soon as possible.
-            static_cast<void>(addKeyVal(&_comm.session_props, ill::keywords::bypass, ""));
+            // This keyword indicates to the register_physical_path API that logical locking should not be enforced.
+            // Logical locking has already been enforced above, so at this point, we know that logical locking is not
+            // being violated. In order to ensure it is being used in an authorized manner, register_physical_path only
+            // allows use of this keyword for server-to-server connections. If this is not already a server-to-server
+            // connection, the server property is set so that the keyword will be recognized.
+            static_cast<void>(addKeyVal(&l1desc.dataObjInp->condInput, ill::keywords::bypass, ""));
+            bool agent_conn_kw_already_set = irods::server_property_exists(irods::AGENT_CONN_KW);
+            if (!agent_conn_kw_already_set) {
+                static_cast<void>(irods::set_server_property<std::string>(irods::AGENT_CONN_KW, ill::keywords::bypass));
+            }
 
             if (const int ec = rs_register_physical_path(&_comm, l1desc.dataObjInp, &info_json_str); ec < 0 || !info_json_str) {
-                rmKeyVal(&_comm.session_props, ill::keywords::bypass);
+                // Remove the logical locking bypass properties as soon as possible.
+                static_cast<void>(rmKeyVal(&l1desc.dataObjInp->condInput, ill::keywords::bypass));
+                if (!agent_conn_kw_already_set) {
+                    static_cast<void>(irods::delete_server_property(irods::AGENT_CONN_KW));
+                }
 
                 irods::log(LOG_ERROR, fmt::format(
                     "[{}:{}] - failed to register physical path "
@@ -378,7 +388,11 @@ namespace
                 return ec;
             }
 
-            rmKeyVal(&_comm.session_props, ill::keywords::bypass);
+            // Remove the logical locking bypass properties as soon as possible.
+            static_cast<void>(rmKeyVal(&l1desc.dataObjInp->condInput, ill::keywords::bypass));
+            if (!agent_conn_kw_already_set) {
+                static_cast<void>(irods::delete_server_property(irods::AGENT_CONN_KW));
+            }
 
             // Extract the JSON output from the registration API. If the output is not an expected value, a JSON
             // parsing error could occur, so the usual teardown needs to occur here. This is done before the
