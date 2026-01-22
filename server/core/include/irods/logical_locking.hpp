@@ -19,8 +19,9 @@ namespace irods::logical_locking
         // determine whether or not it is honored. This should only be used internally in the iRODS server and is
         // not meant for client consumption. Furthermore, its usage should be limited to highly specific cases
         // wherein a replica access token is not available but an object which needs to be modified is locked. It
-        // is recommended that this be used in the session_props of the RsComm so that only internal server
-        // operations can use it.
+        // is recommended that this be used in conjunction with the AGENT_CONN_KW server property - which indicates
+        // that the client is another iRODS agent - to ensure that only iRODS servers can bypass logical locking with
+        // this keyword.
         static inline constexpr const char* bypass = "bypass_logical_locking";
     } // namespace keywords
 
