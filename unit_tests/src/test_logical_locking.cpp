@@ -48,6 +48,9 @@ namespace
     static const auto& opened_replica_resc = resc_0;
     static const auto& other_replica_resc = resc_1;
 
+    constexpr const char* default_resc = "demoResc";
+    constexpr const char* bypass_logical_locking_kw = "bypass_logical_locking";
+
     inline auto get_sandbox_name() -> fs::path
     {
         rodsEnv env;
@@ -966,6 +969,13 @@ TEST_CASE("UnregDataObj / PhyPathReg / RegDataObj ")
         REQUIRE(LOCKED_DATA_OBJECT_ACCESS == rcUnregDataObj(&new_comm, &unreg_inp));
         CHECK(ir::replica_exists(new_comm, target_object.c_str(), opened_replica_resc));
         CHECK(ir::replica_exists(new_comm, target_object.c_str(), other_replica_resc));
+
+        // Try to bypass logical locking with the "bypass_logical_locking" keyword, and fail. This is not normally
+        // available to clients, but this is an open source project, so anybody could try this.
+        addKeyVal(unreg_inp.condInput, bypass_logical_locking_kw, "");
+        REQUIRE(LOCKED_DATA_OBJECT_ACCESS == rcUnregDataObj(&new_comm, &unreg_inp));
+        CHECK(ir::replica_exists(new_comm, target_object.c_str(), opened_replica_resc));
+        CHECK(ir::replica_exists(new_comm, target_object.c_str(), other_replica_resc));
     }
 
     SECTION("PhyPathReg")
@@ -1022,7 +1032,13 @@ TEST_CASE("UnregDataObj / PhyPathReg / RegDataObj ")
             // Try to register a new replica.
             addKeyVal(&reg_inp.condInput, REG_REPL_KW, "");
             REQUIRE(LOCKED_DATA_OBJECT_ACCESS == rcPhyPathReg(&new_comm, &reg_inp));
-            CHECK(!ir::replica_exists(new_comm, target_object.c_str(), resc_2));
+            CHECK(!ir::replica_exists(new_comm, target_object.c_str(), default_resc));
+
+            // Try to bypass logical locking with the "bypass_logical_locking" keyword, and fail. This is not normally
+            // available to clients, but this is an open source project, so anybody could try this.
+            addKeyVal(&reg_inp.condInput, bypass_logical_locking_kw, "");
+            REQUIRE(LOCKED_DATA_OBJECT_ACCESS == rcPhyPathReg(&new_comm, &reg_inp));
+            CHECK(!ir::replica_exists(new_comm, target_object.c_str(), default_resc));
         }
 
         SECTION("RESC_HIER_STR_KW with REG_REPL_KW")
@@ -1041,6 +1057,12 @@ TEST_CASE("UnregDataObj / PhyPathReg / RegDataObj ")
             addKeyVal(&reg_inp.condInput, RESC_HIER_STR_KW, resc_2.c_str());
             REQUIRE(LOCKED_DATA_OBJECT_ACCESS == rcPhyPathReg(&new_comm, &reg_inp));
             CHECK(!ir::replica_exists(new_comm, target_object.c_str(), resc_2));
+
+            // Try to bypass logical locking with the "bypass_logical_locking" keyword, and fail. This is not normally
+            // available to clients, but this is an open source project, so anybody could try this.
+            addKeyVal(&reg_inp.condInput, bypass_logical_locking_kw, "");
+            REQUIRE(LOCKED_DATA_OBJECT_ACCESS == rcPhyPathReg(&new_comm, &reg_inp));
+            CHECK(!ir::replica_exists(new_comm, target_object.c_str(), resc_2));
         }
 
         SECTION("DEST_RESC_NAME_KW with REG_REPL_KW")
@@ -1057,6 +1079,12 @@ TEST_CASE("UnregDataObj / PhyPathReg / RegDataObj ")
 
             // Target resource which has no replicas for this data object.
             addKeyVal(&reg_inp.condInput, DEST_RESC_NAME_KW, resc_2.c_str());
+            REQUIRE(LOCKED_DATA_OBJECT_ACCESS == rcPhyPathReg(&new_comm, &reg_inp));
+            CHECK(!ir::replica_exists(new_comm, target_object.c_str(), resc_2));
+
+            // Try to bypass logical locking with the "bypass_logical_locking" keyword, and fail. This is not normally
+            // available to clients, but this is an open source project, so anybody could try this.
+            addKeyVal(&reg_inp.condInput, bypass_logical_locking_kw, "");
             REQUIRE(LOCKED_DATA_OBJECT_ACCESS == rcPhyPathReg(&new_comm, &reg_inp));
             CHECK(!ir::replica_exists(new_comm, target_object.c_str(), resc_2));
         }
