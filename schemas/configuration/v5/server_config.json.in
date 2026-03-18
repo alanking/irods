@@ -403,6 +403,14 @@
             "pattern": "^[A-Za-z0-9_]+$",
             "maxLength": 49
         },
+        "zone_key_signing_hash_scheme": {
+            "type": "enum",
+            "enum": [
+                "md5",
+                "sha256",
+                "sha512"
+            ]
+        },
         "zone_name": {
             "type": "string",
             "pattern": "^[A-Za-z0-9_\\.]+$",

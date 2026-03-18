@@ -11,11 +11,18 @@
 #include "irods/rsGlobalExtern.hpp"
 
 #include <list>
+#include <map>
 
 #include <fmt/format.h>
 
 namespace irods
 {
+    extern const std::string MD5_NAME;
+
+    std::map<std::string, std::string> signed_zone_key_map;
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     error check_sent_sid(const std::string& _zone_key)
     {
         if (_zone_key.empty()) {
@@ -65,6 +72,7 @@ namespace irods
 
         return ERROR(ZONE_KEY_SIGNATURE_MISMATCH, "signed zone_keys do not match");
     } // check_sent_sid
+#pragma GCC diagnostic pop
 
 
 /// =-=-=-=-=-=-=-
@@ -149,8 +157,12 @@ namespace irods
                     // Make sure that the zone_key was signed using the correct negotiation_key
                     // and matches the signed zone_key for this zone. If it does not match, the
                     // server should end communications.
-                    if (const auto err = check_sent_sid(zone_key); !err.ok()) {
-                        return err;
+                    const auto signed_zone_key_is_correct = std::any_of(
+                        signed_zone_key_map.cbegin(), signed_zone_key_map.cend(), [&zone_key](const auto& _entry) {
+                            return zone_key == _entry.second;
+                        });
+                    if (!signed_zone_key_is_correct) {
+                        return ERROR(ZONE_KEY_SIGNATURE_MISMATCH, "signed zone_keys do not match");
                     }
 
                     // Store property that states this is an Agent-Agent connection, as opposed

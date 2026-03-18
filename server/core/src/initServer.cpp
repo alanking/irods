@@ -56,6 +56,12 @@
 #include <string_view>
 #include <fstream>
 
+namespace irods
+{
+    extern const std::string MD5_NAME;
+    extern std::map<std::string, std::string> signed_zone_key_map;
+} // namespace irods
+
 namespace
 {
     namespace ill = irods::logical_locking;
@@ -283,6 +289,33 @@ int initRcatServerHostByFile()
         }
     }
 
+    // TODO(#3403): Is this the right place to do this?
+    // Store signed zone key for local zone in signed zone key map.
+    const auto config_handle{irods::server_properties::instance().map()};
+    const auto& config{config_handle.get_json()};
+
+    const auto& zone_key = config.at(irods::KW_CFG_ZONE_KEY).get_ref<const std::string&>();
+    const auto& zone_name = config.at(irods::KW_CFG_ZONE_NAME).get_ref<const std::string&>();
+    const auto& negotiation_key = config.at(irods::KW_CFG_NEGOTIATION_KEY).get_ref<const std::string&>();
+
+    // Get the hash scheme (if available; use MD5 by default) and store the signed zone key in a map.
+    auto hash_scheme = irods::MD5_NAME;
+    if (const auto hash_scheme_iter = config.find(irods::KW_CFG_ZONE_KEY_SIGNING_HASH_SCHEME);
+        config.end() != hash_scheme_iter)
+    {
+        hash_scheme = hash_scheme_iter->get<std::string>();
+    }
+
+    std::string signed_zone_key;
+    if (const auto err = irods::sign_zone_key(zone_key, negotiation_key, hash_scheme, signed_zone_key);
+        !err.ok())
+    {
+        log_agent::error(
+            "{}: Failed to sign local zone key. error code:[{}], message:[{}]", __func__, err.result(), err.code());
+        return err.code();
+    }
+    irods::signed_zone_key_map[zone_name] = signed_zone_key;
+
     // try for new federation config
     try {
         for (const auto& federation : irods::get_server_property<const nlohmann::json&>(irods::KW_CFG_FEDERATION)) {
@@ -294,6 +327,29 @@ int initRcatServerHostByFile()
 
                     // store in remote_SID_key_map
                     remote_SID_key_map[fed_zone_name] = std::make_pair(fed_zone_key, fed_zone_negotiation_key);
+
+                    // Get the hash scheme (if available; use MD5 by default) and store the signed zone key in a map.
+                    auto hash_scheme = irods::MD5_NAME;
+                    if (const auto hash_scheme_iter = federation.find(irods::KW_CFG_ZONE_KEY_SIGNING_HASH_SCHEME);
+                        federation.end() != hash_scheme_iter)
+                    {
+                        hash_scheme = hash_scheme_iter->get<std::string>();
+                    }
+
+                    std::string signed_zone_key;
+                    if (const auto err =
+                            irods::sign_zone_key(fed_zone_key, fed_zone_negotiation_key, hash_scheme, signed_zone_key);
+                        !err.ok())
+                    {
+                        log_agent::error(
+                            "{}: Failed to sign zone key for [{}]. Skipping. error code:[{}], message:[{}]",
+                            __func__,
+                            fed_zone_name,
+                            err.result(),
+                            err.code());
+                        continue;
+                    }
+                    irods::signed_zone_key_map[fed_zone_name] = signed_zone_key;
                 }
                 catch (boost::bad_any_cast&) {
                     rodsLog(LOG_ERROR, "initRcatServerHostByFile - failed to cast federation entry to string");

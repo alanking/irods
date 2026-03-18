@@ -7,7 +7,6 @@
 #include "irods/irods_buffer_encryption.hpp"
 #include "irods/irods_hasher_factory.hpp"
 #include "irods/irods_configuration_parser.hpp"
-#include "irods/MD5Strategy.hpp"
 #include "irods/rcGlobalExtern.h"
 #include "irods/sockComm.h"
 #include "irods/sockCommNetworkInterface.hpp"
@@ -31,30 +30,17 @@
 
 extern const packInstruct_t RodsPackTable[];
 
-namespace irods
+namespace
 {
-    auto negotiation_key_is_valid(const std::string_view _key) -> bool
-    {
-        static const auto negotiation_key_regex = std::regex{R"_(^[A-Za-z0-9_]+$)_"};
-
-        return _key.length() == negotiation_key_length_in_bytes &&
-            std::regex_match(_key.data(), negotiation_key_regex);
-    } // negotiation_key_is_valid
-
-    /// =-=-=-=-=-=-=-
-    /// @brief given a property map and the target host name decide between a federated key and a local key
-    auto determine_negotiation_key(const std::string& _host_name) -> std::string
+    auto determine_federation_or_server_property(const std::string& _host_name, const std::string& _key) -> std::string
     {
         try {
             const auto& federation_list = irods::get_server_property<const nlohmann::json&>(irods::KW_CFG_FEDERATION);
             for (const auto& item : federation_list) {
-                const auto e = std::cend(item);
                 const auto provider_hosts = item.find(irods::KW_CFG_CATALOG_PROVIDER_HOSTS);
-                const auto negotiation_key = item.find(irods::KW_CFG_NEGOTIATION_KEY);
-                if (e == provider_hosts || e == negotiation_key) {
-                    irods::log(LOG_WARNING,
-                               fmt::format("[{}] federation entry missing required properties - check configuration",
-                                           __func__));
+                const auto desired_value = item.find(_key);
+                if (std::cend(item) == provider_hosts || std::cend(item) == desired_value) {
+                    // This means that there is a federation entry that is missing a required property. Just skip it.
                     continue;
                 }
 
@@ -66,7 +52,7 @@ namespace irods
                                 });
 
                 if (hostname_in_provider_hosts_list) {
-                    return negotiation_key->get<std::string>();
+                    return desired_value->get<std::string>();
                 }
             }
         }
@@ -74,12 +60,32 @@ namespace irods
         }
 
         // if not, it must be in our zone
-        return irods::get_server_property<std::string>(KW_CFG_NEGOTIATION_KEY);
+        return irods::get_server_property<std::string>(_key);
+    } // determine_federation_or_server_property
+} // anonymous namespace
+
+namespace irods
+{
+    extern const std::string MD5_NAME;
+
+    auto negotiation_key_is_valid(const std::string_view _key) -> bool
+    {
+        static const auto negotiation_key_regex = std::regex{R"_(^[A-Za-z0-9_]+$)_"};
+
+        return _key.length() == negotiation_key_length_in_bytes && std::regex_match(_key.data(), negotiation_key_regex);
+    } // negotiation_key_is_valid
+
+    /// =-=-=-=-=-=-=-
+    /// @brief given a property map and the target host name decide between a federated key and a local key
+    auto determine_negotiation_key(const std::string& _host_name) -> std::string
+    {
+        return determine_federation_or_server_property(_host_name, irods::KW_CFG_NEGOTIATION_KEY);
     } // determine_negotiation_key
 
-    error sign_server_sid(const std::string& _zone_key,
-                          const std::string& _encryption_key,
-                          std::string&       _signed_zone_key)
+    auto sign_zone_key(const std::string& _zone_key,
+                       const std::string& _encryption_key,
+                       const std::string& _zone_key_signing_hash_scheme,
+                       std::string& _signed_zone_key) -> error
     {
         if (_encryption_key.empty()) {
             return ERROR(CLIENT_NEGOTIATION_ERROR, "encryption key for signing is empty");
@@ -99,8 +105,10 @@ namespace irods
             return PASS(err);
         }
 
+        const auto& hash_scheme = _zone_key_signing_hash_scheme;
+
         Hasher hasher;
-        if (const auto err = getHasher(MD5_NAME, hasher); !err.ok()) {
+        if (const auto err = getHasher(hash_scheme, hasher); !err.ok()) {
             return PASS(err);
         }
         if (const auto err = hasher.update(std::string(reinterpret_cast<char*>(out_buf.data()), out_buf.size()));
@@ -113,6 +121,13 @@ namespace irods
         }
 
         return SUCCESS();
+    } // sign_zone_key
+
+    auto sign_server_sid(const std::string& _zone_key,
+                         const std::string& _encryption_key,
+                         std::string& _signed_zone_key) -> error
+    {
+        return sign_zone_key(_zone_key, _encryption_key, MD5_NAME, _signed_zone_key);
     } // sign_server_sid
 
     /// =-=-=-=-=-=-=-
@@ -315,13 +330,15 @@ namespace irods
         // it showing that we are a trusted agent and not a pure client (e.g. icommands, jargon, etc).
         if (AGENT_PT == ProcessType || SERVER_PT == ProcessType) {
             try {
-                boost::optional<std::string> zone_key;
-                try {
-                    zone_key.reset(irods::get_server_property<std::string>(irods::KW_CFG_ZONE_KEY));
+                const auto config_handle{irods::server_properties::instance().map()};
+                const auto& config{config_handle.get_json()};
+
+                const auto zone_key_iter = config.find(irods::KW_CFG_ZONE_KEY);
+                if (config.end() == zone_key_iter) {
+                    THROW(CONFIGURATION_ERROR,
+                          fmt::format("Server configuration missing [{}] property.", irods::KW_CFG_ZONE_KEY));
                 }
-                catch (const irods::exception&) {
-                    zone_key.reset(irods::get_server_property<std::string>(LOCAL_ZONE_SID_KW));
-                }
+                const auto& zone_key = zone_key_iter->get_ref<const std::string&>();
 
                 const std::string neg_key = determine_negotiation_key(_host_name);
                 if (!negotiation_key_is_valid(neg_key)) {
@@ -335,9 +352,18 @@ namespace irods
                         __func__, __LINE__));
                 }
 
+                std::string hash_scheme;
+                try {
+                    hash_scheme =
+                        determine_federation_or_server_property(_host_name, irods::KW_CFG_ZONE_KEY_SIGNING_HASH_SCHEME);
+                }
+                catch (const irods::exception&) {
+                    // Default to MD5 to match historical behavior.
+                    hash_scheme = MD5_NAME;
+                }
+
                 std::string signed_zone_key;
-                if (const auto err = sign_server_sid(*zone_key, neg_key, signed_zone_key);
-                    !err.ok()) {
+                if (const auto err = sign_zone_key(zone_key, neg_key, hash_scheme, signed_zone_key); !err.ok()) {
                     // Even if the signing of the zone_key fails, we continue because the
                     // other side of the connection will reject any further communications
                     // due to the missing keyword. This will result in a clean disconnect.
@@ -570,4 +596,3 @@ namespace irods
         return SUCCESS();
     } // read_client_server_negotiation_message
 } // namespace irods
-
