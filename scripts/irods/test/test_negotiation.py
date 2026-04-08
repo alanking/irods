@@ -139,13 +139,18 @@ class test_server_authentication__issue_2295(unittest.TestCase):
 
     @unittest.skipUnless(test.settings.TOPOLOGY_FROM_RESOURCE_SERVER,
                          'expected behavior manifests only in server-to-server communications')
-    def test_zone_keys_mismatch_on_consumer(self):
+    def test_zone_keys_mismatch_on_consumer_causes_failure_to_connect_to_provider(self):
         self.do_signed_zone_key_mismatch_test_on_consumer("zone_key", "TEMPORARY______KEY")
 
     @unittest.skipUnless(test.settings.TOPOLOGY_FROM_RESOURCE_SERVER,
                          'expected behavior manifests only in server-to-server communications')
-    def test_negotiation_keys_mismatch_on_consumer(self):
+    def test_negotiation_keys_mismatch_on_consumer_causes_failure_to_connect_to_provider(self):
         self.do_signed_zone_key_mismatch_test_on_consumer("negotiation_key", "32_byte____________________key__")
+
+    @unittest.skipUnless(test.settings.TOPOLOGY_FROM_RESOURCE_SERVER,
+                         'expected behavior manifests only in server-to-server communications')
+    def test_hash_scheme_mismatch_on_consumer_causes_failure_to_connect_to_provider(self):
+        self.do_signed_zone_key_mismatch_test_on_consumer("zone_key_signing_hash_scheme", "sha256")
 
     def do_signed_zone_key_mismatch_test_on_provider(self, configuration_key, configuration_value):
         logical_path = f"{self.admin.session_collection}/do_signed_zone_key_mismatch_test_on_provider"
@@ -166,7 +171,7 @@ class test_server_authentication__issue_2295(unittest.TestCase):
                 # cannot get information from the catalog service provider.
                 IrodsController().reload_configuration()
 
-                # Try to stream a file to a catalog consumer and fail because its signed zone key should differ.
+                # Try to stream a file to a catalog consumer and fail because signed zone key should differ.
                 self.admin.assert_icommand(
                     ['istream', "-R", self.consumer1_resc, "write", logical_path],
                     "STDERR", 'Error: Cannot open data object.', input=content)
@@ -179,9 +184,13 @@ class test_server_authentication__issue_2295(unittest.TestCase):
             self.admin.assert_icommand(['irm', "-f", logical_path])
 
     @unittest.skipIf(test.settings.TOPOLOGY_FROM_RESOURCE_SERVER, 'This test must be run on catalog provider.')
-    def test_zone_keys_mismatch_on_provider(self):
+    def test_zone_keys_mismatch_on_provider_causes_failure_to_connect_to_consumer(self):
         self.do_signed_zone_key_mismatch_test_on_provider("zone_key", "zone_key_mismatch")
 
     @unittest.skipIf(test.settings.TOPOLOGY_FROM_RESOURCE_SERVER, 'This test must be run on catalog provider.')
-    def test_negotiation_keys_mismatch_on_provider(self):
+    def test_negotiation_keys_mismatch_on_provider_causes_failure_to_connect_to_consumer(self):
         self.do_signed_zone_key_mismatch_test_on_provider("negotiation_key", "32_byte_negotiation_key_mismatch")
+
+    @unittest.skipIf(test.settings.TOPOLOGY_FROM_RESOURCE_SERVER, 'This test must be run on catalog provider.')
+    def test_hash_scheme_mismatch_on_provider_causes_failure_to_connect_to_consumer(self):
+        self.do_signed_zone_key_mismatch_test_on_provider("zone_key_signing_hash_scheme", "sha256")
