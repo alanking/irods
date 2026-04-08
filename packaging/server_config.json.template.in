@@ -105,5 +105,6 @@
     "rule_engine_namespaces": [
         ""
     ],
-    "zone_auth_scheme": "native"
+    "zone_auth_scheme": "native",
+    "zone_key_signing_hash_scheme": "md5"
 }
