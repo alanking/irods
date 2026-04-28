@@ -191,27 +191,23 @@ class IrodsConfig(object):
 
     @property
     def admin_password(self):
-        auth_scheme = self.server_config.get("zone_auth_scheme", "native")
-        if "native" == auth_scheme:
-            if not os.path.exists(os.path.dirname(paths.password_file_path())):
-                return None
-            with open(paths.password_file_path(), 'rt') as f:
-                return decode(f.read())
+        if not os.path.exists(os.path.dirname(paths.password_file_path())):
+            return None
+        with open(paths.password_file_path(), 'rt') as f:
+            return decode(f.read())
         return self._admin_password
 
     @admin_password.setter
     def admin_password(self, value):
         l = logging.getLogger(__name__)
         self._admin_password = value
-        auth_scheme = self.server_config.get("zone_auth_scheme", "native")
-        if "native" == auth_scheme:
-            if not os.path.exists(os.path.dirname(paths.password_file_path())):
-                os.makedirs(os.path.dirname(paths.password_file_path()), mode=0o700)
-            mtime = int(time.time())
-            with open(paths.password_file_path(), 'wt') as f:
-                l.debug('Writing password file %s', f.name)
-                print(encode(value, mtime=mtime), end='', file=f)
-            os.utime(paths.password_file_path(), (mtime, mtime))
+        if not os.path.exists(os.path.dirname(paths.password_file_path())):
+            os.makedirs(os.path.dirname(paths.password_file_path()), mode=0o700)
+        mtime = int(time.time())
+        with open(paths.password_file_path(), 'wt') as f:
+            l.debug('Writing password file %s', f.name)
+            print(encode(value, mtime=mtime), end='', file=f)
+        os.utime(paths.password_file_path(), (mtime, mtime))
 
     @property
     def admin_session_token(self):
