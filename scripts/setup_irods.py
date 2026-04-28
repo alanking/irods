@@ -2,9 +2,10 @@
 
 import argparse
 import os
+import pathlib
 import sys
 
-import irods.setup_options, irods.database_interface
+import irods.setup_options, irods.database_interface, irods.tls
 
 def parse_arguments():
     parser = argparse.ArgumentParser()
@@ -456,55 +457,75 @@ def setup_tls(irods_config):
     l.info(irods.lib.get_header('Setting up TLS'))
 
     while True:
-        # TLS configuration for incoming connections.
         if "tls_server" not in irods_config.server_config:
             irods_config.server_config["tls_server"] = {}
 
-        default_certificate_chain_file = irods_config.server_config["tls_server"].get("certificate_chain_file")
-        irods_config.server_config["tls_server"]['certificate_chain_file'] = irods.lib.default_prompt(
-            "Path to server's certificate chain file",
-            default=[default_certificate_chain_file] if default_certificate_chain_file else None,
-            input_filter=irods.lib.character_count_filter(minimum=1, field='Certificate chain file'))
-
-        default_certificate_key_file = irods_config.server_config["tls_server"].get("certificate_key_file")
-        irods_config.server_config["tls_server"]['certificate_key_file'] = irods.lib.default_prompt(
-            "Path to server's certificate key file",
-            default=[default_certificate_key_file] if default_certificate_key_file else None,
-            input_filter=irods.lib.character_count_filter(minimum=1, field='Certificate key file'))
-
-        default_dh_params_file = irods_config.server_config["tls_server"].get("dh_params_file")
-        irods_config.server_config["tls_server"]['dh_params_file'] = irods.lib.default_prompt(
-            "Path to Diffie-Hellman parameter file",
-            default=[default_dh_params_file] if default_dh_params_file else None,
-            input_filter=irods.lib.character_count_filter(minimum=1, field='Diffie-Hellman params file'))
-
-        # TLS configuration for outgoing connections (server-to-server).
         if "tls_client" not in irods_config.server_config:
             irods_config.server_config["tls_client"] = {}
 
-        default_ca_certificate_file = irods_config.server_config["tls_client"].get('ca_certificate_file')
-        client_ca_certificate_file = irods.lib.default_prompt(
-            "Path to CA certificate file",
-            default=[default_ca_certificate_file] if default_ca_certificate_file else None)
+        generate_cert = irods.lib.default_prompt('Generate and use self-signed certificate now?', default=['no'])
+        if generate_cert.lower() in ('y','yes'):
+            key, key_file = irods.tls.generate_tls_certificate_key(directory=irods.paths.config_directory())
+            print(f"Generated TLS certificate key file at [{key_file}]")
+            cert_file = irods.tls.generate_tls_self_signed_certificate(key, directory=irods.paths.config_directory())
+            print(f"Generated self-signed certificate file at [{cert_file}]")
+            dh_params_file = irods.tls.generate_tls_dh_params(directory=irods.paths.config_directory())
+            print(f"Generated Diffie-Hellman parameters file at [{dh_params_file}]")
 
-        default_ca_certificate_path = irods_config.server_config["tls_client"].get('ca_certificate_path')
-        client_ca_certificate_path = irods.lib.default_prompt(
-            "Path to CA certificates directory",
-            default=[default_ca_certificate_path] if default_ca_certificate_path else None)
+            chain_file = pathlib.Path(irods.paths.config_directory()) / 'chain.pem'
+            shutil.copyfile(cert_file, chain_file)
+            print(f"Created certificate chain file at [{chain_file}]")
 
-        default_verify_server = irods_config.server_config["tls_client"].get('verify_server') or "cert"
-        verify_server_levels = ["hostname", "cert", "none"]
-        client_verify_server = irods.lib.default_prompt(
-            "Certificate verification level",
-            default=verify_server_levels,
-            previous=verify_server_levels.index(default_verify_server) + 1,
-            input_filter=irods.lib.set_filter(verify_server_levels, field='Verify server'))
+            irods_config.server_config["tls_server"]['certificate_chain_file'] = str(chain_file)
+            irods_config.server_config["tls_server"]['certificate_key_file'] = str(key_file)
+            irods_config.server_config["tls_server"]['dh_params_file'] = str(dh_params_file)
+            irods_config.server_config["tls_client"]['ca_certificate_file'] = str(cert_file)
+            irods_config.server_config["tls_client"]['verify_server'] = "cert"
 
-        if client_ca_certificate_file:
-            irods_config.server_config["tls_client"]['ca_certificate_file'] = client_ca_certificate_file
-        if client_ca_certificate_path:
-            irods_config.server_config["tls_client"]['ca_certificate_path'] = client_ca_certificate_path
-        irods_config.server_config["tls_client"]['verify_server'] = client_verify_server
+        else:
+            # TLS configuration for incoming connections.
+            default_certificate_chain_file = irods_config.server_config["tls_server"].get("certificate_chain_file")
+            irods_config.server_config["tls_server"]['certificate_chain_file'] = irods.lib.default_prompt(
+                "Path to server's certificate chain file",
+                default=[default_certificate_chain_file] if default_certificate_chain_file else None,
+                input_filter=irods.lib.character_count_filter(minimum=1, field='Certificate chain file'))
+
+            default_certificate_key_file = irods_config.server_config["tls_server"].get("certificate_key_file")
+            irods_config.server_config["tls_server"]['certificate_key_file'] = irods.lib.default_prompt(
+                "Path to server's certificate key file",
+                default=[default_certificate_key_file] if default_certificate_key_file else None,
+                input_filter=irods.lib.character_count_filter(minimum=1, field='Certificate key file'))
+
+            default_dh_params_file = irods_config.server_config["tls_server"].get("dh_params_file")
+            irods_config.server_config["tls_server"]['dh_params_file'] = irods.lib.default_prompt(
+                "Path to Diffie-Hellman parameter file",
+                default=[default_dh_params_file] if default_dh_params_file else None,
+                input_filter=irods.lib.character_count_filter(minimum=1, field='Diffie-Hellman params file'))
+
+            # TLS configuration for outgoing connections (server-to-server).
+            default_ca_certificate_file = irods_config.server_config["tls_client"].get('ca_certificate_file')
+            client_ca_certificate_file = irods.lib.default_prompt(
+                "Path to CA certificate file",
+                default=[default_ca_certificate_file] if default_ca_certificate_file else None)
+
+            default_ca_certificate_path = irods_config.server_config["tls_client"].get('ca_certificate_path')
+            client_ca_certificate_path = irods.lib.default_prompt(
+                "Path to CA certificates directory",
+                default=[default_ca_certificate_path] if default_ca_certificate_path else None)
+
+            default_verify_server = irods_config.server_config["tls_client"].get('verify_server') or "cert"
+            verify_server_levels = ["hostname", "cert", "none"]
+            client_verify_server = irods.lib.default_prompt(
+                "Certificate verification level",
+                default=verify_server_levels,
+                previous=verify_server_levels.index(default_verify_server) + 1,
+                input_filter=irods.lib.set_filter(verify_server_levels, field='Verify server'))
+
+            if client_ca_certificate_file:
+                irods_config.server_config["tls_client"]['ca_certificate_file'] = client_ca_certificate_file
+            if client_ca_certificate_path:
+                irods_config.server_config["tls_client"]['ca_certificate_path'] = client_ca_certificate_path
+            irods_config.server_config["tls_client"]['verify_server'] = client_verify_server
 
         confirmation_message = (
             '\n'
