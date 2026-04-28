@@ -349,7 +349,7 @@ def create_database_tables(irods_config, cursor, default_resource_directory=None
             except IrodsError as e:
                 raise IrodsError('Database setup failed while running %s:\n%s' % (sql_file, str(e)))
 
-def setup_database_values(irods_config, cursor=None, default_resource_directory=None, default_resource_name=None):
+def setup_database_values(irods_config, cursor=None, default_resource_directory=None, default_resource_name=None, password_storage_mode="legacy"):
     l = logging.getLogger(__name__)
     timestamp = '{0:011d}'.format(int(time.time()))
 
@@ -417,8 +417,8 @@ def setup_database_values(irods_config, cursor=None, default_resource_directory=
             timestamp)
 
     #password
-    auth_scheme = irods_config.server_config.get("zone_auth_scheme", "native")
-    if "irods" == auth_scheme:
+
+    if password_storage_mode in ["hashed", "both"]:
         # Derive a key from the provided password.
         salt = ''.join([secrets.choice(string.ascii_letters + string.digits) for _ in range(16)])
         hashing_parameters = {
@@ -447,11 +447,25 @@ def setup_database_values(irods_config, cursor=None, default_resource_directory=
                 hashed_password,
                 salt,
                 hashing_parameters["algorithm"],
-                json.dumps(hashing_parameters),
+                json.dumps(hashing_parameters["parameters"]),
                 timestamp,
                 timestamp,
                 log_params=False)
-        # And generate a session token to use later.
+
+    if password_storage_mode in ["legacy", "both"]:
+        scrambled_password = password_obfuscation.scramble(irods_config.admin_password,
+                key=irods_config.server_config.get('environment_variables', {}).get('IRODS_DATABASE_USER_PASSWORD_SALT', None))
+        execute_sql_statement(cursor,
+                "insert into R_USER_PASSWORD values (?,?,'9999-12-31-23.59.00',?,?);",
+                admin_user_id,
+                scrambled_password,
+                timestamp,
+                timestamp,
+                log_params=False)
+
+    # We need a session token for irods authentication at the "cold start". If not using irods authentication, do not
+    # generate a session token for the service account admin. This can be generated at authentication time later.
+    if irods_config.server_config["zone_auth_scheme"] == "irods":
         salt = ''.join([secrets.choice(string.ascii_letters + string.digits) for _ in range(16)])
         irods_config.admin_session_token = str(uuid.uuid4())
         salted_token = salt + irods_config.admin_session_token
@@ -467,16 +481,12 @@ def setup_database_values(irods_config, cursor=None, default_resource_directory=
                 timestamp,
                 salt,
                 log_params=False)
-    else:
-        scrambled_password = password_obfuscation.scramble(irods_config.admin_password,
-                key=irods_config.server_config.get('environment_variables', {}).get('IRODS_DATABASE_USER_PASSWORD_SALT', None))
-        execute_sql_statement(cursor,
-                "insert into R_USER_PASSWORD values (?,?,'9999-12-31-23.59.00',?,?);",
-                admin_user_id,
-                scrambled_password,
-                timestamp,
-                timestamp,
-                log_params=False)
+
+    # Write down the password storage mode based on what was requested as setup.
+    execute_sql_statement(
+        cursor,
+        f"insert into R_GRID_CONFIGURATION values ('authentication', 'password_storage_mode', '{password_storage_mode}');"
+    )
 
     #collections
     system_collections = [
