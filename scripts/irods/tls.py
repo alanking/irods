@@ -6,6 +6,8 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import dh, rsa
 from cryptography.x509.oid import NameOID
 
+from . import lib
+
 
 def generate_tls_certificate_key(directory=None):
     key = rsa.generate_private_key(
@@ -15,7 +17,7 @@ def generate_tls_certificate_key(directory=None):
 
     keyfile = pathlib.Path(directory or os.getcwd()) / 'server.key'
 
-    with open(keyfile, "wb") as f:
+    with open(keyfile, "wb", opener=lib.read_write_owner_opener) as f:
         f.write(key.private_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PrivateFormat.TraditionalOpenSSL,

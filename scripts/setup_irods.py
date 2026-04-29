@@ -463,7 +463,7 @@ def setup_tls(irods_config):
         if "tls_client" not in irods_config.server_config:
             irods_config.server_config["tls_client"] = {}
 
-        generate_cert = irods.lib.default_prompt('Generate and use self-signed certificate now?', default=['no'])
+        generate_cert = irods.lib.default_prompt('Generate and use self-signed certificate now?', default=['yes'])
         if generate_cert.lower() in ('y','yes'):
             key, key_file = irods.tls.generate_tls_certificate_key(directory=irods.paths.config_directory())
             print(f"Generated TLS certificate key file at [{key_file}]")
