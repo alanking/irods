@@ -204,7 +204,7 @@ class IrodsConfig(object):
         if not os.path.exists(os.path.dirname(paths.password_file_path())):
             os.makedirs(os.path.dirname(paths.password_file_path()), mode=0o700)
         mtime = int(time.time())
-        with open(paths.password_file_path(), 'wt') as f:
+        with open(paths.password_file_path(), 'wt', opener=lib.read_write_owner_opener) as f:
             l.debug('Writing password file %s', f.name)
             print(encode(value, mtime=mtime), end='', file=f)
         os.utime(paths.password_file_path(), (mtime, mtime))
@@ -220,7 +220,7 @@ class IrodsConfig(object):
         if not os.path.exists(os.path.dirname(paths.service_account_session_token_file_path())):
             os.makedirs(os.path.dirname(paths.service_account_session_token_file_path()), mode=0o600)
         mtime = int(time.time())
-        with open(paths.service_account_session_token_file_path(), 'wt') as f:
+        with open(paths.service_account_session_token_file_path(), 'wt', opener=lib.read_write_owner_opener) as f:
             l.debug('Writing session token to file: [%s]', f.name)
             print(value, end='', file=f)
         os.utime(paths.service_account_session_token_file_path(), (mtime, mtime))
