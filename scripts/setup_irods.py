@@ -77,6 +77,8 @@ _password_storage_mode = "legacy"
 
 
 def setup_server(irods_config, json_configuration_file=None, test_mode=False, prompt_tls=None, prompt_auth=None):
+    global _password_storage_mode
+
     l = logging.getLogger(__name__)
 
     if json_configuration_file is not None:
@@ -121,7 +123,7 @@ def setup_server(irods_config, json_configuration_file=None, test_mode=False, pr
         irods_config.commit(json_configuration_dict['service_account_environment'], irods_config.client_environment_path)
         # password
         _password_storage_mode = json_configuration_dict.get("password_storage_mode", _password_storage_mode)
-        irods_config.admin_password(
+        irods_config.set_admin_password(
             json_configuration_dict['admin_password'],
             create_legacy_password_file=(_password_storage_mode != "hashed")
         )
@@ -408,6 +410,8 @@ def setup_storage(irods_config):
 
 
 def setup_auth(irods_config):
+    global _password_storage_mode
+
     l = logging.getLogger(__name__)
     l.info(irods.lib.get_header('Setting up auth'))
 
@@ -626,6 +630,8 @@ def setup_server_config(irods_config):
     irods_config.commit(irods_config.server_config, irods_config.server_config_path, clear_cache=False)
 
 def setup_client_environment(irods_config):
+    global _password_storage_mode
+
     l = logging.getLogger(__name__)
     l.info(irods.lib.get_header('Setting up the client environment'))
 
@@ -636,7 +642,7 @@ def setup_client_environment(irods_config):
         'iRODS administrator password',
         input_filter=irods.lib.character_count_filter(minimum=3, maximum=maximum_password_length, field='Admin password'),
         echo=False)
-    irods_config.admin_password(
+    irods_config.set_admin_password(
         admin_password,
         create_legacy_password_file=(_password_storage_mode != "hashed")
     )

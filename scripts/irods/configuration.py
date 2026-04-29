@@ -209,12 +209,20 @@ class IrodsConfig(object):
             print(encode(value, mtime=mtime), end='', file=f)
         os.utime(paths.password_file_path(), (mtime, mtime))
 
+    def get_admin_password(self, check_legacy_password_file=False):
+        """Get the admin password with the option of just using the cached value."""
+        l = logging.getLogger(__name__)
+        if check_legacy_password_file:
+            return self.admin_password
+        return self._admin_password
+
     def set_admin_password(self, value, create_legacy_password_file=False):
+        """Set the admin password with the option of only updating the cached value."""
         l = logging.getLogger(__name__)
         if create_legacy_password_file:
-            self.admin_password = value
-            return
-        self._admin_password = value
+            self.admin_password = value # use the property setter
+        else:
+            self._admin_password = value # just update cached value
 
     @property
     def admin_session_token(self):

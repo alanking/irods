@@ -428,8 +428,9 @@ def setup_database_values(irods_config, cursor=None, default_resource_directory=
             "p": 1,
             "key_length": 64
         }
+        admin_password = irods_config.get_admin_password(check_legacy_password_file=(password_storage_mode != "hashed"))
         derived_key = hashlib.scrypt(
-            irods_config.admin_password.encode("utf-8"),
+            admin_password.encode("utf-8"),
             salt=salt.encode("utf-8"),
             n=hashing_parameters["N"],
             r=hashing_parameters["r"],
