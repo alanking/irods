@@ -31,7 +31,7 @@ def generate_tls_self_signed_certificate(key, directory=None):
     import datetime
 
     subject = issuer = x509.Name([
-        x509.NameAttribute(NameOID.COUNTRY_NAME, u'Country'),
+        x509.NameAttribute(NameOID.COUNTRY_NAME, u'XX'),
         x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, u'State'),
         x509.NameAttribute(NameOID.LOCALITY_NAME, u'City'),
         x509.NameAttribute(NameOID.ORGANIZATION_NAME, u'Organization'),
