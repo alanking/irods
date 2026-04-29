@@ -209,6 +209,13 @@ class IrodsConfig(object):
             print(encode(value, mtime=mtime), end='', file=f)
         os.utime(paths.password_file_path(), (mtime, mtime))
 
+    def set_admin_password(self, value, create_legacy_password_file=False):
+        l = logging.getLogger(__name__)
+        if create_legacy_password_file:
+            self.admin_password = value
+            return
+        self._admin_password = value
+
     @property
     def admin_session_token(self):
         return self._session_token
