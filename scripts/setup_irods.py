@@ -171,6 +171,20 @@ def setup_server(irods_config, json_configuration_file=None, test_mode=False, pr
         acPreConnect_rule_replacement = 'acPreConnect(*OUT) { *OUT="CS_NEG_REQUIRE"; }'
         replace_in_file(core_re_path, acPreConnect_rule_to_replace, acPreConnect_rule_replacement)
 
+    # extract the "irods_version" property from the version.json.dist file.
+    # this guarantees that setup always uses the correct version information.
+    with open(f'{irods_config.version_path}.dist') as f:
+        irods_version_string = json.load(f)['irods_version']
+
+    if irods_config.is_consumer and irods_config.server_config["zone_auth_scheme"] == "irods":
+        l.warning('irods authentication scheme selected during setup of iRODS Catalog Consumer.\n'
+                  'In order to complete setup, a session token must be generated for use by this server.\n'
+                  'To do this, install the irods-icommands package and run iinit as the service account\n'
+                  'rodsadmin and connect to the iRODS Catalog Provider. For more detailed instructions,\n'
+                  'see the documentation:\n'
+                  f'  https://docs.irods.org/{irods_version_string}/getting_started/installation/')
+        return
+
     l.info(irods.lib.get_header('Starting iRODS...'))
     controller = IrodsController(irods_config)
     controller.start()
@@ -194,11 +208,6 @@ def setup_server(irods_config, json_configuration_file=None, test_mode=False, pr
     args = parse_arguments()
     if not args.skip_post_install_test:
         test_put(irods_config)
-
-    # extract the "irods_version" property from the version.json.dist file.
-    # this guarantees that setup always uses the correct version information.
-    with open('.'.join([irods_config.version_path, 'dist'])) as f:
-        irods_version_string = json.load(f)['irods_version']
 
     l.info(irods.lib.get_header('Log Configuration Notes'))
     l.info(('iRODS uses syslog for logging. If your OS has a running syslog service, messages\n'
@@ -417,23 +426,24 @@ def setup_auth(irods_config):
 
     while True:
         # Prompt user for which password storage mode to use in this zone.
-        default_password_storage_mode = "both"
-        password_storage_modes = ["legacy", "hashed", "both"]
-        _password_storage_mode = irods.lib.default_prompt(
-            "Password storage mode",
-            default=password_storage_modes,
-            previous=password_storage_modes.index(default_password_storage_mode) + 1,
-            input_filter=irods.lib.set_filter(password_storage_modes, field='Password storage mode'))
+        if irods_config.is_provider:
+            default_password_storage_mode = "both"
+            password_storage_modes = ["legacy", "hashed", "both"]
+            _password_storage_mode = irods.lib.default_prompt(
+                "Password storage mode",
+                default=password_storage_modes,
+                previous=password_storage_modes.index(default_password_storage_mode) + 1,
+                input_filter=irods.lib.set_filter(password_storage_modes, field='Password storage mode'))
 
         # "legacy" password storage mode implies "native" authentication scheme.
         # "hashed" password storage mode implies "irods" authentication scheme.
         # "both" password storage mode requires another prompt to find which authentication scheme to use in this zone
         # since either "native" or "irods" can be used.
-        if _password_storage_mode == "both":
+        if _password_storage_mode == "both" or irods_config.is_consumer:
             default_auth_scheme = "native"
             auth_scheme_choices = ["irods", "native"]
             auth_scheme = irods.lib.default_prompt(
-                "Zone authentication scheme",
+                "Authentication scheme",
                 default=auth_scheme_choices,
                 previous=auth_scheme_choices.index(default_auth_scheme) + 1,
                 input_filter=irods.lib.set_filter(auth_scheme_choices, field='Auth scheme'))
@@ -442,14 +452,24 @@ def setup_auth(irods_config):
 
         irods_config.server_config['zone_auth_scheme'] = auth_scheme
 
-        confirmation_message = (
-            '\n'
-            '-------------------------------------------------------------\n'
-            f'iRODS password storage mode: {_password_storage_mode}\n'
-            f'iRODS authentication scheme: {irods_config.server_config["zone_auth_scheme"]}\n'
-            '-------------------------------------------------------------\n\n'
-            'Please confirm'
-        )
+        if irods_config.is_consumer:
+            confirmation_message = (
+                '\n'
+                '-------------------------------------------------------------\n'
+                f'iRODS authentication scheme: {irods_config.server_config["zone_auth_scheme"]}\n'
+                '-------------------------------------------------------------\n\n'
+                'Please confirm'
+            )
+        else:
+            confirmation_message = (
+                '\n'
+                '-------------------------------------------------------------\n'
+                f'iRODS password storage mode: {_password_storage_mode}\n'
+                f'iRODS authentication scheme: {irods_config.server_config["zone_auth_scheme"]}\n'
+                '-------------------------------------------------------------\n\n'
+                'Please confirm'
+            )
+
         if irods.lib.default_prompt(confirmation_message, default=['yes']).lower() in ['y', 'yes']:
             break
 
