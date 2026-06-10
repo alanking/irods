@@ -99,11 +99,19 @@ svrToSvrConnectNoLogin( rsComm_t *rsComm, rodsServerHost_t *rodsServerHost ) {
         else {
             reconnFlag = NO_RECONN;
         }
-        rodsServerHost->conn = _rcConnect( rodsServerHost->hostName->name,
-                                           ( ( zoneInfo_t * ) rodsServerHost->zoneInfo )->portNum,
-                                           rsComm->myEnv.rodsUserName, rsComm->myEnv.rodsZone,
-                                           rsComm->clientUser.userName, rsComm->clientUser.rodsZone, &errMsg,
-                                           rsComm->connectCnt, reconnFlag );
+        const auto config_handle = irods::server_properties::instance().map();
+        const auto& config = config_handle.get_json();
+        const auto& zone_user = config.at(irods::KW_CFG_ZONE_USER).get_ref<const std::string&>();
+        const auto& zone_name = config.at(irods::KW_CFG_ZONE_NAME).get_ref<const std::string&>();
+        rodsServerHost->conn = _rcConnect(rodsServerHost->hostName->name,
+                                          ((zoneInfo_t*) rodsServerHost->zoneInfo)->portNum,
+                                          zone_user.c_str(),
+                                          zone_name.c_str(),
+                                          rsComm->clientUser.userName,
+                                          rsComm->clientUser.rodsZone,
+                                          &errMsg,
+                                          rsComm->connectCnt,
+                                          reconnFlag);
 
         if ( rodsServerHost->conn == NULL ) {
             if ( errMsg.status < 0 ) {

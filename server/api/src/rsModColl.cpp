@@ -107,6 +107,7 @@ auto rsModColl(rsComm_t* rsComm, collInp_t* modCollInp) -> int
             return _rsModColl(rsComm, modCollInp);
         }
 
+#if 0
         // Some privileged clients may be affected by temporary elevated privileges. The redirect to the catalog service
         // provider here will cause the temporary privileged status granted to this connection to be lost in the
         // server-to-server connection. Many operations in iRODS use this API to update the collection mtime after a
@@ -118,6 +119,7 @@ auto rsModColl(rsComm_t* rsComm, collInp_t* modCollInp) -> int
             const auto client_user_type =
                 *ua::server::type(*rsComm, ua::user{rsComm->clientUser.userName, rsComm->clientUser.rodsZone});
             if (ua::user_type::rodsadmin != client_user_type) {
+                // Use a client_connection here instead of server_connection because we have to redirect anyway.
                 auto local_admin =
                     irods::experimental::fully_qualified_username{rsComm->myEnv.rodsUserName, rsComm->myEnv.rodsZone};
 
@@ -127,6 +129,7 @@ auto rsModColl(rsComm_t* rsComm, collInp_t* modCollInp) -> int
                 return rcModColl(static_cast<RcComm*>(conn), modCollInp);
             }
         }
+#endif
 
         auto* host = ic::redirect_to_catalog_provider(*rsComm);
         return rcModColl(host->conn, modCollInp);

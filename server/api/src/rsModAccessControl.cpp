@@ -59,6 +59,7 @@ int rsModAccessControl(rsComm_t* rsComm, modAccessControlInp_t* modAccessControl
             return _rsModAccessControl(rsComm, &newModAccessControlInp);
         }
 
+#if 0
         // Some privileged clients may be affected by temporary elevated privileges. The redirect to the catalog service
         // provider here will cause the temporary privileged status granted to this connection to be lost in the
         // server-to-server connection. The compound resource temporarily elevates permissions for users with read-only
@@ -69,6 +70,7 @@ int rsModAccessControl(rsComm_t* rsComm, modAccessControlInp_t* modAccessControl
             const auto client_user_type =
                 *ua::server::type(*rsComm, ua::user{rsComm->clientUser.userName, rsComm->clientUser.rodsZone});
             if (ua::user_type::rodsadmin != client_user_type) {
+                // Use a client_connection here instead of server_connection because we have to redirect anyway.
                 auto local_admin =
                     irods::experimental::fully_qualified_username{rsComm->myEnv.rodsUserName, rsComm->myEnv.rodsZone};
 
@@ -78,6 +80,7 @@ int rsModAccessControl(rsComm_t* rsComm, modAccessControlInp_t* modAccessControl
                 return rcModAccessControl(static_cast<RcComm*>(conn), &newModAccessControlInp);
             }
         }
+#endif
 
         auto* host = ic::redirect_to_catalog_provider(*rsComm);
         return rcModAccessControl(host->conn, &newModAccessControlInp);

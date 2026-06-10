@@ -6,6 +6,7 @@
 #include "irods/getRodsEnv.h"
 #include "irods/get_grid_configuration_value.h"
 #include "irods/hostname_cache.hpp"
+#include "irods/initServer.hpp"
 #include "irods/irods_at_scope_exit.hpp"
 #include "irods/irods_client_api_table.hpp"
 #include "irods/irods_configuration_keywords.hpp"
@@ -25,8 +26,12 @@
 #include "irods/rodsDef.h"
 #include "irods/rodsErrorTable.h"
 #include "irods/rodsLog.h"
-#include "irods/update_replica_access_time.h"
-#include "irods/set_delay_server_migration_info.h"
+#include "irods/rs_get_grid_configuration_value.hpp"
+#include "irods/rs_set_delay_server_migration_info.hpp"
+#include "irods/rs_update_replica_access_time.hpp"
+#include "irods/server_connection.hpp"
+//#include "irods/update_replica_access_time.h"
+//#include "irods/set_delay_server_migration_info.h"
 
 #include <boost/any.hpp>
 #include <boost/asio.hpp>
@@ -149,9 +154,9 @@ namespace
     auto handle_shutdown() -> void;
     auto handle_shutdown_graceful() -> void;
 
-    auto set_delay_server_migration_info(RcComm& _comm, std::string_view _leader, std::string_view _successor) -> void;
-    auto get_delay_server_leader(RcComm& _comm) -> std::optional<std::string>;
-    auto get_delay_server_successor(RcComm& _comm) -> std::optional<std::string>;
+    auto set_delay_server_migration_info(RsComm& _comm, std::string_view _leader, std::string_view _successor) -> void;
+    auto get_delay_server_leader(RsComm& _comm) -> std::optional<std::string>;
+    auto get_delay_server_successor(RsComm& _comm) -> std::optional<std::string>;
     auto launch_agent_factory(const char* _src_func, bool _write_to_stdout, bool _enable_test_mode) -> bool;
     auto handle_configuration_reload(bool _write_to_stdout, bool _enable_test_mode) -> void;
     auto launch_delay_server(bool _write_to_stdout, bool _enable_test_mode) -> void;
@@ -162,7 +167,7 @@ namespace
     auto evict_expired_hostname_cache_entries() -> void;
     auto remove_leftover_agent_info_files_for_ips() -> void;
 
-    auto init_access_time_queue() -> bool;
+    auto init_access_time_queue(RsComm& comm) -> bool;
     auto apply_access_time_updates() -> void;
 
     auto is_server_listening_for_connections(const std::string& _host, const std::string& _port) -> int;
@@ -332,11 +337,17 @@ auto main(int _argc, char* _argv[]) -> int
             return 1;
         }
 
+        // Grandpa needs server info too.
+        irods::server_connection conn;
+        initServerInfo(0, static_cast<RsComm*>(conn));
+
+        // TODO: access time queue might have to come before agent factory - not sure
+
         // The access time queue must be initialized after the API tables are loaded.
         // This is required because the server may use the grid configuration API to fetch access
         // time configuration from the R_GRID_CONFIGURATION table.
         log_server::info("{}: Initializing access time queue for main server process.", __func__);
-        if (!init_access_time_queue()) {
+        if (!init_access_time_queue(static_cast<RsComm&>(conn))) {
             return 1;
         }
         irods::at_scope_exit deinit_access_time_queue{[] { irods::access_time_queue::deinit(); }};
@@ -974,7 +985,7 @@ Signals:
         }
     } // handle_shutdown_graceful
 
-    auto get_delay_server_leader(RcComm& _comm) -> std::optional<std::string>
+    auto get_delay_server_leader(RsComm& _comm) -> std::optional<std::string>
     {
         GridConfigurationInput input{};
         std::strcpy(input.name_space, "delay_server");
@@ -984,7 +995,7 @@ Signals:
         // NOLINTNEXTLINE(cppcoreguidelines-owning-memory,cppcoreguidelines-no-malloc)
         irods::at_scope_exit free_output{[&output] { std::free(output); }};
 
-        if (const auto ec = rc_get_grid_configuration_value(&_comm, &input, &output); ec < 0) {
+        if (const auto ec = rs_get_grid_configuration_value(&_comm, &input, &output); ec < 0) {
             log_server::error("Could not retrieve delay server migration information from catalog "
                               "[error_code={}, namespace=delay_server, option_name=leader].",
                               ec);
@@ -994,7 +1005,7 @@ Signals:
         return output->option_value;
     } // get_delay_server_leader
 
-    auto get_delay_server_successor(RcComm& _comm) -> std::optional<std::string>
+    auto get_delay_server_successor(RsComm& _comm) -> std::optional<std::string>
     {
         GridConfigurationInput input{};
         std::strcpy(input.name_space, "delay_server");
@@ -1004,7 +1015,7 @@ Signals:
         // NOLINTNEXTLINE(cppcoreguidelines-owning-memory,cppcoreguidelines-no-malloc)
         irods::at_scope_exit free_output{[&output] { std::free(output); }};
 
-        if (const auto ec = rc_get_grid_configuration_value(&_comm, &input, &output); ec < 0) {
+        if (const auto ec = rs_get_grid_configuration_value(&_comm, &input, &output); ec < 0) {
             log_server::error("Could not retrieve delay server migration information from catalog "
                               "[error_code={}, namespace=delay_server, option_name=successor].",
                               ec);
@@ -1014,13 +1025,13 @@ Signals:
         return output->option_value;
     } // get_delay_server_successor
 
-    auto set_delay_server_migration_info(RcComm& _comm, std::string_view _leader, std::string_view _successor) -> void
+    auto set_delay_server_migration_info(RsComm& _comm, std::string_view _leader, std::string_view _successor) -> void
     {
         DelayServerMigrationInput input{};
         _leader.copy(input.leader, sizeof(DelayServerMigrationInput::leader) - 1);
         _successor.copy(input.successor, sizeof(DelayServerMigrationInput::successor) - 1);
 
-        if (const auto ec = rc_set_delay_server_migration_info(&_comm, &input); ec < 0) {
+        if (const auto ec = rs_set_delay_server_migration_info(&_comm, &input); ec < 0) {
             log_server::error("Failed to set delay server migration info in R_GRID_CONFIGURATION "
                               "[error_code={}, leader={}, successor={}].",
                               ec,
@@ -1406,7 +1417,9 @@ Signals:
         std::optional<std::string> successor;
 
         try {
-            irods::experimental::client_connection conn;
+            // TODO: grandpa doesn't have zone information, so we fail to redirect to / self-identify as catalog
+            // provider
+            irods::server_connection conn;
             leader = get_delay_server_leader(conn);
             successor = get_delay_server_successor(conn);
 
@@ -1654,7 +1667,7 @@ Signals:
         };
     } // remove_leftover_agent_info_files_for_ips
 
-    auto init_access_time_queue() -> bool
+    auto init_access_time_queue(RsComm& comm) -> bool
     {
         try {
             //
@@ -1666,6 +1679,7 @@ Signals:
             std::optional<std::string> batch_size;
             std::optional<std::string> resolution_in_seconds;
 
+#if 0
             const auto role = irods::get_server_property<std::string>(irods::KW_CFG_CATALOG_SERVICE_ROLE);
 
             // Initialization of the access time queue happens before the agent factory is available.
@@ -1706,17 +1720,19 @@ Signals:
                 // servers are designed to wait for the provider to become available before continuing with
                 // server initialization.
 
-                rodsEnv env;
-                _getRodsEnv(env);
+                //rodsEnv env;
+                //_getRodsEnv(env);
 
-                const auto config_handle = irods::server_properties::instance().map();
-                const auto& config = config_handle.get_json();
+                //const auto config_handle = irods::server_properties::instance().map();
+                //const auto& config = config_handle.get_json();
 
-                const nlohmann::json::json_pointer json_path{"/catalog_provider_hosts/0"};
-                const auto provider_host = get_preferred_host(config.at(json_path).get_ref<const std::string&>());
-                const auto zone_port = config.at(irods::KW_CFG_ZONE_PORT).get<int>();
+                //const nlohmann::json::json_pointer json_path{"/catalog_provider_hosts/0"};
+                //const auto provider_host = get_preferred_host(config.at(json_path).get_ref<const std::string&>());
+                //const auto zone_port = config.at(irods::KW_CFG_ZONE_PORT).get<int>();
 
-                irods::experimental::client_connection conn{provider_host, zone_port, {env.rodsUserName, env.rodsZone}};
+                //irods::experimental::client_connection conn{provider_host, zone_port, {env.rodsUserName, env.rodsZone}};
+                //irods::server_connection conn;
+				//initServerInfo(0, static_cast<RsComm*>(conn));
 
                 GridConfigurationInput input{};
                 std::strcpy(input.name_space, irods::KW_CFG_ACCESS_TIME);
@@ -1735,7 +1751,8 @@ Signals:
                     // NOLINTNEXTLINE(cppcoreguidelines-owning-memory,cppcoreguidelines-no-malloc)
                     irods::at_scope_exit free_output{[&output] { std::free(output); }};
 
-                    const auto ec = rc_get_grid_configuration_value(static_cast<RcComm*>(conn), &input, &output);
+                    //const auto ec = rc_get_grid_configuration_value(static_cast<RcComm*>(conn), &input, &output);
+                    const auto ec = rs_get_grid_configuration_value(&comm, &input, &output);
                     if (ec < 0) {
                         log_server::error("{}: Could not retrieve grid configuration value from catalog "
                                           "[error_code={}, namespace=access_time, option_name={}].",
@@ -1752,6 +1769,41 @@ Signals:
                     *opt.second = output->option_value;
                 }
             }
+#else
+            GridConfigurationInput input{};
+            std::strcpy(input.name_space, irods::KW_CFG_ACCESS_TIME);
+
+            GridConfigurationOutput* output{};
+
+            const auto opt_names = {std::pair{irods::KW_CFG_ACCESS_TIME_QUEUE_NAME_PREFIX, &queue_name_prefix},
+                                    std::pair{irods::KW_CFG_ACCESS_TIME_QUEUE_SIZE, &queue_size},
+                                    std::pair{irods::KW_CFG_ACCESS_TIME_BATCH_SIZE, &batch_size},
+                                    std::pair{irods::KW_CFG_ACCESS_TIME_RESOLUTION_IN_SECONDS, &resolution_in_seconds}};
+
+            for (auto&& opt : opt_names) {
+                std::strcpy(input.option_name, opt.first);
+
+                // NOLINTNEXTLINE(cppcoreguidelines-owning-memory,cppcoreguidelines-no-malloc)
+                irods::at_scope_exit free_output{[&output] { std::free(output); }};
+
+                //const auto ec = rc_get_grid_configuration_value(static_cast<RcComm*>(conn), &input, &output);
+                const auto ec = rs_get_grid_configuration_value(&comm, &input, &output);
+                if (ec < 0) {
+                    log_server::error("{}: Could not retrieve grid configuration value from catalog "
+                                      "[error_code={}, namespace=access_time, option_name={}].",
+                                      __func__,
+                                      ec,
+                                      opt.first);
+
+                    // We break out of the for-loop instead of returning to allow more error
+                    // information to be logged and so that the consumer branch is closer in behavior
+                    // to the provider branch.
+                    break;
+                }
+
+                *opt.second = output->option_value;
+            }
+#endif
 
             //
             // At this point, we expect to have all access time configuration values available.
@@ -1874,7 +1926,8 @@ Signals:
                 return;
             }
 
-            irods::experimental::client_connection conn;
+            //irods::experimental::client_connection conn;
+            irods::server_connection conn;
             irods::access_time_queue::access_time_data data;
             nlohmann::json::array_t updates;
 
@@ -1932,8 +1985,14 @@ Signals:
             // Apply updates.
             const auto json_input = nlohmann::json{{"access_time_updates", updates}}.dump();
             char* ignored{};
-            const auto ec = rc_update_replica_access_time(static_cast<RcComm*>(conn), json_input.c_str(), &ignored);
-            log_server::debug("{}: rc_update_replica_access_time returned [{}].", __func__, ec);
+            //const auto ec = rc_update_replica_access_time(static_cast<RcComm*>(conn), json_input.c_str(), &ignored);
+            //log_server::debug("{}: rc_update_replica_access_time returned [{}].", __func__, ec);
+
+            bytesBuf_t input_buf{};
+            input_buf.buf = const_cast<char*>(json_input.c_str());
+            input_buf.len = static_cast<int>(std::strlen(json_input.c_str()));
+            const auto ec = rs_update_replica_access_time(static_cast<RsComm*>(conn), &input_buf, &ignored);
+            log_server::debug("{}: rs_update_replica_access_time returned [{}].", __func__, ec);
 
             const auto elapsed = std::chrono::steady_clock::now() - start_time;
             log_server::debug("{}: Access time updates took [{}] seconds to apply.",

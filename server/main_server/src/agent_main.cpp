@@ -284,6 +284,7 @@ auto main(int _argc, char* _argv[]) -> int
         // This is where the rule engine plugins are loaded (i.e. plugin_factory is invoked here).
         irods::re_plugin_globals = std::make_unique<irods::global_re_plugin_mgr>();
 
+        // TODO(#8167): All server RsComm's start here. Probably need something like this for a server_connection.
         // Initialize zone information for request processing.
         // initServerMain starts the listening socket and stores it in svrComm.
         RsComm svrComm{}; // RsComm contains a std::string, so never use memset() on this type!
@@ -343,6 +344,8 @@ auto main(int _argc, char* _argv[]) -> int
             time_out.tv_usec = 500 * 1000;
             const auto original_time_out = time_out;
 
+            // TODO(#8167): Listen for incoming client connections. Still don't need for this change.
+            // TODO: Internet says select is bad, use epoll instead: https://man7.org/linux/man-pages/man3/FD_SET.3.html
             while ((numSock = select(svrComm.sock + 1, &sockMask, nullptr, nullptr, &time_out)) == -1) {
                 if (g_terminate) {
                     log_af::info("{}: Received shutdown instruction. Exiting agent factory select() loop.", __func__);
@@ -386,6 +389,7 @@ auto main(int _argc, char* _argv[]) -> int
                 continue;
             }
 
+            // TODO(#8167): Socket options get defined here - probably not needed for this change.
             const int newSock = rsAcceptConn(&svrComm);
             if (newSock < 0) {
                 log_af::info("{}: rsAcceptConn() error, errno = {}", __func__, errno);
@@ -844,6 +848,7 @@ namespace
         // This is where we return to iRODS 4.3 logic.
         //
 
+        // TODO: Wait... THIS is the origin of RsComm??
         RsComm rsComm{};
 
         // Originally set via an environment variable in initRsCommWithStartupPack in iRODS 4.2+.
@@ -884,6 +889,7 @@ namespace
             return 1;
         }
 
+        // TODO: RULE_ENGINE_TRY_CACHE ????
         status = initAgent(RULE_ENGINE_TRY_CACHE, &rsComm);
 
         if (status < 0) {

@@ -51,6 +51,7 @@
 #include "irods/rsSubStructFileCreate.hpp"
 #include "irods/rsSubStructFileOpen.hpp"
 #include "irods/rsUnregDataObj.hpp"
+#include "irods/server_connection.hpp"
 #include "irods/specColl.hpp"
 #include "irods/subStructFileCreate.h"
 #include "irods/subStructFileOpen.h"
@@ -1438,12 +1439,17 @@ int rsDataObjOpen(rsComm_t *rsComm, dataObjInp_t *dataObjInp)
             const auto mtime = time_point_cast<fs::object_time_type::duration>(system_clock::now());
 
             try {
-                irods::experimental::scoped_privileged_client spc{*rsComm};
-                fs::server::last_write_time(*rsComm, parent_path, mtime);
+                //irods::experimental::scoped_privileged_client spc{*rsComm};
+                irods::server_connection comm;
+                fs::server::last_write_time(static_cast<RsComm&>(comm), parent_path, mtime);
             }
             catch (const fs::filesystem_error& e) {
                 log_api::error(e.what());
                 return e.code().value();
+            }
+            catch (const irods::exception& e) {
+                log_api::error(e.client_display_what());
+                return e.code();
             }
         }
     }

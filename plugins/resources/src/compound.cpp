@@ -232,6 +232,8 @@ namespace
     auto stage_to_cache(irods::plugin_context& _ctx, const irods::hierarchy_parser& _hier_from_root_to_compound)
         -> irods::error
     {
+        // TODO(#8167): We might be able to use a server_connection here...?
+
         // If a user does not have sufficient permission on the target data object to replicate or trim, the compound
         // resource operations may not behave correctly. So, we temporarily assume the identity of the local admin and
         // perform the stage-to-cache on behalf of the client user.

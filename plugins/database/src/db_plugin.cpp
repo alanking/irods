@@ -5051,9 +5051,12 @@ irods::error db_mod_coll_op(
     }
 
     /* Check that collection exists and user has write permission */
-    iVal = cmlCheckDir( _coll_info->collName,  _ctx.comm()->clientUser.userName,
-                        _ctx.comm()->clientUser.rodsZone,
-                        ACCESS_MODIFY_OBJECT, &icss );
+    iVal = cmlCheckDir(_coll_info->collName,
+                       _ctx.comm()->clientUser.userName,
+                       _ctx.comm()->clientUser.rodsZone,
+                       ACCESS_MODIFY_OBJECT,
+                       &icss,
+                       irods::is_privileged_client(*_ctx.comm()));
 
     if ( iVal < 0 ) {
         if ( iVal == CAT_UNKNOWN_COLLECTION ) {
