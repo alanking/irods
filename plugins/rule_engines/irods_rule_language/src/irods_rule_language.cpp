@@ -263,8 +263,8 @@ irods::error exec_rule(irods::default_re_ctx&, const std::string& _rn, std::list
                 rodsLog( LOG_DEBUG, "empty serialized map for parameter %s", arg );
                 addMsParam(&(ar.msParamArray), arg, STR_MS_T, (void *) "<unconvertible>", NULL);
             }
-            else if( 1 == param.size() ) {
-                // only one key-value in them map, bind it as a string
+            else if( 1 == param.size() && std::type_index{itr->type()} != std::type_index{typeid(keyValPair_t*)} ) {
+                // If only one key-value in the map and it's not actually a key-value pair, bind it as a string.
                 addMsParam(&(ar.msParamArray), arg, STR_MS_T, (void *) param.begin()->second.c_str(), NULL);
             }
             else {
