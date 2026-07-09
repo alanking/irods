@@ -317,7 +317,6 @@ main( int argc, char **argv ) {
     rodsArguments_t myRodsArgs;
     rodsEnv myEnv;
     int i, j, didOne;
-    char objPath[MAX_NAME_LEN];
     int maxCmdTokens = 20;
     char *cmdToken[20];
     int argOffset;
@@ -343,7 +342,6 @@ main( int argc, char **argv ) {
                  status );
         exit( 1 );
     }
-    snprintf( objPath, sizeof( objPath ), "%s", myEnv.rodsCwd );
 
     for ( i = 0; i < maxCmdTokens; i++ ) {
         cmdToken[i] = "";
@@ -352,6 +350,16 @@ main( int argc, char **argv ) {
     for ( i = argOffset; i < argc; i++ ) {
         cmdToken[j++] = argv[i];
     }
+
+    rodsPathInp_t rodsPathInp{};
+    addSrcInPath( &rodsPathInp, cmdToken[1]);
+    status = parseRodsPath( &rodsPathInp.srcPath[0], &myEnv );
+    if ( status < 0 ) {
+        rodsLogError( LOG_ERROR, status, "main: parseCmdLinePath error. " );
+        usage();
+        exit( 1 );
+    }
+    char* objPath = rodsPathInp.srcPath[0].outPath;
 
     // =-=-=-=-=-=-=-
     // initialize pluggable api table
@@ -392,14 +400,6 @@ main( int argc, char **argv ) {
     if ( *cmdToken[1] == '\0' ) {
         usage();
         exit( 1 );
-    }
-
-    if ( *cmdToken[1] == '/' ) {
-        rstrcpy( objPath, cmdToken[1], MAX_NAME_LEN );
-    }
-    else {
-        rstrcat( objPath, "/", MAX_NAME_LEN );
-        rstrcat( objPath, cmdToken[1], MAX_NAME_LEN );
     }
 
     didOne = 0;
