@@ -202,11 +202,7 @@ queryAndShowStrCond( rcComm_t *conn, char *hint, char *format,
         genQueryInp.continueInx = genQueryOut->continueInx;
         i = rcGenQuery( conn, &genQueryInp, &genQueryOut );
         if ( i < 0 ) {
-            if (i==CAT_NO_ROWS_FOUND) {
-                return 0;
-            } else {
-                return i;
-            }
+        	return i;
         }
         i = printGenQueryOut( stdout, format, hint,  genQueryOut );
         if ( i < 0 ) {

@@ -112,6 +112,10 @@ int main(int _argc, char* _argv[]) // NOLINT(modernize-use-trailing-return-type)
 
         fmt::print("{}\n", output);
 
+		if (std::string_view{"[]"} == output) {
+			return 1;
+		}
+
         return 0;
     }
     catch (const irods::exception& e) {
