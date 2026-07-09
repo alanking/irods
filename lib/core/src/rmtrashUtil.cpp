@@ -181,6 +181,8 @@ initCondForRmtrash( rodsArguments_t *rodsArgs,
     if ( rodsArgs->admin == True ) {
         addKeyVal( &dataObjInp->condInput, ADMIN_RMTRASH_KW, "" );
         addKeyVal( &collInp->condInput, ADMIN_RMTRASH_KW, "" );
+        addKeyVal( &dataObjInp->condInput, ADMIN_KW, "" );
+        addKeyVal( &collInp->condInput, ADMIN_KW, "" );
     }
     else {
         addKeyVal( &dataObjInp->condInput, RMTRASH_KW, "" );
